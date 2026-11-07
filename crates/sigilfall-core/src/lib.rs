@@ -12,4 +12,5 @@ pub mod game;
 pub mod geometry;
 pub mod map;
 pub mod path;
+pub mod rng;
 pub mod schedule;

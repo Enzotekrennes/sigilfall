@@ -15,6 +15,7 @@ use ratatui::crossterm::event::{self, Event, KeyEvent};
 use ratatui::layout::Size;
 use ratatui::{DefaultTerminal, Frame};
 use sigilfall_core::game::Game;
+use sigilfall_core::rng::Seed;
 
 use crate::input::{self, Command};
 use crate::theme::Theme;
@@ -48,11 +49,11 @@ pub struct App {
 }
 
 impl App {
-    /// Starts the application on a new game, in [`State::Playing`], drawn
-    /// with `theme`.
-    pub fn new(theme: Theme) -> Self {
+    /// Starts the application on a new game of the run identified by
+    /// `seed`, in [`State::Playing`], drawn with `theme`.
+    pub fn new(theme: Theme, seed: Seed) -> Self {
         Self {
-            game: Game::new(),
+            game: Game::new(seed),
             state: State::Playing,
             theme,
             screen_size: Cell::new(None),
@@ -154,10 +155,17 @@ mod tests {
     use super::*;
     use crate::theme::{ColorMode, GlyphSet};
 
-    /// A new application drawn in the default mode of Windows Terminal:
-    /// dark 24-bit colours and Unicode glyphs.
+    /// Seed of every test game: its written form, `7F3A-91C2-0B5E-D4A8`,
+    /// is the one of the game screen mock-up in `docs/design.md`.
+    const SEED: Seed = Seed::new(0x7F3A_91C2_0B5E_D4A8);
+
+    /// A new application on [`SEED`], drawn in the default mode of Windows
+    /// Terminal: dark 24-bit colours and Unicode glyphs.
     fn new_app() -> App {
-        App::new(Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode))
+        App::new(
+            Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode),
+            SEED,
+        )
     }
 
     /// A key press of `code`, as crossterm reports it.
@@ -199,7 +207,7 @@ mod tests {
 
     #[test]
     fn ascii_glyphs_replace_every_unicode_glyph() {
-        let app = App::new(Theme::new(ColorMode::TrueColorDark, GlyphSet::Ascii));
+        let app = App::new(Theme::new(ColorMode::TrueColorDark, GlyphSet::Ascii), SEED);
 
         let text = render(&app, 80, 24).backend().to_string();
 
@@ -317,7 +325,7 @@ mod tests {
 
     #[test]
     fn resize_message_uses_the_ascii_dimension_sign() {
-        let app = App::new(Theme::new(ColorMode::Ansi16, GlyphSet::Ascii));
+        let app = App::new(Theme::new(ColorMode::Ansi16, GlyphSet::Ascii), SEED);
 
         let text = render(&app, 60, 20).backend().to_string();
 
@@ -417,7 +425,8 @@ mod tests {
             first_line
                 .trim()
                 .strip_prefix("Turn ")
-                .and_then(|value| value.trim().parse().ok())
+                .and_then(|rest| rest.split_whitespace().next())
+                .and_then(|value| value.parse().ok())
                 .unwrap_or_else(|| panic!("no turn counter on: {first_line:?}"))
         }
 
@@ -802,6 +811,43 @@ mod tests {
             assert_eq!(turn_shown(&app), 7);
             press_all(&mut app, &[KeyCode::Char('k'), KeyCode::Char('y')]);
             assert_eq!(turn_shown(&app), 7, "refused moves are not turns");
+        }
+
+        #[test]
+        fn the_status_line_shows_the_seed_of_the_run_in_its_shareable_form() {
+            let mut app = new_app();
+            let first_line = row_text(&screen(&app), 0);
+
+            assert!(
+                first_line.ends_with(" Seed 7F3A-91C2-0B5E-D4A8 "),
+                "{first_line:?}"
+            );
+            let shown = first_line.trim_end().rsplit(' ').next().unwrap();
+            assert_eq!(shown.parse(), Ok(app.game().seed()), "--seed reads it back");
+
+            press_all(&mut app, &[KeyCode::Char('l'), KeyCode::Char('.')]);
+            let first_line = row_text(&screen(&app), 0);
+            assert!(first_line.starts_with(" Turn 3 "), "{first_line:?}");
+            assert!(
+                first_line.ends_with(" Seed 7F3A-91C2-0B5E-D4A8 "),
+                "the seed does not change while playing: {first_line:?}"
+            );
+        }
+
+        #[test]
+        fn the_seed_stays_at_the_right_end_of_a_wider_terminal() {
+            let app = App::new(
+                Theme::new(ColorMode::TrueColorDark, GlyphSet::Ascii),
+                Seed::new(42),
+            );
+            let first_line = row_text(render(&app, 120, 30).backend().buffer(), 0);
+
+            assert_eq!(first_line.chars().count(), 120);
+            assert!(
+                first_line.ends_with(" Seed 0000-0000-0000-002A "),
+                "{first_line:?}"
+            );
+            assert!(first_line.starts_with(" Turn 1 "), "{first_line:?}");
         }
 
         #[test]

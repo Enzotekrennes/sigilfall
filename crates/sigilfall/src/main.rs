@@ -3,12 +3,13 @@
 //! This binary owns everything tied to the terminal: command line, input,
 //! screens and rendering. Game rules live in the `sigilfall-core` crate.
 //!
-//! This file only prepares the terminal (raw mode, alternate screen, hidden
+//! This file reads the command line ([`cli::Cli`]), prepares the terminal (raw mode, alternate screen, hidden
 //! cursor), runs the [`app::App`] and puts the terminal back the way it was.
 //! The terminal is restored on a normal exit, when the game returns an error
 //! and when it panics, so the player's shell is never left unusable.
 
 mod app;
+mod cli;
 mod input;
 mod theme;
 mod ui;
@@ -16,6 +17,7 @@ mod ui;
 use std::io::{self, Stdout};
 
 use anyhow::Context as _;
+use clap::Parser as _;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::cursor::{Hide, Show};
 use ratatui::crossterm::execute;
@@ -25,9 +27,15 @@ use ratatui::crossterm::terminal::{
 use ratatui::{DefaultTerminal, Terminal};
 
 use crate::app::App;
+use crate::cli::Cli;
 use crate::theme::{Appearance, ColorMode, ColorSupport, GlyphSet, Theme};
 
 /// Runs the game in the current terminal until the player quits.
+///
+/// The command line is read first, while the terminal is untouched: an
+/// invalid argument such as `--seed abc` prints what was expected and ends
+/// the process with exit code 2, and `--help` or `--version` print and exit
+/// with code 0, all on the normal screen.
 ///
 /// # Errors
 ///
@@ -36,10 +44,12 @@ use crate::theme::{Appearance, ColorMode, ColorSupport, GlyphSet, Theme};
 /// during the game, or if the terminal cannot be restored afterwards. The
 /// terminal is restored before any error is reported.
 fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
     install_panic_hook();
 
-    let theme = startup_theme();
-    let outcome = enter_terminal().and_then(|mut terminal| App::new(theme).run(&mut terminal));
+    let theme = startup_theme(cli.glyph_set());
+    let mut app = App::new(theme, cli.seed_or_random());
+    let outcome = enter_terminal().and_then(|mut terminal| app.run(&mut terminal));
     // Restore even when the game failed, so the error is printed on the
     // normal screen; the game's own error is the more useful one to report.
     let restored = restore_terminal().context(
@@ -50,15 +60,14 @@ fn main() -> anyhow::Result<()> {
 }
 
 /// Chooses the theme from the terminal's colour support, read from the
-/// environment (see `ColorSupport::from_env`), before the screen changes.
+/// environment (see `ColorSupport::from_env`), before the screen changes,
+/// drawn with the `glyphs` chosen on the command line.
 ///
-/// The dark theme and Unicode glyphs are the defaults of `docs/design.md`,
-/// and every glyph used is in Cascadia Mono, the font of Windows Terminal.
-/// No other choice can be made yet: the `--ascii` flag arrives with the
-/// command line (T7) and the light theme with the options screen (T26).
-fn startup_theme() -> Theme {
+/// The dark theme is the default of `docs/design.md`; the light theme
+/// arrives with the options screen (T26).
+fn startup_theme(glyphs: GlyphSet) -> Theme {
     let mode = ColorMode::for_terminal(ColorSupport::detect(), Appearance::Dark);
-    Theme::new(mode, GlyphSet::Unicode)
+    Theme::new(mode, glyphs)
 }
 
 /// Switches the terminal to raw mode, enters the alternate screen, hides the

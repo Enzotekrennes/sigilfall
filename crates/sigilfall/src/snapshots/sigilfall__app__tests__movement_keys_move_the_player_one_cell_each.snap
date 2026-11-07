@@ -2,7 +2,7 @@
 source: crates/sigilfall/src/app.rs
 expression: "render(&app, 80, 24).backend()"
 ---
-" Turn 5                                                                         "
+" Turn 5                                                Seed 7F3A-91C2-0B5E-D4A8 "
 "▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒                                                  "
 "▒····························▒                                                  "
 "▒····························▒                                                  "

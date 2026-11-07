@@ -15,11 +15,7 @@ pub enum GlyphSet {
     Unicode,
     /// Plain ASCII, for fonts that lack the Unicode glyphs and for
     /// terminals that draw ambiguous-width characters on two cells (CJK
-    /// locales).
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "selected by the --ascii flag, added with T7")
-    )]
+    /// locales). Selected by the `--ascii` flag.
     Ascii,
 }
 

@@ -11,4 +11,6 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+rand = { version = "0.10.3", default-features = false }
+rand_chacha = { version = "0.10.0", default-features = false }
 slotmap = "1.1.1"

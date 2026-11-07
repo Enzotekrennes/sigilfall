@@ -1,7 +1,7 @@
 //! A game in progress and its single entry point, [`Game::submit`].
 //!
-//! Exposes [`Game`] and [`PLAYER_START`]. The game owns the map, the actors
-//! and the scheduler. The player's action is applied, then the other actors
+//! Exposes [`Game`] and [`PLAYER_START`]. The game owns the run's seed, the
+//! map, the actors and the scheduler. The player's action is applied, then the other actors
 //! take their turns until the player may act again, and everything that
 //! happened is returned as [`Event`]s. The game produces no text and draws
 //! nothing.
@@ -13,6 +13,7 @@ use crate::actor::{Actor, ActorId};
 use crate::event::Event;
 use crate::geometry::Position;
 use crate::map::Map;
+use crate::rng::Seed;
 use crate::schedule::{NORMAL_SPEED, Scheduler, spend_energy};
 
 /// Cell of the fixed room where the player starts.
@@ -27,6 +28,8 @@ pub const PLAYER_START: Position = Position::new(5, 5);
 /// Between two calls to [`Game::submit`], it is always the player's turn.
 #[derive(Debug, Clone)]
 pub struct Game {
+    /// The seed every random choice of this run follows from.
+    seed: Seed,
     /// The current dungeon floor.
     map: Map,
     /// Every actor, the player included.
@@ -40,18 +43,22 @@ pub struct Game {
 }
 
 impl Game {
-    /// Starts a game on the fixed room, with the player at [`PLAYER_START`]
-    /// moving at normal speed and no other actor.
+    /// Starts a game of the run identified by `seed`, on the fixed room,
+    /// with the player at [`PLAYER_START`] moving at normal speed and no
+    /// other actor.
     ///
-    /// Time is advanced until the player's first turn, so [`Game::submit`]
-    /// can be called right away.
-    pub fn new() -> Self {
+    /// The seed is kept for the floors and random choices to come (see
+    /// [`Seed::stream`]); the fixed room does not use it yet. Time is
+    /// advanced until the player's first turn, so [`Game::submit`] can be
+    /// called right away.
+    pub fn new(seed: Seed) -> Self {
         let mut actors = SlotMap::with_key();
         let player = actors.insert(Actor::new(PLAYER_START, NORMAL_SPEED));
         let mut scheduler = Scheduler::default();
         scheduler.enrol(player);
 
         let mut game = Self {
+            seed,
             map: Map::fixed_room(),
             actors,
             player,
@@ -102,6 +109,11 @@ impl Game {
             self.run_until_player_turn(&mut events);
         }
         events
+    }
+
+    /// Returns the seed of this run, as given to [`Game::new`].
+    pub const fn seed(&self) -> Seed {
+        self.seed
     }
 
     /// Returns the current dungeon floor.
@@ -231,18 +243,14 @@ impl Game {
     }
 }
 
-impl Default for Game {
-    /// Same as [`Game::new`].
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::geometry::Direction;
     use crate::schedule::ACTION_THRESHOLD;
+
+    /// Seed of every test game; the fixed room does not depend on it.
+    const SEED: Seed = Seed::new(42);
 
     /// Energy of every actor, keyed for comparison before and after a turn.
     fn energies(game: &Game) -> Vec<(ActorId, i32)> {
@@ -251,7 +259,7 @@ mod tests {
 
     #[test]
     fn player_starts_on_open_floor_and_may_act() {
-        let game = Game::new();
+        let game = Game::new(SEED);
         let player = game.player_actor();
 
         assert_eq!(player.position(), PLAYER_START);
@@ -268,7 +276,7 @@ mod tests {
 
     #[test]
     fn move_returns_a_moved_event_and_updates_the_player() {
-        let mut game = Game::new();
+        let mut game = Game::new(SEED);
         let player = game.player();
         let ticks = game.ticks();
 
@@ -289,7 +297,7 @@ mod tests {
 
     #[test]
     fn wait_returns_a_waited_event_and_lets_time_pass() {
-        let mut game = Game::new();
+        let mut game = Game::new(SEED);
         let player = game.player();
         let ticks = game.ticks();
 
@@ -302,7 +310,7 @@ mod tests {
 
     #[test]
     fn other_actors_act_before_the_player_turn_returns() {
-        let mut game = Game::new();
+        let mut game = Game::new(SEED);
         let player = game.player();
         let fast = game.spawn_actor(Position::new(10, 3), 2 * NORMAL_SPEED);
 
@@ -327,7 +335,7 @@ mod tests {
 
     #[test]
     fn double_speed_actor_acts_twice_per_normal_player_action() {
-        let mut game = Game::new();
+        let mut game = Game::new(SEED);
         let player = game.player();
         let fast = game.spawn_actor(Position::new(10, 3), 2 * NORMAL_SPEED);
         let slow = game.spawn_actor(Position::new(12, 3), NORMAL_SPEED / 2);
@@ -349,7 +357,7 @@ mod tests {
 
     #[test]
     fn wall_blocks_the_player_without_spending_time() {
-        let mut game = Game::new();
+        let mut game = Game::new(SEED);
         let player = game.player();
         let fast = game.spawn_actor(Position::new(10, 3), 2 * NORMAL_SPEED);
         game.submit(Action::Wait);
@@ -383,7 +391,7 @@ mod tests {
 
     #[test]
     fn another_actor_blocks_the_player() {
-        let mut game = Game::new();
+        let mut game = Game::new(SEED);
         let player = game.player();
         let east = PLAYER_START.step(Direction::East);
         game.spawn_actor(east, NORMAL_SPEED);
@@ -404,8 +412,18 @@ mod tests {
     }
 
     #[test]
+    fn a_game_keeps_the_seed_it_was_started_with() {
+        for value in [0, 42, u64::MAX] {
+            let mut game = Game::new(Seed::new(value));
+            game.submit(Action::Wait);
+
+            assert_eq!(game.seed(), Seed::new(value));
+        }
+    }
+
+    #[test]
     fn a_new_game_has_no_player_turn_yet() {
-        let game = Game::new();
+        let game = Game::new(SEED);
 
         assert_eq!(game.player_turns(), 0);
         assert_eq!(game.ticks(), 1, "the clock already ran to the first turn");
@@ -413,7 +431,7 @@ mod tests {
 
     #[test]
     fn player_turns_count_only_player_actions_that_took_time() {
-        let mut game = Game::new();
+        let mut game = Game::new(SEED);
         let fast = game.spawn_actor(Position::new(10, 3), 2 * NORMAL_SPEED);
         let slow = game.spawn_actor(Position::new(12, 3), NORMAL_SPEED / 2);
         // Four moves west reach the wall, the fifth is refused, then waits.
@@ -463,6 +481,6 @@ mod tests {
     #[test]
     #[should_panic(expected = "cannot spawn an actor at (5, 5)")]
     fn spawning_on_an_occupied_cell_panics() {
-        Game::new().spawn_actor(PLAYER_START, NORMAL_SPEED);
+        Game::new(SEED).spawn_actor(PLAYER_START, NORMAL_SPEED);
     }
 }

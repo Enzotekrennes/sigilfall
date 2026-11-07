@@ -1,4 +1,5 @@
-//! The main game screen: status line, map with the player, key help.
+//! The main game screen: status line with the turn and the run's seed, map
+//! with the player, key help.
 //!
 //! Exposes [`render`]. The layout follows the game screen of
 //! `docs/design.md`: status line on the first row, map below it on the
@@ -16,6 +17,7 @@ use ratatui::text::{Line, Span};
 use sigilfall_core::game::Game;
 use sigilfall_core::geometry::Position;
 use sigilfall_core::map::Tile;
+use sigilfall_core::rng::Seed;
 
 use crate::theme::Theme;
 
@@ -31,10 +33,14 @@ const SIDE_PANEL_WIDTH: u16 = 22;
 /// which leaves a 16-row map on a 24-row terminal.
 const LOG_HEIGHT: u16 = 6;
 
+/// Empty columns kept at each end of the status line, as in the mock-up of
+/// `docs/design.md`, so its text never touches the terminal's edges.
+const STATUS_MARGIN: u16 = 1;
+
 /// The areas of the game screen, as laid out by [`GameLayout::new`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct GameLayout {
-    /// First row: turn counter.
+    /// First row: turn counter on the left, seed on the right.
     status: Rect,
     /// The map, which takes every row and column the other areas leave.
     map: Rect,
@@ -72,12 +78,17 @@ impl GameLayout {
 pub fn render(frame: &mut Frame, area: Rect, game: &Game, theme: &Theme) {
     let layout = GameLayout::new(area);
     frame.render_widget(status_line(game, theme), layout.status);
+    let seed_area = Rect {
+        width: layout.status.width.saturating_sub(STATUS_MARGIN),
+        ..layout.status
+    };
+    frame.render_widget(seed_label(game.seed(), theme), seed_area);
     render_map(frame.buffer_mut(), layout.map, game, theme);
     frame.render_widget(key_help(theme), layout.help);
 }
 
-/// Builds the status line: the player's current turn, label in the muted
-/// style and value in the text style.
+/// Builds the left part of the status line: the player's current turn,
+/// label in the muted style and value in the text style.
 ///
 /// The number is the turn the player is about to play, counted from 1:
 /// [`Game::player_turns`] (actions that took time) plus one, so a new game
@@ -89,6 +100,20 @@ fn status_line(game: &Game, theme: &Theme) -> Line<'static> {
         Span::styled(" Turn ", theme.text_muted),
         Span::styled(current_turn.to_string(), theme.text),
     ])
+}
+
+/// Builds the seed shown at the right end of the status line, such as
+/// "Seed 7F3A-91C2-0B5E-D4A8": label in the muted style, seed in the title
+/// style, as `docs/design.md` asks, right-aligned in the area it is drawn in.
+///
+/// The seed is written in its shareable form (see `Seed`'s `Display`), which
+/// `--seed` accepts back to replay the run.
+fn seed_label(seed: Seed, theme: &Theme) -> Line<'static> {
+    Line::from(vec![
+        Span::styled("Seed ", theme.text_muted),
+        Span::styled(seed.to_string(), theme.text_title),
+    ])
+    .right_aligned()
 }
 
 /// Builds the key help: each key in the text style, followed by what it

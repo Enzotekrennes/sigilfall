@@ -84,6 +84,7 @@ mod tests {
     use ratatui::buffer::{Buffer, Cell};
     use ratatui::style::{Color, Modifier};
     use sigilfall_core::game::PLAYER_START;
+    use sigilfall_core::rng::Seed;
 
     use super::*;
     use crate::theme::{ColorMode, GlyphSet};
@@ -94,8 +95,16 @@ mod tests {
     const WALL_CELL: (u16, u16) = (0, 1);
     /// Screen cell of a floor tile next to that wall.
     const FLOOR_CELL: (u16, u16) = (1, 2);
+    /// Seed of the test games; the fixed room does not depend on it.
+    const SEED: Seed = Seed::new(42);
     /// Screen cell outside the map, in the empty side panel.
     const EMPTY_CELL: (u16, u16) = (70, 10);
+    /// Screen cell of the "S" of the seed label: the seed of [`SEED`] is
+    /// written `0000-0000-0000-002A`, right-aligned one column before the
+    /// right edge.
+    const SEED_LABEL_CELL: (u16, u16) = (55, 0);
+    /// Screen cell of the first digit of the seed.
+    const SEED_VALUE_CELL: (u16, u16) = (60, 0);
     /// Screen cell of the first key of the key help (the left arrow).
     const HELP_KEY_CELL: (u16, u16) = (1, 23);
     /// Screen cell of the first letter of the help label "move".
@@ -105,7 +114,7 @@ mod tests {
     /// returns the screen with the theme it was drawn with.
     fn screen(mode: ColorMode) -> (Buffer, Theme) {
         let theme = Theme::new(mode, GlyphSet::Unicode);
-        let game = Game::new();
+        let game = Game::new(SEED);
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         terminal.draw(|frame| render(frame, &game, &theme)).unwrap();
         (terminal.backend().buffer().clone(), theme)
@@ -159,6 +168,20 @@ mod tests {
     }
 
     #[test]
+    fn the_seed_is_drawn_in_the_title_colour_after_a_muted_label() {
+        let (screen, theme) = screen(ColorMode::TrueColorDark);
+
+        let label = cell(&screen, SEED_LABEL_CELL);
+        assert_eq!((label.symbol(), Some(label.fg)), ("S", theme.text_muted.fg));
+        let value = cell(&screen, SEED_VALUE_CELL);
+        assert_eq!(value.symbol(), "0");
+        assert_eq!(value.fg, Color::Rgb(0xE3, 0xB2, 0x4F));
+        assert!(value.modifier.contains(Modifier::BOLD));
+        assert_eq!(cell(&screen, (78, 0)).symbol(), "A", "last digit");
+        assert_eq!(cell(&screen, (79, 0)).symbol(), " ", "right margin");
+    }
+
+    #[test]
     fn light_true_colour_paints_the_parchment() {
         let (screen, theme) = screen(ColorMode::TrueColorLight);
 
@@ -201,7 +224,7 @@ mod tests {
     #[test]
     fn resize_message_is_drawn_in_the_text_colour_on_the_background() {
         let theme = Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode);
-        let game = Game::new();
+        let game = Game::new(SEED);
         let mut terminal = Terminal::new(TestBackend::new(60, 20)).unwrap();
         terminal.draw(|frame| render(frame, &game, &theme)).unwrap();
         let screen = terminal.backend().buffer();
