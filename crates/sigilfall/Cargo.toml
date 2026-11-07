@@ -1,0 +1,11 @@
+[package]
+name = "sigilfall"
+description = "Terminal roguelike where spells are cast by tracing sigils on the keyboard."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,6 @@
+//! Game logic of Sigilfall: rules, world state and dungeon generation.
+//!
+//! This crate is pure logic. It never depends on a terminal, rendering or input
+//! library, so every rule can be tested without a terminal. The `sigilfall`
+//! binary turns player input into actions for this crate and draws the
+//! resulting state.
