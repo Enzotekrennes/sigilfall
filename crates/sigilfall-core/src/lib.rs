@@ -11,4 +11,5 @@ pub mod event;
 pub mod game;
 pub mod geometry;
 pub mod map;
+pub mod path;
 pub mod schedule;

@@ -1,11 +1,12 @@
 //! Dungeon floor layout: a rectangular grid of tiles.
 //!
 //! Exposes [`Tile`] and [`Map`], with bounds-checked access where anything
-//! outside the grid counts as impassable, and [`Map::fixed_room`], a
+//! outside the grid counts as impassable, [`Map::can_step`], the one rule
+//! deciding which single steps are allowed, and [`Map::fixed_room`], a
 //! hand-made room used until dungeon generation exists. Field of view,
 //! remembered cells and engraved glyphs are not handled here yet.
 
-use crate::geometry::Position;
+use crate::geometry::{Direction, Position};
 
 /// Width of the room built by [`Map::fixed_room`], walls included.
 ///
@@ -108,6 +109,38 @@ impl Map {
         self.tile(position).is_some_and(Tile::is_walkable)
     }
 
+    /// Returns whether an actor at `from` may step one cell in `direction`.
+    ///
+    /// This is the single movement rule of the game, shared by player and
+    /// monster moves (`action::resolve`) and by every path computation
+    /// (`path` module), so that "reachable" always means "walkable to".
+    ///
+    /// A step is allowed when the destination cell is walkable. Diagonal steps
+    /// may cut corners: moving diagonally between two walls that touch only by
+    /// their corners is allowed, as long as the destination is open. The rule
+    /// looks at the destination only, so it is symmetric between two walkable
+    /// cells: if `b` can be reached from `a` in one step, `a` can be reached
+    /// from `b`.
+    pub fn can_step(&self, from: Position, direction: Direction) -> bool {
+        self.is_walkable(from.step(direction))
+    }
+
+    /// Returns every position of the map in reading order: row by row from
+    /// the top, left to right within a row.
+    ///
+    /// This is also the order of the internal tile storage, so the `n`-th
+    /// position matches index `n` of a grid laid out like this map.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the width or height does not fit in an `i32`, which no
+    /// dungeon floor comes close to.
+    pub(crate) fn positions(&self) -> impl Iterator<Item = Position> {
+        let width = i32::try_from(self.width).expect("map width fits in i32");
+        let height = i32::try_from(self.height).expect("map height fits in i32");
+        (0..height).flat_map(move |y| (0..width).map(move |x| Position::new(x, y)))
+    }
+
     /// Replaces the tile at `position` with `tile`.
     ///
     /// # Panics
@@ -126,7 +159,10 @@ impl Map {
 
     /// Converts `position` into an index in `tiles`, or `None` when it lies
     /// outside the map (negative or beyond the width or height).
-    fn index(&self, position: Position) -> Option<usize> {
+    ///
+    /// Grids laid out like this map (one value per cell, in the order of
+    /// [`Map::positions`]) use the same index.
+    pub(crate) fn index(&self, position: Position) -> Option<usize> {
         let x = usize::try_from(position.x).ok()?;
         let y = usize::try_from(position.y).ok()?;
         (x < self.width && y < self.height).then(|| y * self.width + x)
@@ -193,6 +229,42 @@ mod tests {
 
         assert!(!map.is_walkable(Position::new(1, 1)));
         assert!(map.is_walkable(Position::new(0, 1)));
+    }
+
+    #[test]
+    fn can_step_onto_walkable_cells_only() {
+        let mut map = Map::new(3, 1, Tile::Floor);
+        map.set_tile(Position::new(2, 0), Tile::Wall);
+
+        assert!(map.can_step(Position::new(0, 0), Direction::East));
+        assert!(!map.can_step(Position::new(1, 0), Direction::East));
+        assert!(!map.can_step(Position::new(0, 0), Direction::West));
+    }
+
+    #[test]
+    fn diagonal_step_may_cut_between_two_walls() {
+        // .#
+        // #.
+        let mut map = Map::new(2, 2, Tile::Floor);
+        map.set_tile(Position::new(1, 0), Tile::Wall);
+        map.set_tile(Position::new(0, 1), Tile::Wall);
+
+        assert!(map.can_step(Position::new(0, 0), Direction::SouthEast));
+        assert!(map.can_step(Position::new(1, 1), Direction::NorthWest));
+    }
+
+    #[test]
+    fn positions_follow_reading_order_and_match_indices() {
+        let map = Map::new(3, 2, Tile::Floor);
+        let positions: Vec<Position> = map.positions().collect();
+
+        assert_eq!(
+            positions,
+            [(0, 0), (1, 0), (2, 0), (0, 1), (1, 1), (2, 1)].map(|(x, y)| Position::new(x, y))
+        );
+        for (index, &position) in positions.iter().enumerate() {
+            assert_eq!(map.index(position), Some(index));
+        }
     }
 
     #[test]

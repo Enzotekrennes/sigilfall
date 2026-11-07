@@ -32,16 +32,19 @@ pub enum ActionOutcome {
 
 /// Works out what `action` does for an actor standing at `from` on `map`.
 ///
-/// A move succeeds when the destination cell is walkable; walls and cells
-/// outside the map block it. Waiting always succeeds and keeps the actor in
-/// place. The function is pure: neither `map` nor any actor is modified.
+/// A move succeeds when [`Map::can_step`] allows it: the destination cell is
+/// walkable, diagonals included even between two walls touching by a corner.
+/// Walls and cells outside the map block it. Waiting always succeeds and
+/// keeps the actor in place. The function is pure: neither `map` nor any actor
+/// is modified.
 pub fn resolve(action: Action, from: Position, map: &Map) -> ActionOutcome {
     match action {
         Action::Wait => ActionOutcome::Performed { position: from },
         Action::Move(direction) => {
-            let to = from.step(direction);
-            if map.is_walkable(to) {
-                ActionOutcome::Performed { position: to }
+            if map.can_step(from, direction) {
+                ActionOutcome::Performed {
+                    position: from.step(direction),
+                }
             } else {
                 ActionOutcome::Blocked
             }
@@ -139,6 +142,26 @@ mod tests {
                 "moving {direction:?}"
             );
         }
+    }
+
+    #[test]
+    fn diagonal_move_cuts_between_two_walls() {
+        // .#
+        // #.
+        let mut map = Map::new(2, 2, Tile::Floor);
+        map.set_tile(Position::new(1, 0), Tile::Wall);
+        map.set_tile(Position::new(0, 1), Tile::Wall);
+
+        assert_eq!(
+            resolve(
+                Action::Move(Direction::SouthEast),
+                Position::new(0, 0),
+                &map
+            ),
+            ActionOutcome::Performed {
+                position: Position::new(1, 1)
+            }
+        );
     }
 
     #[test]
