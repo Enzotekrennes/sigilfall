@@ -9,3 +9,6 @@ license.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+slotmap = "1.1.1"

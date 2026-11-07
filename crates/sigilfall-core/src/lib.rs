@@ -6,5 +6,9 @@
 //! resulting state.
 
 pub mod action;
+pub mod actor;
+pub mod event;
+pub mod game;
 pub mod geometry;
 pub mod map;
+pub mod schedule;
