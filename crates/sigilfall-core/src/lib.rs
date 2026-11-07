@@ -4,3 +4,7 @@
 //! library, so every rule can be tested without a terminal. The `sigilfall`
 //! binary turns player input into actions for this crate and draws the
 //! resulting state.
+
+pub mod action;
+pub mod geometry;
+pub mod map;
