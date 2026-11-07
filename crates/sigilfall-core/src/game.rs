@@ -35,6 +35,8 @@ pub struct Game {
     player: ActorId,
     /// Turn order and elapsed time.
     scheduler: Scheduler,
+    /// Number of player actions that took time since the game started.
+    player_turns: u64,
 }
 
 impl Game {
@@ -54,6 +56,7 @@ impl Game {
             actors,
             player,
             scheduler,
+            player_turns: 0,
         };
         // Only the player exists, so no event can be produced here.
         game.run_until_player_turn(&mut Vec::new());
@@ -91,10 +94,11 @@ impl Game {
     /// the only event is [`Event::MoveBlocked`], the player spends no energy,
     /// no time passes and no other actor acts. Otherwise the first event is
     /// the player's own, followed by those of every actor that acted before
-    /// the player's next turn.
+    /// the player's next turn, and [`Game::player_turns`] grows by one.
     pub fn submit(&mut self, action: Action) -> Vec<Event> {
         let mut events = Vec::new();
         if self.perform(self.player, action, &mut events) {
+            self.player_turns += 1;
             self.run_until_player_turn(&mut events);
         }
         events
@@ -128,8 +132,24 @@ impl Game {
     }
 
     /// Returns the number of ticks elapsed since the game started.
+    ///
+    /// Ticks measure the flow of time for every actor; they are not the
+    /// player's turns. A new game already shows one tick, the one that gave
+    /// the player the energy for its first turn, and the gap between ticks
+    /// and player turns depends on the player's speed and action costs. Use
+    /// [`Game::player_turns`] to count what the player did.
     pub const fn ticks(&self) -> u64 {
         self.scheduler.ticks()
+    }
+
+    /// Returns the number of actions the player has performed that took
+    /// time: 0 in a new game, one more per successful [`Game::submit`].
+    ///
+    /// A refused action (a move into a wall or another actor) does not
+    /// count, and the turns of other actors, whatever their speed, never
+    /// change it.
+    pub const fn player_turns(&self) -> u64 {
+        self.player_turns
     }
 
     /// Returns the key of the actor standing at `position`, if any.
@@ -381,6 +401,63 @@ mod tests {
         );
         assert_eq!(game.player_actor().position(), PLAYER_START);
         assert_eq!(game.ticks(), ticks);
+    }
+
+    #[test]
+    fn a_new_game_has_no_player_turn_yet() {
+        let game = Game::new();
+
+        assert_eq!(game.player_turns(), 0);
+        assert_eq!(game.ticks(), 1, "the clock already ran to the first turn");
+    }
+
+    #[test]
+    fn player_turns_count_only_player_actions_that_took_time() {
+        let mut game = Game::new();
+        let fast = game.spawn_actor(Position::new(10, 3), 2 * NORMAL_SPEED);
+        let slow = game.spawn_actor(Position::new(12, 3), NORMAL_SPEED / 2);
+        // Four moves west reach the wall, the fifth is refused, then waits.
+        let actions = [
+            Action::Move(Direction::West),
+            Action::Move(Direction::West),
+            Action::Move(Direction::West),
+            Action::Move(Direction::West),
+            Action::Move(Direction::West),
+            Action::Wait,
+            Action::Move(Direction::NorthWest),
+            Action::Wait,
+            Action::Wait,
+            Action::Wait,
+        ];
+
+        let mut events = Vec::new();
+        let mut performed = 0;
+        for action in actions {
+            let before = game.player_turns();
+            let happened = game.submit(action);
+            let blocked = matches!(happened.as_slice(), [Event::MoveBlocked { .. }]);
+            if !blocked {
+                performed += 1;
+            }
+            assert_eq!(
+                game.player_turns(),
+                before + u64::from(!blocked),
+                "{action:?}"
+            );
+            events.extend(happened);
+        }
+
+        // The wall refuses the fifth move west and the move north-west.
+        assert_eq!(performed, 8);
+        assert_eq!(game.player_turns(), 8);
+        let turns_of = |id| {
+            events
+                .iter()
+                .filter(|e| **e == Event::Waited { actor: id })
+                .count()
+        };
+        assert!(turns_of(fast) > 8, "the fast actor acted more often");
+        assert!(turns_of(slow) < 8, "the slow actor acted less often");
     }
 
     #[test]

@@ -4,10 +4,15 @@
 //! drawing ([`App::render`]) never touch the real terminal, so tests drive
 //! the whole application with simulated keys and render it into ratatui's
 //! `TestBackend`. Only [`App::run`] reads the terminal; preparing and
-//! restoring the terminal is left to `main`.
+//! restoring the terminal is left to `main`. Rendering only records the size
+//! of the frame it drew, so that keys are not played on a screen too small
+//! to show the game.
+
+use std::cell::Cell;
 
 use anyhow::Context as _;
 use ratatui::crossterm::event::{self, Event, KeyEvent};
+use ratatui::layout::Size;
 use ratatui::{DefaultTerminal, Frame};
 use sigilfall_core::game::Game;
 
@@ -34,6 +39,12 @@ pub struct App {
     state: State,
     /// Colours and glyphs of every screen, chosen at start-up.
     theme: Theme,
+    /// Size of the last frame drawn by [`App::render`], or `None` before the
+    /// first one.
+    ///
+    /// A `Cell` so that rendering, which only reads the game, can still
+    /// note the size it drew at.
+    screen_size: Cell<Option<Size>>,
 }
 
 impl App {
@@ -44,6 +55,7 @@ impl App {
             game: Game::new(),
             state: State::Playing,
             theme,
+            screen_size: Cell::new(None),
         }
     }
 
@@ -65,6 +77,12 @@ impl App {
     /// unbound keys do nothing. A game action is submitted to the game, which
     /// may refuse it (a move into a wall) without any time passing. Once the
     /// application has quit, keys are ignored.
+    ///
+    /// While the last frame drawn was smaller than 80 × 24 (see `ui::fits`),
+    /// the screen shows a resize message instead of the game, so game
+    /// actions are ignored and only the quit keys work. Before the first
+    /// frame the size is unknown and actions are accepted: the event loop
+    /// always draws before it reads a key.
     pub fn handle_key(&mut self, key: KeyEvent) {
         if self.state != State::Playing {
             return;
@@ -72,6 +90,7 @@ impl App {
         match input::command_for(key) {
             None => {}
             Some(Command::Quit) => self.state = State::Quit,
+            Some(Command::Act(_)) if !self.game_is_visible() => {}
             Some(Command::Act(action)) => {
                 // The events will feed the message log; there is no log yet,
                 // and the map is drawn from the game state itself.
@@ -84,16 +103,24 @@ impl App {
     /// theme.
     ///
     /// Any frame size is accepted: below 80 × 24 a message asks for a larger
-    /// terminal instead (see `ui::render`).
+    /// terminal instead (see `ui::render`). The frame's size is recorded, and
+    /// decides whether [`App::handle_key`] plays game actions.
     pub fn render(&self, frame: &mut Frame) {
+        self.screen_size.set(Some(frame.area().as_size()));
         ui::render(frame, &self.game, &self.theme);
+    }
+
+    /// Returns whether the game screen is shown: `true` when the last frame
+    /// drawn was at least 80 × 24, or when no frame has been drawn yet.
+    fn game_is_visible(&self) -> bool {
+        self.screen_size.get().is_none_or(ui::fits)
     }
 
     /// Runs the event loop on `terminal` until the player quits: draw, wait
     /// for the next terminal event, handle it, repeat.
     ///
     /// A resize event needs no handling of its own: the next draw adapts to
-    /// the new size.
+    /// the new size and records it before any further key is read.
     ///
     /// # Errors
     ///
@@ -451,7 +478,7 @@ mod tests {
                         [screen_cell_of(target)],
                         "{direction:?} by {key:?}: one @, one cell from the start"
                     );
-                    assert_eq!(turn_shown(&app), ticks + 1);
+                    assert_eq!(turn_shown(&app), 2, "{direction:?} by {key:?}");
                 }
             }
         }
@@ -556,7 +583,7 @@ mod tests {
                 assert_eq!(player_position(&app), from, "{side}");
                 assert_eq!(app.game().ticks(), ticks, "{side}: no time passes");
                 assert_eq!(screen(&app), before, "{side}: the screen is unchanged");
-                assert_eq!(turn_shown(&app), ticks, "{side}");
+                assert_eq!(turn_shown(&app), app.game().player_turns() + 1, "{side}");
             }
         }
 
@@ -756,19 +783,67 @@ mod tests {
             }
 
             assert_eq!(app.game().ticks(), ticks);
-            assert_eq!(turn_shown(&app), ticks);
+            assert_eq!(turn_shown(&app), 1);
         }
 
         #[test]
         fn a_new_game_starts_with_the_clock_at_one_and_counts_player_actions() {
-            // Documents what the status line shows: game ticks, which start
-            // at 1 because time runs once to the player's first turn.
+            // The status line shows the turn the player is about to play:
+            // "Turn 1" before any action, one more per move or wait, and
+            // nothing more for a refused move (B1).
             let mut app = new_app();
+            assert_eq!(app.game().player_turns(), 0);
             assert_eq!(turn_shown(&app), 1);
 
             press_all(&mut app, &[KeyCode::Char('l'), KeyCode::Char('.')]);
-
             assert_eq!(turn_shown(&app), 3);
+
+            walk(&mut app, &[(KeyCode::Char('y'), 4)], Position::new(2, 1));
+            assert_eq!(turn_shown(&app), 7);
+            press_all(&mut app, &[KeyCode::Char('k'), KeyCode::Char('y')]);
+            assert_eq!(turn_shown(&app), 7, "refused moves are not turns");
+        }
+
+        #[test]
+        fn game_keys_do_nothing_below_80_by_24_but_quitting_works() {
+            // B2: the resize message hides the game, so nothing is played
+            // blind; only the quit keys still act.
+            for (width, height) in [(79, 24), (80, 23), (40, 10), (0, 0)] {
+                let mut app = new_app();
+                drop(render(&app, width, height));
+                let turns = app.game().player_turns();
+                let ticks = app.game().ticks();
+
+                press_all(
+                    &mut app,
+                    &[KeyCode::Char('l'), KeyCode::Right, KeyCode::Char('.')],
+                );
+
+                let size = format!("{width} × {height}");
+                assert_eq!(player_position(&app), PLAYER_START, "{size}");
+                assert_eq!(app.game().player_turns(), turns, "{size}");
+                assert_eq!(app.game().ticks(), ticks, "{size}: no time passes");
+                assert_eq!(app.state(), State::Playing, "{size}");
+
+                app.handle_key(press(KeyCode::Char('q')));
+
+                assert_eq!(app.state(), State::Quit, "{size}");
+            }
+        }
+
+        #[test]
+        fn game_keys_work_again_once_the_terminal_is_enlarged() {
+            let mut app = new_app();
+            let mut terminal = render(&app, 79, 24);
+            app.handle_key(press(KeyCode::Char('l')));
+            assert_eq!(player_position(&app), PLAYER_START);
+
+            terminal.backend_mut().resize(80, 24);
+            terminal.draw(|frame| app.render(frame)).unwrap();
+            app.handle_key(press(KeyCode::Char('l')));
+
+            assert_eq!(player_position(&app), PLAYER_START.step(Direction::East));
+            assert_eq!(turn_shown(&app), 2);
         }
 
         /// Path of the file that receives the output of a child process,

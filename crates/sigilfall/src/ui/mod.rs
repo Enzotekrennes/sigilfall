@@ -9,7 +9,7 @@
 pub mod game;
 
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Rect};
+use ratatui::layout::{Alignment, Rect, Size};
 use ratatui::widgets::{Paragraph, Wrap};
 use sigilfall_core::game::Game;
 
@@ -25,6 +25,15 @@ pub const MIN_WIDTH: u16 = 80;
 /// [`MIN_WIDTH`]).
 pub const MIN_HEIGHT: u16 = 24;
 
+/// Returns whether a terminal of `size` is large enough for the game
+/// screen, that is at least [`MIN_WIDTH`] × [`MIN_HEIGHT`].
+///
+/// Below that size [`render`] shows a message instead of the game, and the
+/// application ignores game keys, so nothing is played blind.
+pub const fn fits(size: Size) -> bool {
+    size.width >= MIN_WIDTH && size.height >= MIN_HEIGHT
+}
+
 /// Draws the screen for `game` over the whole frame, with `theme`.
 ///
 /// The theme's background is painted on every cell first. When the frame
@@ -35,10 +44,10 @@ pub const MIN_HEIGHT: u16 = 24;
 pub fn render(frame: &mut Frame, game: &Game, theme: &Theme) {
     let area = frame.area();
     frame.buffer_mut().set_style(area, theme.bg);
-    if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
-        render_too_small(frame, area, theme);
-    } else {
+    if fits(area.as_size()) {
         game::render(frame, area, game, theme);
+    } else {
+        render_too_small(frame, area, theme);
     }
 }
 

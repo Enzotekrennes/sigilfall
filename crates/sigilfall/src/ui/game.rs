@@ -76,12 +76,18 @@ pub fn render(frame: &mut Frame, area: Rect, game: &Game, theme: &Theme) {
     frame.render_widget(key_help(theme), layout.help);
 }
 
-/// Builds the status line: the number of turns elapsed so far, label in
-/// the muted style and value in the text style.
+/// Builds the status line: the player's current turn, label in the muted
+/// style and value in the text style.
+///
+/// The number is the turn the player is about to play, counted from 1:
+/// [`Game::player_turns`] (actions that took time) plus one, so a new game
+/// shows "Turn 1" and each move or wait adds one. Game ticks are not shown:
+/// they also count the time other actors and slower actions take.
 fn status_line(game: &Game, theme: &Theme) -> Line<'static> {
+    let current_turn = game.player_turns() + 1;
     Line::from(vec![
         Span::styled(" Turn ", theme.text_muted),
-        Span::styled(game.ticks().to_string(), theme.text),
+        Span::styled(current_turn.to_string(), theme.text),
     ])
 }
 
