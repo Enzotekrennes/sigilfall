@@ -12,6 +12,7 @@ use ratatui::{DefaultTerminal, Frame};
 use sigilfall_core::game::Game;
 
 use crate::input::{self, Command};
+use crate::theme::Theme;
 use crate::ui;
 
 /// The screen the application is on.
@@ -23,21 +24,26 @@ pub enum State {
     Quit,
 }
 
-/// The running application: a game and the screen showing it.
+/// The running application: a game, the screen showing it and the theme
+/// it is drawn with.
 #[derive(Debug)]
 pub struct App {
     /// The game in progress.
     game: Game,
     /// The active screen.
     state: State,
+    /// Colours and glyphs of every screen, chosen at start-up.
+    theme: Theme,
 }
 
 impl App {
-    /// Starts the application on a new game, in [`State::Playing`].
-    pub fn new() -> Self {
+    /// Starts the application on a new game, in [`State::Playing`], drawn
+    /// with `theme`.
+    pub fn new(theme: Theme) -> Self {
         Self {
             game: Game::new(),
             state: State::Playing,
+            theme,
         }
     }
 
@@ -74,12 +80,13 @@ impl App {
         }
     }
 
-    /// Draws the active screen over the whole frame.
+    /// Draws the active screen over the whole frame, with the application's
+    /// theme.
     ///
     /// Any frame size is accepted: below 80 × 24 a message asks for a larger
     /// terminal instead (see `ui::render`).
     pub fn render(&self, frame: &mut Frame) {
-        ui::render(frame, &self.game);
+        ui::render(frame, &self.game, &self.theme);
     }
 
     /// Runs the event loop on `terminal` until the player quits: draw, wait
@@ -105,13 +112,6 @@ impl App {
     }
 }
 
-impl Default for App {
-    /// Same as [`App::new`].
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     //! Test harness: drives [`App`] with simulated keys and renders it into
@@ -125,6 +125,13 @@ mod tests {
     use sigilfall_core::geometry::{Direction, Position};
 
     use super::*;
+    use crate::theme::{ColorMode, GlyphSet};
+
+    /// A new application drawn in the default mode of Windows Terminal:
+    /// dark 24-bit colours and Unicode glyphs.
+    fn new_app() -> App {
+        App::new(Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode))
+    }
 
     /// A key press of `code`, as crossterm reports it.
     fn press(code: KeyCode) -> KeyEvent {
@@ -157,15 +164,25 @@ mod tests {
 
     #[test]
     fn new_game_shows_the_room_and_the_player() {
-        let app = App::new();
+        let app = new_app();
 
         assert_eq!(app.state(), State::Playing);
         assert_snapshot!(render(&app, 80, 24).backend());
     }
 
     #[test]
+    fn ascii_glyphs_replace_every_unicode_glyph() {
+        let app = App::new(Theme::new(ColorMode::TrueColorDark, GlyphSet::Ascii));
+
+        let text = render(&app, 80, 24).backend().to_string();
+
+        assert!(text.is_ascii(), "{text}");
+        assert_snapshot!(text);
+    }
+
+    #[test]
     fn movement_keys_move_the_player_one_cell_each() {
-        let mut app = App::new();
+        let mut app = new_app();
         let ticks = app.game().ticks();
 
         // Arrow, keypad digit, vi key, then a keypad diagonal without Num Lock.
@@ -191,7 +208,7 @@ mod tests {
 
     #[test]
     fn waiting_lets_time_pass_without_moving() {
-        let mut app = App::new();
+        let mut app = new_app();
         let ticks = app.game().ticks();
 
         press_all(&mut app, &[KeyCode::Char('.'), KeyCode::Char('5')]);
@@ -202,7 +219,7 @@ mod tests {
 
     #[test]
     fn wall_stops_the_player_and_no_time_passes() {
-        let mut app = App::new();
+        let mut app = new_app();
         // The start is four cells right of the floor next to the left wall.
         press_all(&mut app, &[KeyCode::Char('h'); 4]);
         let at_wall = Position::new(1, PLAYER_START.y);
@@ -218,7 +235,7 @@ mod tests {
 
     #[test]
     fn press_then_release_counts_as_one_move() {
-        let mut app = App::new();
+        let mut app = new_app();
         let ticks = app.game().ticks();
 
         app.handle_key(press(KeyCode::Right));
@@ -230,7 +247,7 @@ mod tests {
 
     #[test]
     fn q_quits() {
-        let mut app = App::new();
+        let mut app = new_app();
 
         app.handle_key(press(KeyCode::Char('q')));
 
@@ -239,7 +256,7 @@ mod tests {
 
     #[test]
     fn escape_quits_and_later_keys_are_ignored() {
-        let mut app = App::new();
+        let mut app = new_app();
 
         press_all(&mut app, &[KeyCode::Esc, KeyCode::Right]);
 
@@ -249,7 +266,7 @@ mod tests {
 
     #[test]
     fn releasing_q_does_not_quit() {
-        let mut app = App::new();
+        let mut app = new_app();
 
         app.handle_key(release(KeyCode::Char('q')));
 
@@ -258,7 +275,7 @@ mod tests {
 
     #[test]
     fn terminal_smaller_than_80_by_24_shows_a_resize_message() {
-        let app = App::new();
+        let app = new_app();
 
         assert_snapshot!(render(&app, 60, 20).backend());
         for (width, height) in [(79, 24), (80, 23)] {
@@ -272,8 +289,17 @@ mod tests {
     }
 
     #[test]
+    fn resize_message_uses_the_ascii_dimension_sign() {
+        let app = App::new(Theme::new(ColorMode::Ansi16, GlyphSet::Ascii));
+
+        let text = render(&app, 60, 20).backend().to_string();
+
+        assert!(text.contains("80 x 24 (current: 60 x 20)"), "{text}");
+    }
+
+    #[test]
     fn resizing_switches_between_message_and_game_without_panicking() {
-        let app = App::new();
+        let app = new_app();
         let mut terminal = render(&app, 80, 24);
 
         for (width, height) in [(40, 10), (1, 1), (79, 30), (80, 24), (120, 40)] {

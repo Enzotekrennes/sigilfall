@@ -10,6 +10,7 @@
 
 mod app;
 mod input;
+mod theme;
 mod ui;
 
 use std::io::{self, Stdout};
@@ -24,6 +25,7 @@ use ratatui::crossterm::terminal::{
 use ratatui::{DefaultTerminal, Terminal};
 
 use crate::app::App;
+use crate::theme::{Appearance, ColorMode, ColorSupport, GlyphSet, Theme};
 
 /// Runs the game in the current terminal until the player quits.
 ///
@@ -36,7 +38,8 @@ use crate::app::App;
 fn main() -> anyhow::Result<()> {
     install_panic_hook();
 
-    let outcome = enter_terminal().and_then(|mut terminal| App::new().run(&mut terminal));
+    let theme = startup_theme();
+    let outcome = enter_terminal().and_then(|mut terminal| App::new(theme).run(&mut terminal));
     // Restore even when the game failed, so the error is printed on the
     // normal screen; the game's own error is the more useful one to report.
     let restored = restore_terminal().context(
@@ -44,6 +47,18 @@ fn main() -> anyhow::Result<()> {
     );
     outcome?;
     restored
+}
+
+/// Chooses the theme from the terminal's colour support, read from the
+/// environment (see `ColorSupport::from_env`), before the screen changes.
+///
+/// The dark theme and Unicode glyphs are the defaults of `docs/design.md`,
+/// and every glyph used is in Cascadia Mono, the font of Windows Terminal.
+/// No other choice can be made yet: the `--ascii` flag arrives with the
+/// command line (T7) and the light theme with the options screen (T26).
+fn startup_theme() -> Theme {
+    let mode = ColorMode::for_terminal(ColorSupport::detect(), Appearance::Dark);
+    Theme::new(mode, GlyphSet::Unicode)
 }
 
 /// Switches the terminal to raw mode, enters the alternate screen, hides the

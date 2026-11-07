@@ -1,0 +1,398 @@
+//! The visual theme: every colour, emphasis and glyph the screens draw with.
+//!
+//! Exposes [`Theme`], whose fields are the semantic tokens of
+//! `docs/design.md` (one [`Style`] each) plus the [`Glyphs`] to draw with,
+//! the four rendering modes ([`ColorMode`]), terminal colour detection
+//! ([`ColorSupport::detect`]) and the player's preferences that feed it
+//! ([`Appearance`], [`GlyphSet`]). This module is the only place where a
+//! colour or a glyph is written down: screens ask for a token by name and
+//! never pick a colour themselves.
+//!
+//! Token styles carry a foreground and emphasis only. The background is the
+//! [`Theme::bg`] token, painted once over the whole screen before anything
+//! else is drawn, so every cell sits on the theme's background.
+
+mod glyphs;
+
+use std::env;
+use std::ffi::OsString;
+
+use ratatui::style::{Color, Modifier, Style};
+
+pub use self::glyphs::{GlyphSet, Glyphs};
+
+/// How much colour the terminal can show, as detected at start-up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorSupport {
+    /// 24-bit colour: the RGB values of `docs/design.md` are shown as is.
+    TrueColor,
+    /// The 16 standard ANSI colours, whose exact shades depend on the
+    /// terminal's colour scheme.
+    Ansi16,
+    /// No colour at all, at the user's request (`NO_COLOR`).
+    None,
+}
+
+impl ColorSupport {
+    /// Detects the colour support of the terminal the game runs in, from
+    /// the process environment (see [`ColorSupport::from_env`] for the
+    /// rules).
+    pub fn detect() -> Self {
+        Self::from_env(|name| env::var_os(name))
+    }
+
+    /// Decides the colour support from environment variables, read through
+    /// `var` (which returns a variable's value, or `None` when it is unset).
+    ///
+    /// Rules, first match wins:
+    /// 1. `NO_COLOR` set to a non-empty value → [`ColorSupport::None`], as
+    ///    the convention at <https://no-color.org> asks;
+    /// 2. `COLORTERM` equal to `truecolor` or `24bit` (any case) →
+    ///    [`ColorSupport::TrueColor`]; most terminals with 24-bit colour
+    ///    announce it this way;
+    /// 3. `WT_SESSION` set → [`ColorSupport::TrueColor`]: Windows Terminal
+    ///    supports 24-bit colour but does not set `COLORTERM`, and sets this
+    ///    variable in every shell it starts;
+    /// 4. anything else → [`ColorSupport::Ansi16`], which every terminal
+    ///    supports (macOS Terminal.app, the Linux console, old Windows
+    ///    consoles).
+    ///
+    /// An unreadable value (not valid Unicode) counts as not matching.
+    pub fn from_env(var: impl Fn(&str) -> Option<OsString>) -> Self {
+        if var("NO_COLOR").is_some_and(|value| !value.is_empty()) {
+            return Self::None;
+        }
+        let colorterm = var("COLORTERM");
+        let announces_true_color = colorterm
+            .as_deref()
+            .and_then(|value| value.to_str())
+            .is_some_and(|value| {
+                value.eq_ignore_ascii_case("truecolor") || value.eq_ignore_ascii_case("24bit")
+            });
+        if announces_true_color || var("WT_SESSION").is_some() {
+            return Self::TrueColor;
+        }
+        Self::Ansi16
+    }
+}
+
+/// The player's choice between the dark theme and the light "parchment"
+/// theme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Appearance {
+    /// Light text on ink (the default).
+    Dark,
+    /// Dark text on parchment.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "chosen in the options screen, added with T26")
+    )]
+    Light,
+}
+
+/// One of the four rendering modes of `docs/design.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorMode {
+    /// 24-bit colour on the dark ink background.
+    TrueColorDark,
+    /// 24-bit colour on the light parchment background.
+    TrueColorLight,
+    /// The 16 ANSI colours on the terminal's black.
+    Ansi16,
+    /// The terminal's own colours; hierarchy by bold, reversed and dim.
+    Monochrome,
+}
+
+impl ColorMode {
+    /// Picks the rendering mode for a terminal with `support` and the
+    /// player's `appearance`.
+    ///
+    /// The light theme falls back to [`ColorMode::Monochrome`] with only 16
+    /// colours, because the ANSI colours of light terminal schemes fail the
+    /// contrast minimum on their own background (`docs/design.md`, section
+    /// "Modes de rendu"). Without colour support the mode is always
+    /// monochrome.
+    pub const fn for_terminal(support: ColorSupport, appearance: Appearance) -> Self {
+        match (support, appearance) {
+            (ColorSupport::TrueColor, Appearance::Dark) => Self::TrueColorDark,
+            (ColorSupport::TrueColor, Appearance::Light) => Self::TrueColorLight,
+            (ColorSupport::Ansi16, Appearance::Dark) => Self::Ansi16,
+            (ColorSupport::Ansi16, Appearance::Light) | (ColorSupport::None, _) => Self::Monochrome,
+        }
+    }
+}
+
+/// The semantic tokens of `docs/design.md`, resolved for one rendering
+/// mode, and the glyphs to draw with.
+///
+/// Each token field is named after its token and holds the full style to
+/// apply: foreground colour and emphasis (bold, dim, reversed). The three
+/// surface tokens (`bg`, `bg_panel`, `bg_selection`) set the background
+/// instead. Some tokens share a value in a mode but stay separate, so they
+/// can diverge without touching the screens.
+#[derive(Debug, Clone)]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the full token set of docs/design.md; the remaining tokens are drawn by the \
+                  screens of T12, T16, T19, T21, T25 and T26"
+    )
+)]
+pub struct Theme {
+    /// Background of the whole screen, painted on every cell.
+    pub bg: Style,
+    /// Background of overlays: sigil tracing, inventory, help.
+    pub bg_panel: Style,
+    /// Background of the selected menu line, always shown with the `›`
+    /// marker as well.
+    pub bg_selection: Style,
+    /// Running text and menus.
+    pub text: Style,
+    /// Labels, key help and captions.
+    pub text_muted: Style,
+    /// Titles, the game's name and the seed.
+    pub text_title: Style,
+    /// Frames, separators and the empty part of bars.
+    pub border: Style,
+    /// Floor in view.
+    pub floor: Style,
+    /// Wall in view.
+    pub wall_seen: Style,
+    /// Explored wall out of view.
+    pub wall_remembered: Style,
+    /// Arch or passage.
+    pub door: Style,
+    /// Stairs down.
+    pub stairs: Style,
+    /// Engraved glyph not read yet.
+    pub engraving_unread: Style,
+    /// Engraved glyph already deciphered.
+    pub engraving_read: Style,
+    /// The player.
+    pub player: Style,
+    /// Creatures of flesh (vermin, acolytes, homunculi).
+    pub monster_hostile: Style,
+    /// Creatures of spirit (eyes, spectres).
+    pub monster_arcane: Style,
+    /// Items on the ground and in the bag.
+    pub item: Style,
+    /// Free node of the sigil grid.
+    pub sigil_node: Style,
+    /// Stroke being traced or traced cleanly, and the nodes it links.
+    pub sigil_stroke: Style,
+    /// The pen: last node linked.
+    pub sigil_cursor: Style,
+    /// Unstable trace.
+    pub sigil_unstable: Style,
+    /// Failed trace.
+    pub sigil_failed: Style,
+    /// Health above half.
+    pub hp_high: Style,
+    /// Health from a quarter to half.
+    pub hp_mid: Style,
+    /// Health below a quarter, always followed by `!`.
+    pub hp_low: Style,
+    /// Neutral log line.
+    pub log_info: Style,
+    /// Gain or discovery in the log (prefix `+`).
+    pub log_success: Style,
+    /// Damage taken or threat in the log (prefix `!`).
+    pub log_danger: Style,
+    /// Spell cast in the log (prefix `~`).
+    pub log_sigil: Style,
+    /// Characters to draw the map and the interface with.
+    pub glyphs: Glyphs,
+}
+
+impl Theme {
+    /// Builds the theme for the given rendering `mode`, drawn with the
+    /// given `glyph_set`.
+    pub fn new(mode: ColorMode, glyph_set: GlyphSet) -> Self {
+        let glyphs = Glyphs::new(glyph_set);
+        match mode {
+            ColorMode::TrueColorDark => Self::true_color_dark(glyphs),
+            ColorMode::TrueColorLight => Self::true_color_light(glyphs),
+            ColorMode::Ansi16 => Self::ansi16(glyphs),
+            ColorMode::Monochrome => Self::monochrome(glyphs),
+        }
+    }
+
+    /// The dark 24-bit theme: "Sombre" column of `docs/design.md`.
+    fn true_color_dark(glyphs: Glyphs) -> Self {
+        Self {
+            bg: on(0x0F0D15),
+            bg_panel: on(0x1B1824),
+            bg_selection: on(0x2E2742),
+            text: fg(0xE6DECB),
+            text_muted: fg(0xA49CB2),
+            text_title: fg(0xE3B24F).add_modifier(Modifier::BOLD),
+            border: fg(0x6E6684),
+            floor: fg(0x6A6379),
+            wall_seen: fg(0xB9AF9C),
+            wall_remembered: fg(0x6E6878),
+            door: fg(0xC4915A),
+            stairs: fg(0xF2EADB).add_modifier(Modifier::BOLD),
+            engraving_unread: fg(0x5ED6B8),
+            engraving_read: fg(0x4F8F82),
+            player: fg(0xF5C451).add_modifier(Modifier::BOLD),
+            monster_hostile: fg(0xEC6A50),
+            monster_arcane: fg(0xB794F0),
+            item: fg(0x8DBDE6),
+            sigil_node: fg(0x6E6684),
+            sigil_stroke: fg(0x5ED6B8),
+            sigil_cursor: fg(0xF5C451).add_modifier(Modifier::BOLD),
+            sigil_unstable: fg(0xF0A53C),
+            sigil_failed: fg(0xEC6A50),
+            hp_high: fg(0x76C891),
+            hp_mid: fg(0xE3B24F),
+            hp_low: fg(0xEC6A50),
+            log_info: fg(0xA49CB2),
+            log_success: fg(0x76C891),
+            log_danger: fg(0xF07D63),
+            log_sigil: fg(0x5ED6B8),
+            glyphs,
+        }
+    }
+
+    /// The light 24-bit "parchment" theme: "Clair" column of
+    /// `docs/design.md`.
+    fn true_color_light(glyphs: Glyphs) -> Self {
+        Self {
+            bg: on(0xF2EBDC),
+            bg_panel: on(0xE7DECB),
+            bg_selection: on(0xD6CAB0),
+            text: fg(0x2A2230),
+            text_muted: fg(0x5C5266),
+            text_title: fg(0x7A4F08).add_modifier(Modifier::BOLD),
+            border: fg(0x857868),
+            floor: fg(0x8A7E70),
+            wall_seen: fg(0x4A4038),
+            wall_remembered: fg(0x85796C),
+            door: fg(0x8A5428),
+            stairs: fg(0x1E1824).add_modifier(Modifier::BOLD),
+            engraving_unread: fg(0x0B6E58),
+            engraving_read: fg(0x4F7D73),
+            player: fg(0x7A4E00).add_modifier(Modifier::BOLD),
+            monster_hostile: fg(0xA82C1A),
+            monster_arcane: fg(0x6A3FB0),
+            item: fg(0x255C8C),
+            sigil_node: fg(0x857868),
+            sigil_stroke: fg(0x0B6E58),
+            sigil_cursor: fg(0x7A4E00).add_modifier(Modifier::BOLD),
+            sigil_unstable: fg(0x8C4A00),
+            sigil_failed: fg(0xA82C1A),
+            hp_high: fg(0x24693A),
+            hp_mid: fg(0x7A4F08),
+            hp_low: fg(0xA82C1A),
+            log_info: fg(0x5C5266),
+            log_success: fg(0x24693A),
+            log_danger: fg(0xA82C1A),
+            log_sigil: fg(0x0B6E58),
+            glyphs,
+        }
+    }
+
+    /// The 16-colour theme on black: "ANSI 16" column of `docs/design.md`.
+    ///
+    /// The selection has no colour of its own here: it is reversed instead,
+    /// which reads well whatever the terminal's colour scheme.
+    fn ansi16(glyphs: Glyphs) -> Self {
+        let named = |color| Style::new().fg(color);
+        Self {
+            bg: Style::new().bg(Color::Black),
+            bg_panel: Style::new().bg(Color::Black),
+            bg_selection: Style::new().add_modifier(Modifier::REVERSED),
+            text: named(Color::White),
+            text_muted: named(Color::Gray),
+            text_title: named(Color::Yellow).add_modifier(Modifier::BOLD),
+            border: named(Color::DarkGray),
+            floor: named(Color::DarkGray),
+            wall_seen: named(Color::Gray),
+            wall_remembered: named(Color::DarkGray),
+            door: named(Color::Yellow),
+            stairs: named(Color::LightYellow).add_modifier(Modifier::BOLD),
+            engraving_unread: named(Color::LightCyan),
+            engraving_read: named(Color::Cyan),
+            player: named(Color::LightYellow).add_modifier(Modifier::BOLD),
+            monster_hostile: named(Color::LightRed),
+            monster_arcane: named(Color::LightRed),
+            item: named(Color::LightBlue),
+            sigil_node: named(Color::DarkGray),
+            sigil_stroke: named(Color::LightCyan),
+            sigil_cursor: named(Color::LightYellow).add_modifier(Modifier::BOLD),
+            sigil_unstable: named(Color::Yellow),
+            sigil_failed: named(Color::LightRed),
+            hp_high: named(Color::LightGreen),
+            hp_mid: named(Color::Yellow),
+            hp_low: named(Color::LightRed),
+            log_info: named(Color::Gray),
+            log_success: named(Color::LightGreen),
+            log_danger: named(Color::LightRed),
+            log_sigil: named(Color::LightCyan),
+            glyphs,
+        }
+    }
+
+    /// The colourless theme: the terminal's own foreground and background,
+    /// with hierarchy carried by emphasis only.
+    ///
+    /// Bold marks what `docs/design.md` emphasises in every mode (player,
+    /// stairs, titles, the sigil pen); dim fades the floor and remembered
+    /// walls, never text; the selection is reversed. Every piece of
+    /// information is also carried by a glyph, a word or a prefix, so
+    /// nothing is lost.
+    fn monochrome(glyphs: Glyphs) -> Self {
+        let plain = Style::new();
+        let bold = Style::new().add_modifier(Modifier::BOLD);
+        let dim = Style::new().add_modifier(Modifier::DIM);
+        Self {
+            bg: Style::new().fg(Color::Reset).bg(Color::Reset),
+            bg_panel: Style::new().bg(Color::Reset),
+            bg_selection: Style::new().add_modifier(Modifier::REVERSED),
+            text: plain,
+            text_muted: plain,
+            text_title: bold,
+            border: plain,
+            floor: dim,
+            wall_seen: plain,
+            wall_remembered: dim,
+            door: plain,
+            stairs: bold,
+            engraving_unread: plain,
+            engraving_read: plain,
+            player: bold,
+            monster_hostile: plain,
+            monster_arcane: plain,
+            item: plain,
+            sigil_node: plain,
+            sigil_stroke: plain,
+            sigil_cursor: bold,
+            sigil_unstable: plain,
+            sigil_failed: plain,
+            hp_high: plain,
+            hp_mid: plain,
+            hp_low: plain,
+            log_info: plain,
+            log_success: plain,
+            log_danger: plain,
+            log_sigil: plain,
+            glyphs,
+        }
+    }
+}
+
+/// A foreground style of the 24-bit colour `rgb`, written `0xRRGGBB` as in
+/// `docs/design.md`.
+const fn fg(rgb: u32) -> Style {
+    Style::new().fg(Color::from_u32(rgb))
+}
+
+/// A surface style: the 24-bit background `rgb`, written `0xRRGGBB` as in
+/// `docs/design.md`.
+const fn on(rgb: u32) -> Style {
+    Style::new().bg(Color::from_u32(rgb))
+}
+
+#[cfg(test)]
+mod tests;
