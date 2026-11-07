@@ -5,8 +5,9 @@ members = ["crates/sigilfall-core", "crates/sigilfall"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-# Edition 2024 requires at least Rust 1.85.
-rust-version = "1.85"
+# ratatui 0.30 (terminal rendering) requires Rust 1.88, above the 1.85
+# minimum of edition 2024; one minimum applies to the whole workspace.
+rust-version = "1.88"
 authors = ["Enzo Abel"]
 license = "MIT OR Apache-2.0"
 

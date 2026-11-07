@@ -9,3 +9,11 @@ license.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
+sigilfall-core = { version = "0.1.0", path = "../sigilfall-core" }
+
+[dev-dependencies]
+insta = "1.49.0"
