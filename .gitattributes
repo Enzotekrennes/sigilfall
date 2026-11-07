@@ -1,0 +1,13 @@
+# Same line endings on every platform: text files are stored and checked out
+# with LF, so rustfmt and snapshot tests behave identically on Windows.
+* text=auto eol=lf
+
+# Binary assets: never converted nor diffed as text.
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.ttf binary
+*.woff2 binary
+*.zip binary
+*.gz binary
