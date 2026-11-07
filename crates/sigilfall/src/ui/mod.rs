@@ -1,11 +1,13 @@
 //! Screens of the game, drawn with ratatui from read-only game state.
 //!
 //! Exposes [`render`], which picks what to draw for the current terminal
-//! size, and one module per screen ([`game`] for now). Drawing never changes
+//! size, one module per screen ([`game`] for now) and the [`camera`] that
+//! decides which part of the map is seen. Drawing never changes
 //! the game and never touches the real terminal: it fills a [`Frame`], so
 //! every screen can be rendered into a test backend. Every colour and glyph
 //! comes from the [`Theme`] passed in.
 
+pub mod camera;
 pub mod game;
 
 use ratatui::Frame;
@@ -84,17 +86,21 @@ mod tests {
     use ratatui::buffer::{Buffer, Cell};
     use ratatui::style::{Color, Modifier};
     use sigilfall_core::game::PLAYER_START;
+    use sigilfall_core::geometry::Position;
     use sigilfall_core::rng::Seed;
 
     use super::*;
     use crate::theme::{ColorMode, GlyphSet};
+    use crate::ui::camera::Camera;
 
-    /// Screen cell of the player at the start: the map starts on row 1.
-    const PLAYER_CELL: (u16, u16) = (5, 6);
-    /// Screen cell of the map's top-left wall.
-    const WALL_CELL: (u16, u16) = (0, 1);
-    /// Screen cell of a floor tile next to that wall.
-    const FLOOR_CELL: (u16, u16) = (1, 2);
+    /// Screen cell of the player at the start. The fixed room (30 × 12) is
+    /// centred in the 58 × 16 map area that starts on row 1: 14 columns
+    /// left of it and 2 rows above it.
+    const PLAYER_CELL: (u16, u16) = (5 + 14, 5 + 1 + 2);
+    /// Screen cell of the room's top-left wall, map cell (0, 0).
+    const WALL_CELL: (u16, u16) = (14, 3);
+    /// Screen cell of a floor tile next to that wall, map cell (1, 1).
+    const FLOOR_CELL: (u16, u16) = (15, 4);
     /// Seed of the test games; the fixed room does not depend on it.
     const SEED: Seed = Seed::new(42);
     /// Screen cell outside the map, in the empty side panel.
@@ -126,12 +132,16 @@ mod tests {
     }
 
     #[test]
-    fn the_player_cell_is_where_the_game_puts_the_player() {
-        let start = (
-            u16::try_from(PLAYER_START.x).unwrap(),
-            u16::try_from(PLAYER_START.y).unwrap() + 1,
-        );
-        assert_eq!(start, PLAYER_CELL);
+    fn the_player_cell_is_where_the_camera_puts_the_player() {
+        let game = Game::in_fixed_room(SEED);
+        let map_area = game::map_area(Rect::new(0, 0, 80, 24));
+        let camera = Camera::new(map_area, game.map(), PLAYER_START);
+
+        let start = camera.screen_position(PLAYER_START).unwrap();
+
+        assert_eq!((start.x, start.y), PLAYER_CELL);
+        let wall = camera.screen_position(Position::new(0, 0));
+        assert_eq!(wall.map(|cell| (cell.x, cell.y)), Some(WALL_CELL));
     }
 
     #[test]

@@ -161,12 +161,17 @@ mod tests {
     use insta::assert_snapshot;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    use ratatui::buffer::Buffer;
     use ratatui::crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
+    use ratatui::layout::Rect;
     use sigilfall_core::game::PLAYER_START;
+    use sigilfall_core::generation::{self, FIRST_DEPTH};
     use sigilfall_core::geometry::{Direction, Position};
+    use sigilfall_core::path::DijkstraMap;
 
     use super::*;
     use crate::theme::{ColorMode, GlyphSet};
+    use crate::ui::camera::Camera;
 
     /// Seed of every test game: its written form, `7F3A-91C2-0B5E-D4A8`,
     /// is the one of the game screen mock-up in `docs/design.md`.
@@ -210,6 +215,13 @@ mod tests {
     /// The player's current cell.
     fn player_position(app: &App) -> Position {
         app.game().player_actor().position()
+    }
+
+    /// The camera of `app`'s game screen on a `width` × `height` terminal,
+    /// placed as the screen places it.
+    fn camera(app: &App, width: u16, height: u16) -> Camera {
+        let map_area = ui::game::map_area(Rect::new(0, 0, width, height));
+        Camera::new(map_area, app.game().map(), player_position(app))
     }
 
     /// Renders `app` once into a new `width` × `height` test terminal.
@@ -345,6 +357,100 @@ mod tests {
         }
     }
 
+    /// The text of row `y` of `buffer`, one symbol per cell.
+    fn row_text(buffer: &Buffer, y: u16) -> String {
+        (0..buffer.area.width)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect()
+    }
+
+    /// A new application on the generated first floor of [`SEED`], in the
+    /// default mode of Windows Terminal (see [`new_app`]).
+    fn generated_floor_app() -> App {
+        App::new(
+            Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode),
+            SEED,
+        )
+    }
+
+    /// The vi key that moves the player one cell in `direction`.
+    const fn vi_key(direction: Direction) -> KeyCode {
+        KeyCode::Char(match direction {
+            Direction::North => 'k',
+            Direction::NorthEast => 'u',
+            Direction::East => 'l',
+            Direction::SouthEast => 'n',
+            Direction::South => 'j',
+            Direction::SouthWest => 'b',
+            Direction::West => 'h',
+            Direction::NorthWest => 'y',
+        })
+    }
+
+    #[test]
+    fn a_generated_floor_is_shown_around_the_player_at_the_start() {
+        let app = generated_floor_app();
+        let floor = generation::generate(SEED, FIRST_DEPTH);
+        assert_eq!(player_position(&app), floor.start());
+
+        let terminal = render(&app, 80, 24);
+
+        let player = camera(&app, 80, 24).screen_position(floor.start());
+        assert_eq!(
+            player.map(|cell| terminal.backend().buffer()[cell].symbol()),
+            Some("@")
+        );
+        assert_snapshot!(terminal.backend());
+    }
+
+    #[test]
+    fn walking_across_the_floor_scrolls_the_view_and_keeps_the_player_in_it() {
+        // The stairs are the cell farthest from the start, so walking to
+        // them crosses the floor. Stop two steps short so they stay visible.
+        let mut app = generated_floor_app();
+        let floor = generation::generate(SEED, FIRST_DEPTH);
+        let to_stairs = DijkstraMap::new(floor.map(), [floor.stairs()]);
+        let start_origin = camera(&app, 80, 24).origin();
+        let mut origins = vec![start_origin];
+
+        while to_stairs.distance(player_position(&app)) > Some(2) {
+            let direction = to_stairs.downhill(player_position(&app)).unwrap();
+            app.handle_key(press(vi_key(direction)));
+            let buffer = render(&app, 80, 24).backend().buffer().clone();
+            let camera = camera(&app, 80, 24);
+            let player = camera.screen_position(player_position(&app));
+            assert_eq!(
+                player.map(|cell| buffer[cell].symbol()),
+                Some("@"),
+                "{camera:?}"
+            );
+            origins.push(camera.origin());
+        }
+
+        origins.dedup();
+        assert!(origins.len() > 1, "the view scrolled: {origins:?}");
+        assert_ne!(camera(&app, 80, 24).origin(), start_origin);
+        assert_snapshot!(render(&app, 80, 24).backend());
+    }
+
+    #[test]
+    fn a_120_by_40_terminal_centres_the_floor_across_and_crops_it_down_the_rows() {
+        // The 98 × 32 map area is wider than the 80 × 40 floor but shorter.
+        let app = generated_floor_app();
+
+        let terminal = render(&app, 120, 40);
+
+        let origin = camera(&app, 120, 40).origin();
+        assert_eq!(origin.x, -9, "9 spare columns on each side");
+        assert!((0..=40 - 32).contains(&origin.y), "{origin:?}");
+        let first_line = row_text(terminal.backend().buffer(), 0);
+        assert!(
+            first_line.ends_with(" Seed 7F3A-91C2-0B5E-D4A8 "),
+            "{first_line:?}"
+        );
+        assert_snapshot!(terminal.backend());
+    }
+
     #[test]
     fn resize_message_uses_the_ascii_dimension_sign() {
         let app = fixed_room_app(Theme::new(ColorMode::Ansi16, GlyphSet::Ascii), SEED);
@@ -375,7 +481,6 @@ mod tests {
         use std::path::PathBuf;
         use std::process::{Command, Stdio};
 
-        use ratatui::buffer::Buffer;
         use ratatui::crossterm::event::KeyEventState;
         use sigilfall_core::map::FIXED_ROOM_PILLAR;
 
@@ -400,12 +505,12 @@ mod tests {
         const SHOW_CURSOR: &str = "\x1b[?25h";
 
         /// The screen cell `(column, row)` where the map's cell `position`
-        /// is drawn: the map starts on row 1, under the status line.
-        fn screen_cell_of(position: Position) -> (u16, u16) {
-            (
-                u16::try_from(position.x).unwrap(),
-                u16::try_from(position.y).unwrap() + 1,
-            )
+        /// is drawn on the 80 × 24 screen of `app`, through the camera.
+        fn screen_cell_of(app: &App, position: Position) -> (u16, u16) {
+            let cell = camera(app, 80, 24)
+                .screen_position(position)
+                .unwrap_or_else(|| panic!("{position:?} is off screen"));
+            (cell.x, cell.y)
         }
 
         /// Every cell of the buffer that shows the player glyph.
@@ -420,13 +525,6 @@ mod tests {
         /// The game screen of `app` at 80 × 24.
         fn screen(app: &App) -> Buffer {
             render(app, 80, 24).backend().buffer().clone()
-        }
-
-        /// The text of row `y` of `buffer`, one symbol per cell.
-        fn row_text(buffer: &Buffer, y: u16) -> String {
-            (0..buffer.area.width)
-                .map(|x| buffer[(x, y)].symbol())
-                .collect()
         }
 
         /// The whole screen of `buffer` as text, rows joined by newlines;
@@ -506,7 +604,7 @@ mod tests {
                     let buffer = screen(&app);
                     assert_eq!(
                         player_cells(&buffer),
-                        [screen_cell_of(target)],
+                        [screen_cell_of(&app, target)],
                         "{direction:?} by {key:?}: one @, one cell from the start"
                     );
                     assert_eq!(turn_shown(&app), 2, "{direction:?} by {key:?}");
@@ -517,7 +615,7 @@ mod tests {
         #[test]
         fn moving_leaves_floor_behind_and_draws_a_single_player() {
             let mut app = new_app();
-            let start_cell = screen_cell_of(PLAYER_START);
+            let start_cell = screen_cell_of(&app, PLAYER_START);
 
             app.handle_key(press(KeyCode::Char('l')));
 

@@ -6,8 +6,8 @@
 //! left, side panel on the right, message log under both, key help on the
 //! last row. Only the areas that have something to show are drawn for now:
 //! the side panel and the log keep their place but stay empty until the
-//! health bar and the log exist, and the map is drawn from its top-left
-//! corner, clipped to its area, until the camera follows the player.
+//! health bar and the log exist. The map is seen through a
+//! [`Camera`] that follows the player.
 
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
@@ -15,10 +15,10 @@ use ratatui::layout::{Constraint, Layout, Position as ScreenPosition, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use sigilfall_core::game::Game;
-use sigilfall_core::geometry::Position;
 use sigilfall_core::map::Tile;
 use sigilfall_core::rng::Seed;
 
+use super::camera::Camera;
 use crate::theme::Theme;
 
 /// Width of the side panel, in columns, its left border included.
@@ -68,6 +68,13 @@ impl GameLayout {
                 .areas(body);
         Self { status, map, help }
     }
+}
+
+/// Returns the map area of a game screen drawn over `screen`, so tests can
+/// place a [`Camera`] exactly where [`render`] places it.
+#[cfg(test)]
+pub fn map_area(screen: Rect) -> Rect {
+    GameLayout::new(screen).map
 }
 
 /// Draws the game screen for `game` inside `area`, with `theme`.
@@ -145,48 +152,35 @@ const fn tile_look(tile: Tile, theme: &Theme) -> (char, Style) {
     }
 }
 
-/// Draws every tile of the map, then the player on top, into `buffer`
-/// with the map's top-left corner at the top-left corner of `area`.
+/// Draws the part of the map the camera shows in `area`, then the player
+/// on top, into `buffer`.
 ///
-/// Cells that fall outside `area` are skipped.
+/// The camera follows the player (see [`Camera::new`]), so the player is
+/// always drawn. Cells of `area` that show no map cell, around a map smaller
+/// than the area, keep the background painted beforehand.
 fn render_map(buffer: &mut Buffer, area: Rect, game: &Game, theme: &Theme) {
     let map = game.map();
-    for y in 0..map.height() {
-        for x in 0..map.width() {
-            let (Ok(x), Ok(y)) = (i32::try_from(x), i32::try_from(y)) else {
-                continue;
-            };
-            let position = Position::new(x, y);
-            if let Some(tile) = map.tile(position) {
-                draw_cell(buffer, area, position, tile_look(tile, theme));
-            }
+    let player = game.player_actor().position();
+    let camera = Camera::new(area, map, player);
+    for (screen, position) in camera.cells() {
+        if let Some(tile) = map.tile(position) {
+            draw_cell(buffer, screen, tile_look(tile, theme));
         }
     }
-    let player = (theme.glyphs.player, theme.player);
-    draw_cell(buffer, area, game.player_actor().position(), player);
+    if let Some(screen) = camera.screen_position(player) {
+        draw_cell(buffer, screen, (theme.glyphs.player, theme.player));
+    }
 }
 
-/// Writes one map cell at `position` (map coordinates) with the given
-/// character and style, if that cell lies inside `area`.
+/// Writes `glyph` with `style` at the terminal cell `screen`, if that cell
+/// exists in `buffer`.
 ///
 /// The style is patched over the cell's current one, so the background
 /// painted beforehand is kept.
-fn draw_cell(buffer: &mut Buffer, area: Rect, position: Position, (glyph, style): (char, Style)) {
-    let Some(screen) = screen_position(area, position) else {
-        return;
-    };
+fn draw_cell(buffer: &mut Buffer, screen: ScreenPosition, (glyph, style): (char, Style)) {
     if let Some(cell) = buffer.cell_mut(screen) {
         cell.set_char(glyph).set_style(style);
     }
-}
-
-/// Converts a map position into a terminal position inside `area`, or
-/// `None` when the position is negative or falls outside `area`.
-fn screen_position(area: Rect, position: Position) -> Option<ScreenPosition> {
-    let x = u16::try_from(position.x).ok()?;
-    let y = u16::try_from(position.y).ok()?;
-    let screen = ScreenPosition::new(area.x.checked_add(x)?, area.y.checked_add(y)?);
-    area.contains(screen).then_some(screen)
 }
 
 #[cfg(test)]
