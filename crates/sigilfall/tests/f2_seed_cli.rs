@@ -92,11 +92,10 @@ fn a_negative_seed_given_with_an_equals_sign_is_refused_with_the_format() {
     assert_clear_refusal("-1", &sigilfall(&["--seed=-1"]));
 }
 
-/// Known defect (reported as bug B1 of the F2 test): with a space, clap
-/// reads `-1` as an unknown option and the message does not mention the
-/// seed formats. Remove the `ignore` once the message names them.
+/// Non-regression test of bug B1 of the F2 test: with a space, `-1` was
+/// read as an unknown option and the message did not mention the seed
+/// formats.
 #[test]
-#[ignore = "bug B1: `--seed -1` is reported as an unexpected argument, without the seed format"]
 fn a_negative_seed_given_after_a_space_is_refused_with_the_format() {
     assert_clear_refusal("-1", &sigilfall(&["--seed", "-1"]));
 }

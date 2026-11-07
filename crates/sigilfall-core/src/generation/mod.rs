@@ -68,7 +68,8 @@ impl Floor {
 ///
 /// The floor is [`FLOOR_WIDTH`] × [`FLOOR_HEIGHT`] cells of rooms joined by
 /// corridors, enclosed by walls on every edge, and every walkable cell can
-/// be reached from every other one. The player starts on a random cell of a
+/// be reached from every other one. The number of rooms, from 8 to 16,
+/// varies from floor to floor. The player starts on a random cell of a
 /// random room.
 ///
 /// The stairs go on the walkable cell farthest from the start in steps (the

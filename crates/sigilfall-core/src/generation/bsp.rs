@@ -7,6 +7,10 @@
 //! pair of sister parts is joined by one corridor. Because every cut is
 //! joined exactly once, all rooms end up connected.
 //!
+//! The last level of cuts is drawn at random part by part (see
+//! [`LAST_CUT_SKIP_NUMERATOR`]), so an 80 × 40 floor holds from 8 to
+//! [`MAX_ROOMS`] rooms and mixes small rooms with larger halls.
+//!
 //! Choosing the start and the stairs is left to the parent module.
 
 use rand::RngExt as _;
@@ -33,13 +37,40 @@ const ROOM_MARGIN: i32 = 1;
 /// on both sides. A part is cut only if both halves keep at least this size.
 const MIN_PART_SIDE: i32 = MIN_ROOM_SIDE + 2 * ROOM_MARGIN;
 
-/// Number of successive cuts from the whole floor down to a leaf.
+/// Largest number of successive cuts from the whole floor down to a leaf.
 ///
 /// Four levels give at most 16 rooms. On an 80 × 40 floor, that makes parts
 /// of about 20 × 10 cells, which leaves rooms of a comfortable size with
 /// enough corridors between them; a fifth level would crowd the floor with
 /// rooms barely larger than [`MIN_ROOM_SIDE`].
 const MAX_CUT_DEPTH: u32 = 4;
+
+/// Number of cuts every part goes through before a cut may be skipped.
+///
+/// An 80 × 40 floor can always be cut three times (parts stay at least
+/// [`MIN_PART_SIDE`] cells on each side), so every floor keeps at least
+/// 2³ = 8 rooms: enough for the stairs, placed at the farthest cell,
+/// to be a real crossing. Only the last level, from this depth to
+/// [`MAX_CUT_DEPTH`], is random.
+const ALWAYS_CUT_DEPTH: u32 = 3;
+
+/// A part between [`ALWAYS_CUT_DEPTH`] and [`MAX_CUT_DEPTH`] is left whole,
+/// and becomes one larger room, with a chance of
+/// `LAST_CUT_SKIP_NUMERATOR / LAST_CUT_SKIP_DENOMINATOR`.
+///
+/// One in two makes the number of rooms vary the most: with eight parts at
+/// the last level, a floor has 12 rooms on average, and every count from
+/// 8 to [`MAX_ROOMS`] can occur. The skipped parts give rooms up
+/// to about twice as large, so a floor mixes halls and small rooms. The
+/// chance is a ratio of integers so that the draw is exact on every
+/// platform.
+const LAST_CUT_SKIP_NUMERATOR: u32 = 1;
+
+/// See [`LAST_CUT_SKIP_NUMERATOR`].
+const LAST_CUT_SKIP_DENOMINATOR: u32 = 2;
+
+/// Most rooms of a floor: one per part after [`MAX_CUT_DEPTH`] cuts.
+const MAX_ROOMS: usize = 1 << MAX_CUT_DEPTH;
 
 /// How many times taller than wide a terminal cell is drawn, roughly.
 ///
@@ -147,17 +178,23 @@ pub(crate) fn carve(width: usize, height: usize, rng: &mut ChaCha8Rng) -> (Map, 
     );
     let mut map = Map::new(width, height, Tile::Wall);
     let rooms = carve_part(area, 0, &mut map, rng);
+    debug_assert!(
+        rooms.len() <= MAX_ROOMS,
+        "{} rooms laid out, more than {MAX_ROOMS}",
+        rooms.len()
+    );
     (map, rooms)
 }
 
 /// Lays out the part `area` at `depth` cuts from the whole floor and returns
 /// its rooms.
 ///
-/// A part that may still be cut is split in two, each half is laid out in
-/// turn, and the two halves are joined by one corridor. Otherwise the part is
-/// a leaf and receives a single room.
+/// A part that is to be cut (see [`should_cut`]) and is large enough is
+/// split in two, each half is laid out in turn, and the two halves are
+/// joined by one corridor. Otherwise the part is a leaf and receives a
+/// single room.
 fn carve_part(area: Rect, depth: u32, map: &mut Map, rng: &mut ChaCha8Rng) -> Vec<Rect> {
-    let halves = if depth < MAX_CUT_DEPTH {
+    let halves = if should_cut(depth, rng) {
         split(area, rng)
     } else {
         None
@@ -173,6 +210,21 @@ fn carve_part(area: Rect, depth: u32, map: &mut Map, rng: &mut ChaCha8Rng) -> Ve
     join(&rooms, &second_rooms, map, rng);
     rooms.extend(second_rooms);
     rooms
+}
+
+/// Decides whether a part at `depth` cuts from the whole floor is cut again.
+///
+/// Parts above [`ALWAYS_CUT_DEPTH`] are always cut and parts at
+/// [`MAX_CUT_DEPTH`] never are; in between, the cut is skipped with the
+/// chance set by [`LAST_CUT_SKIP_NUMERATOR`]. A value is drawn from `rng`
+/// only in that last case, so the order of the draws depends on the layout
+/// alone.
+fn should_cut(depth: u32, rng: &mut ChaCha8Rng) -> bool {
+    if depth >= MAX_CUT_DEPTH {
+        return false;
+    }
+    depth < ALWAYS_CUT_DEPTH
+        || !rng.random_ratio(LAST_CUT_SKIP_NUMERATOR, LAST_CUT_SKIP_DENOMINATOR)
 }
 
 /// Cuts `area` in two, or returns `None` when neither direction leaves two
@@ -326,7 +378,13 @@ mod tests {
     use rand::SeedableRng as _;
 
     use super::*;
+    use crate::generation::FIRST_DEPTH;
     use crate::path::flood_fill;
+    use crate::rng::{Purpose, Seed};
+
+    /// Fewest rooms of an 80 × 40 floor: one per part after
+    /// [`ALWAYS_CUT_DEPTH`] cuts, which always fit.
+    const MIN_ROOMS: usize = 1 << ALWAYS_CUT_DEPTH;
 
     /// Width of the floors laid out by these tests: the real floor size.
     const WIDTH: usize = 80;
@@ -391,14 +449,52 @@ mod tests {
     fn the_cutting_tree_gives_between_eight_and_sixteen_rooms() {
         // 80 × 40 can always be cut three times (parts stay at least 12
         // wide on screen), so at least 8 leaves; four cuts give at most 16.
+        assert_eq!((MIN_ROOMS, MAX_ROOMS), (8, 16));
         for seed in 0..200 {
             let (_, rooms) = layout(seed);
             assert!(
-                (8..=16).contains(&rooms.len()),
+                (MIN_ROOMS..=MAX_ROOMS).contains(&rooms.len()),
                 "seed {seed}: {}",
                 rooms.len()
             );
         }
+    }
+
+    #[test]
+    fn the_number_of_rooms_varies_from_floor_to_floor() {
+        // Floors laid out from the generation stream of 1 000 seeds, as the
+        // game does. Measured distribution (rooms: floors), recorded so a
+        // change of the generator shows up in review:
+        // 8: 3, 9: 37, 10: 123, 11: 210, 12: 250, 13: 215, 14: 122,
+        // 15: 37, 16: 3; fewest 8, most 16.
+        const SAMPLE: u64 = 1000;
+        let mut counts = std::collections::BTreeMap::new();
+        for seed in 0..SAMPLE {
+            let mut rng = Seed::new(seed).stream(FIRST_DEPTH, Purpose::Generation);
+            let (_, rooms) = carve(WIDTH, HEIGHT, &mut rng);
+            *counts.entry(rooms.len()).or_insert(0_u64) += 1;
+        }
+        println!("rooms per floor over {SAMPLE} seeds: {counts:?}");
+
+        let (&fewest, _) = counts.first_key_value().unwrap();
+        let (&most, _) = counts.last_key_value().unwrap();
+        assert!(fewest >= MIN_ROOMS && most <= MAX_ROOMS, "{counts:?}");
+        assert!(counts.len() >= 3, "at least three room counts: {counts:?}");
+        // No single count dominates: the floors really differ.
+        assert!(counts.values().all(|&n| 2 * n < SAMPLE), "{counts:?}");
+    }
+
+    #[test]
+    fn the_last_level_of_cuts_is_random_and_the_others_are_fixed() {
+        let mut rng = ChaCha8Rng::seed_from_u64(7);
+        for _ in 0..100 {
+            assert!((0..ALWAYS_CUT_DEPTH).all(|depth| should_cut(depth, &mut rng)));
+            assert!(!should_cut(MAX_CUT_DEPTH, &mut rng));
+        }
+        let last: Vec<bool> = (0..100)
+            .map(|_| should_cut(ALWAYS_CUT_DEPTH, &mut rng))
+            .collect();
+        assert!(last.contains(&true) && last.contains(&false));
     }
 
     #[test]

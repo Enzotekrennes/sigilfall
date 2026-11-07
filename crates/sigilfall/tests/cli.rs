@@ -1,10 +1,21 @@
 //! Command-line tests of the real `sigilfall` executable.
 //!
 //! Only invocations that end before the game takes over the terminal are
-//! run here (invalid arguments, `--help`, `--version`), so the tests need no
-//! terminal and leave none in a changed state.
+//! run here (invalid arguments, `--help`, `--version`, a redirected output),
+//! so the tests need no terminal and leave none in a changed state.
 
-use std::process::{Command, Output};
+use std::io::Read as _;
+use std::process::{Command, Output, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
+
+/// How long the game may take to refuse a redirected output. Refusing takes
+/// milliseconds; the margin absorbs a slow, loaded CI machine, while a game
+/// stuck waiting would never end.
+const REFUSAL_DEADLINE: Duration = Duration::from_secs(10);
+
+/// Pause between two checks of whether the game has ended.
+const POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 /// Runs the built `sigilfall` executable with `arguments` and returns what
 /// it printed and how it ended.
@@ -36,4 +47,54 @@ fn help_lists_the_seed_and_ascii_options() {
     assert!(output.status.success(), "{stdout}");
     assert!(stdout.contains("--seed <SEED>"), "{stdout}");
     assert!(stdout.contains("--ascii"), "{stdout}");
+}
+
+#[test]
+fn a_redirected_output_is_refused_at_once_with_a_clear_message() {
+    // Under `cargo test`, the pipes set up below are not terminals, just
+    // like `sigilfall --seed 42 > out.txt`.
+    let mut child = Command::new(env!("CARGO_BIN_EXE_sigilfall"))
+        .args(["--seed", "42"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start the sigilfall executable");
+
+    let started = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("check the sigilfall process") {
+            break status;
+        }
+        if started.elapsed() > REFUSAL_DEADLINE {
+            // Kill it so a regression fails the test instead of hanging it.
+            child.kill().expect("stop the stuck sigilfall process");
+            child.wait().expect("reap the stuck sigilfall process");
+            panic!("sigilfall still running after {REFUSAL_DEADLINE:?} with a redirected output");
+        }
+        thread::sleep(POLL_INTERVAL);
+    };
+    let mut stdout = Vec::new();
+    let mut stderr = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_end(&mut stdout)
+        .unwrap();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+
+    assert!(!status.success(), "{status:?}: {stderr}");
+    assert!(stdout.is_empty(), "nothing drawn on the redirected output");
+    assert!(!stderr.contains(''), "no terminal escape: {stderr:?}");
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(
+        stderr.contains("standard output is not a terminal"),
+        "{stderr}"
+    );
 }

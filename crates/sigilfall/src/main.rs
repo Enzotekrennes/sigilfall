@@ -14,7 +14,7 @@ mod input;
 mod theme;
 mod ui;
 
-use std::io::{self, Stdout};
+use std::io::{self, IsTerminal as _, Stdout};
 
 use anyhow::Context as _;
 use clap::Parser as _;
@@ -39,12 +39,14 @@ use crate::theme::{Appearance, ColorMode, ColorSupport, GlyphSet, Theme};
 ///
 /// # Errors
 ///
-/// Returns an error if the terminal cannot be prepared (for example when
-/// standard output is not a terminal), if reading input or drawing fails
+/// Returns an error, printed on standard error with exit code 1, if
+/// standard output is not a terminal (see [`require_terminal_output`]), if
+/// the terminal cannot be prepared, if reading input or drawing fails
 /// during the game, or if the terminal cannot be restored afterwards. The
 /// terminal is restored before any error is reported.
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    require_terminal_output()?;
     install_panic_hook();
 
     let theme = startup_theme(cli.glyph_set());
@@ -57,6 +59,28 @@ fn main() -> anyhow::Result<()> {
     );
     outcome?;
     restored
+}
+
+/// Refuses to start the game when standard output is not a terminal, as
+/// with `sigilfall > out.txt` or `sigilfall | less`.
+///
+/// The game draws full screens and reads single key presses, which only
+/// make sense in a terminal; on Windows, preparing a redirected output
+/// would leave the process waiting forever instead of failing. Checking
+/// first ends the process at once, before the terminal is touched.
+///
+/// # Errors
+///
+/// Returns an error that says standard output is redirected and how to
+/// start the game, when it is not a terminal.
+fn require_terminal_output() -> anyhow::Result<()> {
+    if io::stdout().is_terminal() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "standard output is not a terminal: Sigilfall draws on the screen, \
+         so start it without redirecting its output (no `>` or `|`)"
+    )
 }
 
 /// Chooses the theme from the terminal's colour support, read from the

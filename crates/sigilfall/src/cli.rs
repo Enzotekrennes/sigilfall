@@ -2,7 +2,7 @@
 //!
 //! Exposes [`Cli`], read from the process arguments by clap, which also
 //! generates `--help` and `--version`. An invalid value, such as
-//! `--seed abc`, is reported by clap with the accepted forms of the value
+//! `--seed abc` or `--seed -1`, is reported by clap with the accepted forms of the value
 //! and ends the process with a non-zero exit code, before the terminal is
 //! touched.
 
@@ -19,7 +19,10 @@ pub struct Cli {
     /// Seed of the run, to replay or share a dungeon: a number such as 42,
     /// or the seed shown in the game, such as 7F3A-91C2-0B5E-D4A8. A random
     /// seed is used when it is left out.
-    #[arg(long, value_name = "SEED")]
+    // A value that looks like a negative number, such as `--seed -1`, is
+    // taken as the seed, so it is refused with the accepted forms instead of
+    // being reported as an unknown option.
+    #[arg(long, value_name = "SEED", allow_negative_numbers = true)]
     pub seed: Option<Seed>,
 
     /// Draw with plain ASCII characters instead of Unicode glyphs, for fonts
@@ -109,6 +112,26 @@ mod tests {
             assert!(message.contains("such as 42"), "{message}");
             assert!(message.contains("7F3A-91C2-0B5E-D4A8"), "{message}");
         }
+    }
+
+    #[test]
+    fn a_negative_seed_is_refused_with_the_expected_format() {
+        for arguments in [&["--seed", "-1"][..], &["--seed=-1"], &["--seed", "-4.2"]] {
+            let error = parse(arguments).unwrap_err();
+            let message = error.to_string();
+
+            assert_eq!(error.kind(), ErrorKind::ValueValidation, "{message}");
+            assert!(message.contains("such as 42"), "{message}");
+            assert!(message.contains("7F3A-91C2-0B5E-D4A8"), "{message}");
+        }
+    }
+
+    #[test]
+    fn an_option_after_seed_is_not_taken_as_its_value() {
+        let error = parse(&["--seed", "--ascii"]).unwrap_err();
+
+        assert_ne!(error.kind(), ErrorKind::ValueValidation, "{error}");
+        assert_ne!(error.exit_code(), 0, "{error}");
     }
 
     #[test]
