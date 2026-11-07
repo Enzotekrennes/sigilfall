@@ -114,7 +114,7 @@ mod tests {
     /// returns the screen with the theme it was drawn with.
     fn screen(mode: ColorMode) -> (Buffer, Theme) {
         let theme = Theme::new(mode, GlyphSet::Unicode);
-        let game = Game::new(SEED);
+        let game = Game::in_fixed_room(SEED);
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         terminal.draw(|frame| render(frame, &game, &theme)).unwrap();
         (terminal.backend().buffer().clone(), theme)
@@ -224,7 +224,7 @@ mod tests {
     #[test]
     fn resize_message_is_drawn_in_the_text_colour_on_the_background() {
         let theme = Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode);
-        let game = Game::new(SEED);
+        let game = Game::in_fixed_room(SEED);
         let mut terminal = Terminal::new(TestBackend::new(60, 20)).unwrap();
         terminal.draw(|frame| render(frame, &game, &theme)).unwrap();
         let screen = terminal.backend().buffer();

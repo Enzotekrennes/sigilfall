@@ -4,7 +4,7 @@
 //! Exposes [`GlyphSet`] and [`Glyphs`]. The values come from section
 //! "Glyphes" of `docs/design.md`; every Unicode glyph there is present in
 //! Cascadia Mono, the default font of Windows Terminal. Only the glyphs of
-//! elements the game already has are listed: the others (arches, stairs,
+//! elements the game already has are listed: the others (arches,
 //! engravings, creatures, items, sigil grid, frames) join this table with
 //! the tasks that bring them to the screen.
 
@@ -28,6 +28,8 @@ pub struct Glyphs {
     pub wall: char,
     /// The player: `@` in both sets.
     pub player: char,
+    /// Stairs down: `▼`, or `>` in ASCII.
+    pub stairs: char,
     /// Left arrow of the key help: `←`, or `<` in ASCII.
     pub arrow_left: char,
     /// Up arrow of the key help: `↑`, or `^` in ASCII.
@@ -49,6 +51,7 @@ impl Glyphs {
                 floor: '·',
                 wall: '▒',
                 player: '@',
+                stairs: '▼',
                 arrow_left: '←',
                 arrow_up: '↑',
                 arrow_right: '→',
@@ -59,6 +62,7 @@ impl Glyphs {
                 floor: '.',
                 wall: '#',
                 player: '@',
+                stairs: '>',
                 arrow_left: '<',
                 arrow_up: '^',
                 arrow_right: '>',
@@ -87,11 +91,12 @@ mod tests {
     use super::*;
 
     /// Every glyph of `glyphs`, with its field name for failure messages.
-    fn all(glyphs: Glyphs) -> [(&'static str, char); 8] {
+    fn all(glyphs: Glyphs) -> [(&'static str, char); 9] {
         [
             ("floor", glyphs.floor),
             ("wall", glyphs.wall),
             ("player", glyphs.player),
+            ("stairs", glyphs.stairs),
             ("arrow_left", glyphs.arrow_left),
             ("arrow_up", glyphs.arrow_up),
             ("arrow_right", glyphs.arrow_right),
@@ -108,6 +113,7 @@ mod tests {
             ("floor", '\u{00B7}'),
             ("wall", '\u{2592}'),
             ("player", '\u{0040}'),
+            ("stairs", '\u{25BC}'),
             ("arrow_left", '\u{2190}'),
             ("arrow_up", '\u{2191}'),
             ("arrow_right", '\u{2192}'),
@@ -128,7 +134,7 @@ mod tests {
     fn map_glyphs_are_distinct_in_both_sets() {
         for set in [GlyphSet::Unicode, GlyphSet::Ascii] {
             let glyphs = Glyphs::new(set);
-            let map = [glyphs.floor, glyphs.wall, glyphs.player];
+            let map = [glyphs.floor, glyphs.wall, glyphs.player, glyphs.stairs];
             for (i, a) in map.iter().enumerate() {
                 assert!(!map[i + 1..].contains(a), "{set:?}: {a:?} used twice");
             }

@@ -1,22 +1,26 @@
 //! A game in progress and its single entry point, [`Game::submit`].
 //!
 //! Exposes [`Game`] and [`PLAYER_START`]. The game owns the run's seed, the
-//! map, the actors and the scheduler. The player's action is applied, then the other actors
-//! take their turns until the player may act again, and everything that
-//! happened is returned as [`Event`]s. The game produces no text and draws
-//! nothing.
+//! map, the actors and the scheduler. A new game starts on the first
+//! generated floor of its seed (see the `generation` module). The player's
+//! action is applied, then the other actors take their turns until the
+//! player may act again, and everything that happened is returned as
+//! [`Event`]s. The game produces no text and draws nothing. Going down the
+//! stairs is not handled yet.
 
 use slotmap::SlotMap;
 
 use crate::action::{self, Action, ActionOutcome};
 use crate::actor::{Actor, ActorId};
 use crate::event::Event;
+use crate::generation::{self, FIRST_DEPTH};
 use crate::geometry::Position;
 use crate::map::Map;
 use crate::rng::Seed;
 use crate::schedule::{NORMAL_SPEED, Scheduler, spend_energy};
 
-/// Cell of the fixed room where the player starts.
+/// Cell where the player starts in the fixed room of
+/// [`Game::in_fixed_room`].
 ///
 /// A floor cell near the left wall whose eight neighbours are all floor, so
 /// every direction can be tried on the first turn, and away from the pillar
@@ -43,23 +47,41 @@ pub struct Game {
 }
 
 impl Game {
-    /// Starts a game of the run identified by `seed`, on the fixed room,
-    /// with the player at [`PLAYER_START`] moving at normal speed and no
-    /// other actor.
+    /// Starts a game of the run identified by `seed`, on its first floor
+    /// (`generation::generate(seed, FIRST_DEPTH)`), with the player on that
+    /// floor's start cell, moving at normal speed, and no other actor.
     ///
-    /// The seed is kept for the floors and random choices to come (see
-    /// [`Seed::stream`]); the fixed room does not use it yet. Time is
-    /// advanced until the player's first turn, so [`Game::submit`] can be
-    /// called right away.
+    /// The same seed always gives the same floor. Time is advanced until the
+    /// player's first turn, so [`Game::submit`] can be called right away.
     pub fn new(seed: Seed) -> Self {
+        let floor = generation::generate(seed, FIRST_DEPTH);
+        Self::start(seed, floor.map, floor.start)
+    }
+
+    /// Starts a game of the run identified by `seed` in the hand-made room of
+    /// [`Map::fixed_room`] instead of a generated floor, with the player at
+    /// [`PLAYER_START`] and no other actor.
+    ///
+    /// The room never changes, whatever the seed, which makes it the ground
+    /// of tests that need known walls and distances. The seed is only kept
+    /// (see [`Game::seed`]).
+    pub fn in_fixed_room(seed: Seed) -> Self {
+        Self::start(seed, Map::fixed_room(), PLAYER_START)
+    }
+
+    /// Starts a game on `map` with the player alone at `start`, at normal
+    /// speed, and runs the clock to the player's first turn.
+    ///
+    /// `start` is expected to be walkable; both callers guarantee it.
+    fn start(seed: Seed, map: Map, start: Position) -> Self {
         let mut actors = SlotMap::with_key();
-        let player = actors.insert(Actor::new(PLAYER_START, NORMAL_SPEED));
+        let player = actors.insert(Actor::new(start, NORMAL_SPEED));
         let mut scheduler = Scheduler::default();
         scheduler.enrol(player);
 
         let mut game = Self {
             seed,
-            map: Map::fixed_room(),
+            map,
             actors,
             player,
             scheduler,
@@ -111,7 +133,8 @@ impl Game {
         events
     }
 
-    /// Returns the seed of this run, as given to [`Game::new`].
+    /// Returns the seed of this run, as given to [`Game::new`] or
+    /// [`Game::in_fixed_room`].
     pub const fn seed(&self) -> Seed {
         self.seed
     }
@@ -247,10 +270,17 @@ impl Game {
 mod tests {
     use super::*;
     use crate::geometry::Direction;
+    use crate::map::Tile;
+    use crate::path::DijkstraMap;
     use crate::schedule::ACTION_THRESHOLD;
 
     /// Seed of every test game; the fixed room does not depend on it.
     const SEED: Seed = Seed::new(42);
+
+    /// A new game in the fixed room, the ground of most tests here.
+    fn fixed_room_game() -> Game {
+        Game::in_fixed_room(SEED)
+    }
 
     /// Energy of every actor, keyed for comparison before and after a turn.
     fn energies(game: &Game) -> Vec<(ActorId, i32)> {
@@ -259,7 +289,7 @@ mod tests {
 
     #[test]
     fn player_starts_on_open_floor_and_may_act() {
-        let game = Game::new(SEED);
+        let game = fixed_room_game();
         let player = game.player_actor();
 
         assert_eq!(player.position(), PLAYER_START);
@@ -276,7 +306,7 @@ mod tests {
 
     #[test]
     fn move_returns_a_moved_event_and_updates_the_player() {
-        let mut game = Game::new(SEED);
+        let mut game = fixed_room_game();
         let player = game.player();
         let ticks = game.ticks();
 
@@ -297,7 +327,7 @@ mod tests {
 
     #[test]
     fn wait_returns_a_waited_event_and_lets_time_pass() {
-        let mut game = Game::new(SEED);
+        let mut game = fixed_room_game();
         let player = game.player();
         let ticks = game.ticks();
 
@@ -310,7 +340,7 @@ mod tests {
 
     #[test]
     fn other_actors_act_before_the_player_turn_returns() {
-        let mut game = Game::new(SEED);
+        let mut game = fixed_room_game();
         let player = game.player();
         let fast = game.spawn_actor(Position::new(10, 3), 2 * NORMAL_SPEED);
 
@@ -335,7 +365,7 @@ mod tests {
 
     #[test]
     fn double_speed_actor_acts_twice_per_normal_player_action() {
-        let mut game = Game::new(SEED);
+        let mut game = fixed_room_game();
         let player = game.player();
         let fast = game.spawn_actor(Position::new(10, 3), 2 * NORMAL_SPEED);
         let slow = game.spawn_actor(Position::new(12, 3), NORMAL_SPEED / 2);
@@ -357,7 +387,7 @@ mod tests {
 
     #[test]
     fn wall_blocks_the_player_without_spending_time() {
-        let mut game = Game::new(SEED);
+        let mut game = fixed_room_game();
         let player = game.player();
         let fast = game.spawn_actor(Position::new(10, 3), 2 * NORMAL_SPEED);
         game.submit(Action::Wait);
@@ -391,7 +421,7 @@ mod tests {
 
     #[test]
     fn another_actor_blocks_the_player() {
-        let mut game = Game::new(SEED);
+        let mut game = fixed_room_game();
         let player = game.player();
         let east = PLAYER_START.step(Direction::East);
         game.spawn_actor(east, NORMAL_SPEED);
@@ -412,6 +442,42 @@ mod tests {
     }
 
     #[test]
+    fn a_new_game_starts_on_the_first_generated_floor() {
+        for value in [0, 42, u64::MAX] {
+            let seed = Seed::new(value);
+            let floor = generation::generate(seed, FIRST_DEPTH);
+
+            let game = Game::new(seed);
+
+            assert_eq!(game.map(), floor.map());
+            assert_eq!(game.player_actor().position(), floor.start());
+            assert_eq!(game.actors().count(), 1);
+            assert!(game.player_actor().energy() >= ACTION_THRESHOLD);
+        }
+    }
+
+    #[test]
+    fn the_player_can_walk_onto_the_stairs() {
+        let seed = Seed::new(42);
+        let mut game = Game::new(seed);
+        let floor = generation::generate(seed, FIRST_DEPTH);
+        let stairs = floor.stairs();
+        let distances = DijkstraMap::new(floor.map(), [stairs]);
+
+        // Follow the way down to the stairs; each step must be accepted.
+        while let Some(direction) = distances.downhill(game.player_actor().position()) {
+            let events = game.submit(Action::Move(direction));
+            assert!(
+                matches!(events.as_slice(), [Event::Moved { .. }]),
+                "{events:?}"
+            );
+        }
+
+        assert_eq!(game.player_actor().position(), stairs);
+        assert_eq!(game.map().tile(stairs), Some(Tile::StairsDown));
+    }
+
+    #[test]
     fn a_game_keeps_the_seed_it_was_started_with() {
         for value in [0, 42, u64::MAX] {
             let mut game = Game::new(Seed::new(value));
@@ -423,7 +489,7 @@ mod tests {
 
     #[test]
     fn a_new_game_has_no_player_turn_yet() {
-        let game = Game::new(SEED);
+        let game = fixed_room_game();
 
         assert_eq!(game.player_turns(), 0);
         assert_eq!(game.ticks(), 1, "the clock already ran to the first turn");
@@ -431,7 +497,7 @@ mod tests {
 
     #[test]
     fn player_turns_count_only_player_actions_that_took_time() {
-        let mut game = Game::new(SEED);
+        let mut game = fixed_room_game();
         let fast = game.spawn_actor(Position::new(10, 3), 2 * NORMAL_SPEED);
         let slow = game.spawn_actor(Position::new(12, 3), NORMAL_SPEED / 2);
         // Four moves west reach the wall, the fifth is refused, then waits.
@@ -481,6 +547,6 @@ mod tests {
     #[test]
     #[should_panic(expected = "cannot spawn an actor at (5, 5)")]
     fn spawning_on_an_occupied_cell_panics() {
-        Game::new(SEED).spawn_actor(PLAYER_START, NORMAL_SPEED);
+        fixed_room_game().spawn_actor(PLAYER_START, NORMAL_SPEED);
     }
 }

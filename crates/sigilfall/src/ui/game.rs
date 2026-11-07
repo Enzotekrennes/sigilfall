@@ -141,6 +141,7 @@ const fn tile_look(tile: Tile, theme: &Theme) -> (char, Style) {
     match tile {
         Tile::Floor => (theme.glyphs.floor, theme.floor),
         Tile::Wall => (theme.glyphs.wall, theme.wall_seen),
+        Tile::StairsDown => (theme.glyphs.stairs, theme.stairs),
     }
 }
 

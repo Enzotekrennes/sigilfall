@@ -60,6 +60,19 @@ impl App {
         }
     }
 
+    /// Starts the application on `game` instead of a new game of a seed,
+    /// so tests can play in a map they know, such as the fixed room of
+    /// `Game::in_fixed_room`.
+    #[cfg(test)]
+    pub const fn with_game(theme: Theme, game: Game) -> Self {
+        Self {
+            game,
+            state: State::Playing,
+            theme,
+            screen_size: Cell::new(None),
+        }
+    }
+
     /// Returns the active screen, so tests can check it.
     #[cfg(test)]
     pub const fn state(&self) -> State {
@@ -159,13 +172,22 @@ mod tests {
     /// is the one of the game screen mock-up in `docs/design.md`.
     const SEED: Seed = Seed::new(0x7F3A_91C2_0B5E_D4A8);
 
-    /// A new application on [`SEED`], drawn in the default mode of Windows
-    /// Terminal: dark 24-bit colours and Unicode glyphs.
+    /// A new application on [`SEED`] in the fixed room, drawn in the
+    /// default mode of Windows Terminal: dark 24-bit colours and Unicode
+    /// glyphs.
+    ///
+    /// The tests play in the fixed room, whose walls and start never change,
+    /// rather than on the generated floor of the seed.
     fn new_app() -> App {
-        App::new(
+        fixed_room_app(
             Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode),
             SEED,
         )
+    }
+
+    /// A new application on `seed` in the fixed room, drawn with `theme`.
+    fn fixed_room_app(theme: Theme, seed: Seed) -> App {
+        App::with_game(theme, Game::in_fixed_room(seed))
     }
 
     /// A key press of `code`, as crossterm reports it.
@@ -207,7 +229,7 @@ mod tests {
 
     #[test]
     fn ascii_glyphs_replace_every_unicode_glyph() {
-        let app = App::new(Theme::new(ColorMode::TrueColorDark, GlyphSet::Ascii), SEED);
+        let app = fixed_room_app(Theme::new(ColorMode::TrueColorDark, GlyphSet::Ascii), SEED);
 
         let text = render(&app, 80, 24).backend().to_string();
 
@@ -325,7 +347,7 @@ mod tests {
 
     #[test]
     fn resize_message_uses_the_ascii_dimension_sign() {
-        let app = App::new(Theme::new(ColorMode::Ansi16, GlyphSet::Ascii), SEED);
+        let app = fixed_room_app(Theme::new(ColorMode::Ansi16, GlyphSet::Ascii), SEED);
 
         let text = render(&app, 60, 20).backend().to_string();
 
@@ -836,7 +858,7 @@ mod tests {
 
         #[test]
         fn the_seed_stays_at_the_right_end_of_a_wider_terminal() {
-            let app = App::new(
+            let app = fixed_room_app(
                 Theme::new(ColorMode::TrueColorDark, GlyphSet::Ascii),
                 Seed::new(42),
             );

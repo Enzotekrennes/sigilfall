@@ -3,8 +3,9 @@
 //! Exposes [`Tile`] and [`Map`], with bounds-checked access where anything
 //! outside the grid counts as impassable, [`Map::can_step`], the one rule
 //! deciding which single steps are allowed, and [`Map::fixed_room`], a
-//! hand-made room used until dungeon generation exists. Field of view,
-//! remembered cells and engraved glyphs are not handled here yet.
+//! hand-made room kept for tests. Building generated floors is the job of the
+//! `generation` module. Field of view, remembered cells and engraved glyphs
+//! are not handled here yet.
 
 use crate::geometry::{Direction, Position};
 
@@ -33,13 +34,16 @@ pub enum Tile {
     Floor,
     /// Solid rock that blocks movement.
     Wall,
+    /// Stairs leading down to the next floor. Actors can stand on them like
+    /// on floor; going down is a separate action of the player.
+    StairsDown,
 }
 
 impl Tile {
     /// Returns whether an actor can stand on this tile.
     pub const fn is_walkable(self) -> bool {
         match self {
-            Self::Floor => true,
+            Self::Floor | Self::StairsDown => true,
             Self::Wall => false,
         }
     }
@@ -70,8 +74,9 @@ impl Map {
     /// Builds the fixed test room: a floor area enclosed by walls on every
     /// edge, with one wall pillar at [`FIXED_ROOM_PILLAR`].
     ///
-    /// The room is 30 columns by 12 rows, walls included. It stands in for a
-    /// generated dungeon floor until procedural generation is implemented.
+    /// The room is 30 columns by 12 rows, walls included. Its layout never
+    /// changes, which makes it the ground of the movement and scheduling
+    /// tests; games are played on generated floors.
     pub fn fixed_room() -> Self {
         let mut map = Self::new(FIXED_ROOM_WIDTH, FIXED_ROOM_HEIGHT, Tile::Floor);
         for (index, tile) in map.tiles.iter_mut().enumerate() {
@@ -220,6 +225,15 @@ mod tests {
             assert!(!map.is_walkable(outside));
         }
         assert!(map.is_walkable(Position::new(2, 1)));
+    }
+
+    #[test]
+    fn stairs_are_walkable_like_floor() {
+        let mut map = Map::new(2, 1, Tile::Wall);
+        map.set_tile(Position::new(1, 0), Tile::StairsDown);
+
+        assert!(map.is_walkable(Position::new(1, 0)));
+        assert!(map.can_step(Position::new(0, 0), Direction::East));
     }
 
     #[test]

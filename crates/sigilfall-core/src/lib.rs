@@ -9,6 +9,7 @@ pub mod action;
 pub mod actor;
 pub mod event;
 pub mod game;
+pub mod generation;
 pub mod geometry;
 pub mod map;
 pub mod path;
