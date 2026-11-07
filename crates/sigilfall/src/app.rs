@@ -310,4 +310,555 @@ mod tests {
             assert_eq!(text.contains('@'), fits, "{width} × {height}:\n{text}");
         }
     }
+
+    /// Acceptance tests of "move around the dungeon" (F1), written from the
+    /// player's side: only keys go in and only the rendered screen and the
+    /// game clock are read back.
+    mod acceptance {
+        use std::path::PathBuf;
+        use std::process::{Command, Stdio};
+
+        use ratatui::buffer::Buffer;
+        use ratatui::crossterm::event::KeyEventState;
+        use sigilfall_core::map::FIXED_ROOM_PILLAR;
+
+        use super::*;
+
+        /// Environment variable that turns the child-process tests below
+        /// into the program that panics; absent in a normal test run.
+        const CHILD_MODE: &str = "SIGILFALL_TEST_PANIC_CHILD";
+
+        /// Value of [`CHILD_MODE`] for the child that installs the
+        /// production panic hook before panicking.
+        const WITH_HOOK: &str = "with-hook";
+
+        /// Value of [`CHILD_MODE`] for the control child that panics without
+        /// the hook, to show the checks below can fail.
+        const WITHOUT_HOOK: &str = "without-hook";
+
+        /// Terminal sequence that leaves the alternate screen.
+        const LEAVE_ALTERNATE_SCREEN: &str = "\x1b[?1049l";
+
+        /// Terminal sequence that shows the cursor again.
+        const SHOW_CURSOR: &str = "\x1b[?25h";
+
+        /// The screen cell `(column, row)` where the map's cell `position`
+        /// is drawn: the map starts on row 1, under the status line.
+        fn screen_cell_of(position: Position) -> (u16, u16) {
+            (
+                u16::try_from(position.x).unwrap(),
+                u16::try_from(position.y).unwrap() + 1,
+            )
+        }
+
+        /// Every cell of the buffer that shows the player glyph.
+        fn player_cells(buffer: &Buffer) -> Vec<(u16, u16)> {
+            let area = buffer.area;
+            (0..area.height)
+                .flat_map(|y| (0..area.width).map(move |x| (x, y)))
+                .filter(|&(x, y)| buffer[(x, y)].symbol() == "@")
+                .collect()
+        }
+
+        /// The game screen of `app` at 80 × 24.
+        fn screen(app: &App) -> Buffer {
+            render(app, 80, 24).backend().buffer().clone()
+        }
+
+        /// The text of row `y` of `buffer`, one symbol per cell.
+        fn row_text(buffer: &Buffer, y: u16) -> String {
+            (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect()
+        }
+
+        /// The whole screen of `buffer` as text, rows joined by newlines;
+        /// unlike the backend's own display it accepts a zero-sized screen.
+        fn screen_text(buffer: &Buffer) -> String {
+            (0..buffer.area.height)
+                .map(|y| row_text(buffer, y))
+                .collect::<Vec<_>>()
+                .join(
+                    "
+",
+                )
+        }
+
+        /// The number shown after "Turn" on the status line.
+        fn turn_shown(app: &App) -> u64 {
+            let first_line = row_text(&screen(app), 0);
+            first_line
+                .trim()
+                .strip_prefix("Turn ")
+                .and_then(|value| value.trim().parse().ok())
+                .unwrap_or_else(|| panic!("no turn counter on: {first_line:?}"))
+        }
+
+        /// Presses `code` `times` times and checks the player ended where
+        /// `expected` says, so a route to a test position is verified.
+        fn walk(app: &mut App, steps: &[(KeyCode, usize)], expected: Position) {
+            for &(code, times) in steps {
+                press_all(app, &vec![code; times]);
+            }
+            assert_eq!(player_position(app), expected, "route {steps:?}");
+        }
+
+        /// The key press as a keypad digit with Num Lock on: the character
+        /// is a digit and the key state says it comes from the keypad.
+        fn keypad(digit: char) -> KeyEvent {
+            KeyEvent::new_with_kind_and_state(
+                KeyCode::Char(digit),
+                KeyModifiers::NONE,
+                KeyEventKind::Press,
+                KeyEventState::KEYPAD,
+            )
+        }
+
+        #[test]
+        fn every_movement_key_moves_one_cell_in_its_direction() {
+            // Direction, arrow or navigation key, digit row / keypad digit
+            // and vi key, as listed in the keymap documentation.
+            let bindings = [
+                (Direction::North, KeyCode::Up, '8', 'k'),
+                (Direction::NorthEast, KeyCode::PageUp, '9', 'u'),
+                (Direction::East, KeyCode::Right, '6', 'l'),
+                (Direction::SouthEast, KeyCode::PageDown, '3', 'n'),
+                (Direction::South, KeyCode::Down, '2', 'j'),
+                (Direction::SouthWest, KeyCode::End, '1', 'b'),
+                (Direction::West, KeyCode::Left, '4', 'h'),
+                (Direction::NorthWest, KeyCode::Home, '7', 'y'),
+            ];
+
+            for (direction, navigation, digit, vi) in bindings {
+                let events = [
+                    press(navigation),
+                    press(KeyCode::Char(digit)),
+                    keypad(digit),
+                    press(KeyCode::Char(vi)),
+                ];
+                for key in events {
+                    let mut app = new_app();
+                    let ticks = app.game().ticks();
+
+                    app.handle_key(key);
+
+                    let target = PLAYER_START.step(direction);
+                    assert_eq!(player_position(&app), target, "{direction:?} by {key:?}");
+                    assert_eq!(app.game().ticks(), ticks + 1, "{direction:?} by {key:?}");
+                    let buffer = screen(&app);
+                    assert_eq!(
+                        player_cells(&buffer),
+                        [screen_cell_of(target)],
+                        "{direction:?} by {key:?}: one @, one cell from the start"
+                    );
+                    assert_eq!(turn_shown(&app), ticks + 1);
+                }
+            }
+        }
+
+        #[test]
+        fn moving_leaves_floor_behind_and_draws_a_single_player() {
+            let mut app = new_app();
+            let start_cell = screen_cell_of(PLAYER_START);
+
+            app.handle_key(press(KeyCode::Char('l')));
+
+            let buffer = screen(&app);
+            assert_eq!(
+                buffer[start_cell].symbol(),
+                "·",
+                "the old cell is floor again"
+            );
+            assert_eq!(player_cells(&buffer).len(), 1);
+        }
+
+        #[test]
+        fn a_long_walk_follows_every_diagonal_and_returns_to_the_start() {
+            let mut app = new_app();
+            let there_and_back = [
+                KeyCode::Char('u'),
+                KeyCode::Char('u'),
+                KeyCode::Char('n'),
+                KeyCode::Char('n'),
+                KeyCode::Char('b'),
+                KeyCode::Char('b'),
+                KeyCode::Char('y'),
+                KeyCode::Char('y'),
+            ];
+
+            press_all(&mut app, &there_and_back);
+
+            assert_eq!(player_position(&app), PLAYER_START);
+            assert_eq!(turn_shown(&app), 1 + 8);
+        }
+
+        #[test]
+        fn the_pillar_blocks_a_move_from_each_of_its_eight_sides() {
+            // Start (5, 5); the pillar is at (15, 6). Each route reaches a
+            // neighbour of the pillar by moves that are themselves legal.
+            let right = KeyCode::Char('l');
+            let down = KeyCode::Char('j');
+            let cases = [
+                (
+                    vec![(right, 9)],
+                    Position::new(14, 5),
+                    'n',
+                    "north-west side",
+                ),
+                (vec![(right, 10)], Position::new(15, 5), 'j', "north side"),
+                (
+                    vec![(right, 11)],
+                    Position::new(16, 5),
+                    'b',
+                    "north-east side",
+                ),
+                (
+                    vec![(right, 9), (down, 1)],
+                    Position::new(14, 6),
+                    'l',
+                    "west side",
+                ),
+                (
+                    vec![(right, 11), (down, 1)],
+                    Position::new(16, 6),
+                    'h',
+                    "east side",
+                ),
+                (
+                    vec![(right, 9), (down, 2)],
+                    Position::new(14, 7),
+                    'u',
+                    "south-west side",
+                ),
+                (
+                    vec![(right, 9), (down, 2), (right, 1)],
+                    Position::new(15, 7),
+                    'k',
+                    "south side",
+                ),
+                (
+                    vec![(right, 11), (down, 2)],
+                    Position::new(16, 7),
+                    'y',
+                    "south-east side",
+                ),
+            ];
+            assert_eq!(FIXED_ROOM_PILLAR, Position::new(15, 6));
+
+            for (route, from, towards_pillar, side) in cases {
+                let mut app = new_app();
+                walk(&mut app, &route, from);
+                let ticks = app.game().ticks();
+                let before = screen(&app);
+
+                app.handle_key(press(KeyCode::Char(towards_pillar)));
+
+                assert_eq!(player_position(&app), from, "{side}");
+                assert_eq!(app.game().ticks(), ticks, "{side}: no time passes");
+                assert_eq!(screen(&app), before, "{side}: the screen is unchanged");
+                assert_eq!(turn_shown(&app), ticks, "{side}");
+            }
+        }
+
+        #[test]
+        fn the_outer_walls_block_every_move_that_would_enter_them() {
+            // (1, 1) is the top-left floor cell, (28, 10) the bottom-right one.
+            let corners = [
+                (
+                    [(KeyCode::Char('y'), 4)],
+                    Position::new(1, 1),
+                    "kyuhb",
+                    "top-left corner",
+                ),
+                (
+                    [(KeyCode::Char('n'), 5)],
+                    Position::new(10, 10),
+                    "jnb",
+                    "bottom wall",
+                ),
+            ];
+
+            for (route, from, blocked_keys, place) in corners {
+                let mut app = new_app();
+                walk(&mut app, &route, from);
+                let ticks = app.game().ticks();
+                let before = screen(&app);
+
+                for key in blocked_keys.chars() {
+                    app.handle_key(press(KeyCode::Char(key)));
+                }
+
+                assert_eq!(player_position(&app), from, "{place}");
+                assert_eq!(app.game().ticks(), ticks, "{place}: no time passes");
+                assert_eq!(screen(&app), before, "{place}: the screen is unchanged");
+            }
+        }
+
+        #[test]
+        fn the_bottom_right_corner_is_enclosed_too() {
+            let mut app = new_app();
+            walk(
+                &mut app,
+                &[(KeyCode::Char('n'), 5), (KeyCode::Char('l'), 18)],
+                Position::new(28, 10),
+            );
+            let ticks = app.game().ticks();
+
+            for key in ['j', 'l', 'n', 'u', 'b'] {
+                app.handle_key(press(KeyCode::Char(key)));
+            }
+            // The arrows, keypad digits and navigation keys are refused alike.
+            for key in [
+                KeyCode::Down,
+                KeyCode::Right,
+                KeyCode::PageDown,
+                KeyCode::End,
+            ] {
+                app.handle_key(press(key));
+            }
+            app.handle_key(keypad('3'));
+
+            assert_eq!(player_position(&app), Position::new(28, 10));
+            assert_eq!(app.game().ticks(), ticks);
+        }
+
+        #[test]
+        fn a_refused_move_does_not_prevent_the_next_legal_one() {
+            let mut app = new_app();
+            walk(&mut app, &[(KeyCode::Char('y'), 4)], Position::new(1, 1));
+            let ticks = app.game().ticks();
+
+            press_all(&mut app, &[KeyCode::Char('k'), KeyCode::Char('l')]);
+
+            assert_eq!(player_position(&app), Position::new(2, 1));
+            assert_eq!(app.game().ticks(), ticks + 1, "only the legal move counts");
+        }
+
+        #[test]
+        fn a_game_started_in_a_too_small_terminal_asks_for_more_room() {
+            let app = new_app();
+            let sizes = [
+                (0, 0),
+                (1, 1),
+                (30, 1),
+                (79, 24),
+                (80, 23),
+                (79, 23),
+                (60, 20),
+                (300, 10),
+                (10, 300),
+                (79, 200),
+                (200, 23),
+            ];
+
+            for (width, height) in sizes {
+                let text = screen_text(render(&app, width, height).backend().buffer());
+
+                assert!(!text.contains('@'), "{width} × {height}:\n{text}");
+                assert!(!text.contains("Turn"), "{width} × {height}:\n{text}");
+                if width >= 30 && height >= 2 {
+                    assert!(text.contains("Enlarge"), "{width} × {height}:\n{text}");
+                }
+            }
+        }
+
+        #[test]
+        fn the_resize_message_gives_the_target_and_the_current_size() {
+            let app = new_app();
+
+            let text = render(&app, 79, 24).backend().to_string();
+
+            assert!(
+                text.contains("Enlarge the terminal to 80 × 24 (current: 79 × 24)."),
+                "{text}"
+            );
+        }
+
+        #[test]
+        fn shrinking_and_enlarging_keeps_the_game_exactly_as_it_was() {
+            let mut app = new_app();
+            press_all(
+                &mut app,
+                &[KeyCode::Char('l'), KeyCode::Char('n'), KeyCode::Char('.')],
+            );
+            let before = screen(&app);
+            let position = player_position(&app);
+            let ticks = app.game().ticks();
+            let mut terminal = render(&app, 80, 24);
+
+            for (width, height) in [(40, 10), (1, 1), (0, 0), (79, 24), (80, 24)] {
+                terminal.backend_mut().resize(width, height);
+                terminal.draw(|frame| app.render(frame)).unwrap();
+            }
+
+            assert_eq!(terminal.backend().buffer(), &before);
+            assert_eq!(player_position(&app), position);
+            assert_eq!(app.game().ticks(), ticks);
+        }
+
+        #[test]
+        fn key_releases_and_repeats_never_make_time_pass() {
+            let mut codes = vec![
+                KeyCode::Up,
+                KeyCode::Down,
+                KeyCode::Left,
+                KeyCode::Right,
+                KeyCode::Home,
+                KeyCode::End,
+                KeyCode::PageUp,
+                KeyCode::PageDown,
+                KeyCode::KeypadBegin,
+                KeyCode::Enter,
+                KeyCode::Tab,
+                KeyCode::Esc,
+                KeyCode::Backspace,
+                KeyCode::Delete,
+                KeyCode::Insert,
+            ];
+            codes.extend((b' '..=b'~').map(|byte| KeyCode::Char(char::from(byte))));
+            codes.extend((1..=12).map(KeyCode::F));
+            let modifiers = [
+                KeyModifiers::NONE,
+                KeyModifiers::SHIFT,
+                KeyModifiers::CONTROL,
+                KeyModifiers::ALT,
+            ];
+            let mut app = new_app();
+            let ticks = app.game().ticks();
+            let before = screen(&app);
+
+            for kind in [KeyEventKind::Release, KeyEventKind::Repeat] {
+                for &code in &codes {
+                    for modifiers in modifiers {
+                        app.handle_key(KeyEvent::new_with_kind(code, modifiers, kind));
+                    }
+                }
+            }
+
+            assert_eq!(app.state(), State::Playing, "no release or repeat quits");
+            assert_eq!(app.game().ticks(), ticks);
+            assert_eq!(player_position(&app), PLAYER_START);
+            assert_eq!(screen(&app), before);
+        }
+
+        #[test]
+        fn drawing_the_screen_again_and_again_never_makes_time_pass() {
+            let app = new_app();
+            let ticks = app.game().ticks();
+
+            for round in 0..200_u16 {
+                let (width, height) = if round % 3 == 0 {
+                    (80, 24)
+                } else {
+                    (60 + round % 70, 20)
+                };
+                drop(render(&app, width, height));
+            }
+
+            assert_eq!(app.game().ticks(), ticks);
+            assert_eq!(turn_shown(&app), ticks);
+        }
+
+        #[test]
+        fn a_new_game_starts_with_the_clock_at_one_and_counts_player_actions() {
+            // Documents what the status line shows: game ticks, which start
+            // at 1 because time runs once to the player's first turn.
+            let mut app = new_app();
+            assert_eq!(turn_shown(&app), 1);
+
+            press_all(&mut app, &[KeyCode::Char('l'), KeyCode::Char('.')]);
+
+            assert_eq!(turn_shown(&app), 3);
+        }
+
+        /// Path of the file that receives the output of a child process,
+        /// unique per test run and per child mode.
+        fn child_output_path(mode: &str) -> PathBuf {
+            std::env::temp_dir().join(format!("sigilfall-panic-{mode}-{}.log", std::process::id()))
+        }
+
+        /// Runs this test executable again, restricted to the child test, in
+        /// `mode`, with standard output and error written to one file so the
+        /// order of what was written is kept. Returns the exit code and the
+        /// captured output.
+        fn run_panicking_child(mode: &str) -> (Option<i32>, String) {
+            let path = child_output_path(mode);
+            let log = std::fs::File::create(&path).expect("create the child's log file");
+            let status = Command::new(std::env::current_exe().expect("path of the test binary"))
+                .args([
+                    "--exact",
+                    "app::tests::acceptance::panicking_child",
+                    "--nocapture",
+                ])
+                .env(CHILD_MODE, mode)
+                .env("TERM", "xterm-256color")
+                .env("RUST_BACKTRACE", "0")
+                .stdin(Stdio::null())
+                .stdout(log.try_clone().expect("duplicate the log handle"))
+                .stderr(log)
+                .status()
+                .expect("start the child test process");
+            let bytes = std::fs::read(&path).expect("read the child's log file");
+            drop(std::fs::remove_file(&path));
+            (status.code(), String::from_utf8_lossy(&bytes).into_owned())
+        }
+
+        /// The program the two tests below start: panics, with or without
+        /// the production panic hook installed first, depending on
+        /// [`CHILD_MODE`]. It does nothing in a normal test run.
+        #[test]
+        fn panicking_child() {
+            match std::env::var(CHILD_MODE).as_deref() {
+                Ok(WITH_HOOK) => {
+                    crate::install_panic_hook();
+                    panic!("deliberate panic of the hook test");
+                }
+                Ok(WITHOUT_HOOK) => panic!("deliberate panic of the control test"),
+                _ => {}
+            }
+        }
+
+        #[test]
+        fn a_panic_restores_the_terminal_before_its_message_is_printed() {
+            let (code, output) = run_panicking_child(WITH_HOOK);
+
+            assert_eq!(
+                code,
+                Some(101),
+                "the panic still ends the process:\n{output:?}"
+            );
+            let message = output
+                .find("deliberate panic of the hook test")
+                .unwrap_or_else(|| panic!("the panic message is printed:\n{output:?}"));
+            let leave = output
+                .find(LEAVE_ALTERNATE_SCREEN)
+                .unwrap_or_else(|| panic!("the alternate screen is left:\n{output:?}"));
+            let cursor = output
+                .find(SHOW_CURSOR)
+                .unwrap_or_else(|| panic!("the cursor is shown again:\n{output:?}"));
+            assert!(
+                leave < message,
+                "the screen is left before the message:\n{output:?}"
+            );
+            assert!(
+                cursor < message,
+                "the cursor is shown before the message:\n{output:?}"
+            );
+        }
+
+        #[test]
+        fn without_the_hook_a_panic_leaves_the_terminal_as_it_was() {
+            // Control: the same child without the hook emits no restore
+            // sequence, so the test above does detect the hook's work.
+            let (code, output) = run_panicking_child(WITHOUT_HOOK);
+
+            assert_eq!(code, Some(101), "{output:?}");
+            assert!(
+                output.contains("deliberate panic of the control test"),
+                "{output:?}"
+            );
+            assert!(!output.contains(LEAVE_ALTERNATE_SCREEN), "{output:?}");
+            assert!(!output.contains(SHOW_CURSOR), "{output:?}");
+        }
+    }
 }
