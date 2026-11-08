@@ -1,0 +1,20 @@
+---
+source: crates/sigilfall/src/ui/hud.rs
+expression: "panel_on_screen(&game, &content, 24, &theme)"
+---
+"│ HP            30/30 "
+"│ ██████████████████  "
+"│ Essence         6/6 "
+"│                     "
+"│ SIGILS          0/5 "
+"│ none yet            "
+"│                     "
+"│ IN VIEW             "
+"│ @ you               "
+"│ H lead hom ×2 26/28 "
+"│ s shade         7/7 "
+"│                     "
+"│                     "
+"│                     "
+"│                     "
+"│                     "

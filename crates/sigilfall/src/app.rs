@@ -2081,7 +2081,11 @@ mod tests {
                 panel_text(&screen, BAR_ROW),
                 format!("{}{}", "█".repeat(filled), "░".repeat(18 - filled))
             );
-            assert_eq!(panel_text(&screen, IN_VIEW_ROW + 2), "v cave gnat");
+            // D25: the gnat's line ends with its own health.
+            assert_eq!(
+                panel_text(&screen, IN_VIEW_ROW + 2),
+                format!("v cave gnat {}/999", gnat_hp(&app))
+            );
         }
 
         #[test]
@@ -2122,7 +2126,7 @@ mod tests {
         fn a_killing_blow_names_the_victim_and_removes_it_from_the_panel() {
             let (mut app, ids) = arena(dark(), &[("moth", east())]);
             let before = render(&app, 80, 24).backend().buffer().clone();
-            assert_eq!(panel_text(&before, IN_VIEW_ROW + 2), "v wax moth");
+            assert_eq!(panel_text(&before, IN_VIEW_ROW + 2), "v wax moth      1/1");
 
             app.handle_key(press(KeyCode::Char('l')));
 
@@ -3392,11 +3396,13 @@ mod tests {
         }
 
         #[test]
-        fn s1_the_hit_points_of_monsters_are_not_shown_anywhere() {
-            // Observation only (a decision of the owner is pending): the
-            // panel names the monster but gives no figure for its health.
+        fn s1_the_panel_gives_each_monster_its_current_and_maximum_health() {
+            // D25 (2026-11-08): the "in view" line of a monster ends with
+            // its hit points, current out of maximum, as figures only.
             let mut fight = Fight::new(Seed::new(42), dark(), &[("brute", east())]);
             fight.hit_east();
+            let hp = fight.app.game().actor(fight.ids[0]).unwrap().hp();
+            assert!(hp < 40, "the blow wounded the brute");
             let screen = fight.screen();
             // The "in view" list, from its title down: the essence and the
             // sigils count above it are figures of the player.
@@ -3406,11 +3412,12 @@ mod tests {
                 .collect();
             assert!(!panel.is_empty(), "the panel lists what is in view");
 
-            assert!(panel.iter().any(|l| l == "a brute"), "{panel:#?}");
-            assert!(
-                panel.iter().all(|l| !l.contains('/') && !l.contains('█')),
-                "{panel:#?}"
-            );
+            let line = panel
+                .iter()
+                .find(|l| l.starts_with("a brute"))
+                .unwrap_or_else(|| panic!("{panel:#?}"));
+            assert!(line.ends_with(&format!(" {hp}/40")), "{panel:#?}");
+            assert!(!panel.iter().any(|l| l.contains('█')), "{panel:#?}");
         }
 
         // --- Scenario 2 -------------------------------------------------
@@ -3466,7 +3473,9 @@ mod tests {
             assert_eq!(glyph_at(&fight.app, west), "v", "the gnat is still there");
             fight.assert_log_is_exact("two monsters");
             let panel: Vec<String> = (3..=10).map(|y| panel_text(&screen, y)).collect();
-            assert!(panel.iter().any(|l| l == "v cave gnat"), "{panel:#?}");
+            let gnat_hp = fight.app.game().actor(fight.ids[1]).unwrap().hp();
+            let gnat = format!("v cave gnat {gnat_hp}/999");
+            assert!(panel.contains(&gnat), "{panel:#?}");
             assert!(!panel.iter().any(|l| l.contains("moth")), "{panel:#?}");
         }
 

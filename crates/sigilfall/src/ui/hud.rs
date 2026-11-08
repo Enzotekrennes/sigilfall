@@ -12,6 +12,12 @@
 //! the player, one line per kind of monster, one per kind of item, one per
 //! kind of engraved glyph and one for the stairs down in view.
 //!
+//! Each monster line ends with that monster's hit points, current out of
+//! maximum ("4/9"), right-aligned like the player's value above and in the
+//! colour of the same [`HealthLevel`]; for a kind seen several times
+//! ("×2"), those of the most wounded of them. The figures and the count are
+//! never cut: the name is shortened first.
+//!
 //! The rows left under the fixed lines are shared by the sigil names and
 //! the "in view" block, in this order of priority: the "in view" block
 //! first, since it is the map's legend and names what threatens the player,
@@ -23,7 +29,9 @@
 //!
 //! Health is never told by colour alone: the value is written out, the bar
 //! is drawn with two glyphs, and below a quarter the value is preceded by
-//! `!`. Essence below the cost of a cast is marked `!` as well.
+//! `!`. Essence below the cost of a cast is marked `!` as well. A monster's
+//! health is written out too, without `!`: that mark warns of a danger to
+//! the player, which a dying monster is not.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -176,7 +184,7 @@ pub fn render(buffer: &mut Buffer, area: Rect, game: &Game, content: &Content, t
     ));
     lines.push(Line::default());
     let list_rows = usize::from(content_area.height).saturating_sub(lines.len());
-    lines.extend(in_view_lines(entries, list_rows, theme));
+    lines.extend(in_view_lines(entries, list_rows, content_area.width, theme));
     for (offset, line) in (0..content_area.height).zip(lines) {
         line.render(
             Rect {
@@ -321,14 +329,50 @@ fn sigils_block(
     lines
 }
 
-/// One line of the "in view" list: a glyph in its own style, then a name.
+/// One line of the "in view" list: a glyph in its own style, then a name,
+/// and for a monster its health right-aligned.
 struct Entry {
     /// The glyph the thing is drawn with on the map.
     glyph: char,
     /// Style of that glyph, the same as on the map.
     glyph_style: Style,
-    /// Name, possibly followed by a count.
+    /// Name, possibly followed by a count, already shortened so that the
+    /// health (and the blank column before it) fits on the line.
     name: String,
+    /// For a monster, its hit points as "4/9" in the style of their
+    /// [`HealthLevel`]; `None` for everything else.
+    health: Option<(String, Style)>,
+}
+
+/// One kind of monster in view, while [`in_view_entries`] groups them.
+struct MonsterKind<'game> {
+    /// Identifier of the definition shared by the monsters of this kind.
+    definition: &'game str,
+    /// Letter of the kind on the map.
+    glyph: char,
+    /// Style of that letter, the same as on the map.
+    style: Style,
+    /// How many monsters of this kind are in view.
+    count: usize,
+    /// Hit points of the most wounded monster of this kind in view.
+    hp: i32,
+    /// Maximum hit points of that same monster.
+    max_hp: i32,
+}
+
+impl MonsterKind<'_> {
+    /// Keeps the health of another monster of this kind, with `hp` hit
+    /// points out of `max_hp`, if it is more wounded than the one kept so
+    /// far: a lower share of its maximum, compared exactly in integers. On a
+    /// tie the monster seen first stays.
+    fn keep_most_wounded(&mut self, hp: i32, max_hp: i32) {
+        let candidate = i64::from(hp) * i64::from(self.max_hp);
+        let kept = i64::from(self.hp) * i64::from(max_hp);
+        if candidate < kept {
+            self.hp = hp;
+            self.max_hp = max_hp;
+        }
+    }
 }
 
 /// The entries of the "in view" block, names cut to fit `width` columns:
@@ -336,7 +380,9 @@ struct Entry {
 /// `Game::visible_monsters`, then one per kind of item in view, in the
 /// order of `Game::visible_items`, then the engraved glyphs in view, unread
 /// ones first, then the stairs down when in view, with "×2" after the name
-/// when several of a kind are in view.
+/// when several of a kind are in view. A monster entry also carries the
+/// health of the most wounded monster of its kind in view, and its name is
+/// shortened so that name, count and health share the `width` columns.
 /// Monsters come first since they threaten the player; items, which the
 /// player may pick up, come before the glyphs, as in the mock-up.
 fn in_view_entries(game: &Game, content: &Content, width: u16, theme: &Theme) -> Vec<Entry> {
@@ -344,23 +390,45 @@ fn in_view_entries(game: &Game, content: &Content, width: u16, theme: &Theme) ->
         glyph: theme.glyphs.player,
         glyph_style: theme.player,
         name: messages::PLAYER_IN_VIEW.to_owned(),
+        health: None,
     }];
-    let mut kinds: Vec<(&str, char, Style, usize)> = Vec::new();
+    let mut kinds: Vec<MonsterKind<'_>> = Vec::new();
     for monster in game.visible_monsters() {
-        if let Some(kind) = kinds.iter_mut().find(|kind| kind.0 == monster.definition) {
-            kind.3 += 1;
+        // A monster in view is always in the world; skipping one that is not
+        // only drops a line, it never shows wrong figures.
+        let Some(actor) = game.actor(monster.id) else {
+            continue;
+        };
+        let (hp, max_hp) = (actor.hp().max(0), actor.max_hp());
+        if let Some(kind) = kinds
+            .iter_mut()
+            .find(|kind| kind.definition == monster.definition)
+        {
+            kind.count += 1;
+            kind.keep_most_wounded(hp, max_hp);
         } else {
-            let glyph = theme.glyphs.creature(monster.family, monster.elite);
-            kinds.push((monster.definition, glyph, theme.creature(monster.family), 1));
+            kinds.push(MonsterKind {
+                definition: monster.definition,
+                glyph: theme.glyphs.creature(monster.family, monster.elite),
+                style: theme.creature(monster.family),
+                count: 1,
+                hp,
+                max_hp,
+            });
         }
     }
     let name_width = usize::from(width).saturating_sub(2);
-    entries.extend(kinds.into_iter().map(|(definition, glyph, style, count)| {
-        let name = messages::monster_name(content, definition);
+    entries.extend(kinds.into_iter().map(|kind| {
+        let health = format!("{}/{}", kind.hp, kind.max_hp);
+        let level = HealthLevel::of(kind.hp, kind.max_hp);
+        // One blank column between the name (or its count) and the figures.
+        let room = name_width.saturating_sub(health.chars().count() + 1);
+        let name = messages::monster_name(content, kind.definition);
         Entry {
-            glyph,
-            glyph_style: style,
-            name: counted_name(name, count, name_width, theme.glyphs.dimension),
+            glyph: kind.glyph,
+            glyph_style: kind.style,
+            name: counted_name(name, kind.count, room, theme.glyphs.dimension),
+            health: Some((health, level.style(theme))),
         }
     }));
     let mut items: Vec<(&str, char, usize)> = Vec::new();
@@ -380,6 +448,7 @@ fn in_view_entries(game: &Game, content: &Content, width: u16, theme: &Theme) ->
             name_width,
             theme.glyphs.dimension,
         ),
+        health: None,
     }));
     let (read, unread): (Vec<_>, Vec<_>) = game
         .engravings()
@@ -405,6 +474,7 @@ fn in_view_entries(game: &Game, content: &Content, width: u16, theme: &Theme) ->
             glyph,
             glyph_style,
             name: counted_name(name, count, name_width, theme.glyphs.dimension),
+            health: None,
         },
     ));
     if stairs_in_view(game) {
@@ -417,6 +487,7 @@ fn in_view_entries(game: &Game, content: &Content, width: u16, theme: &Theme) ->
                 name_width,
                 theme.glyphs.dimension,
             ),
+            health: None,
         });
     }
     entries
@@ -437,10 +508,16 @@ fn stairs_in_view(game: &Game) -> bool {
         .any(|cell| map.tile(cell) == Some(Tile::StairsDown) && game.is_visible(cell))
 }
 
-/// The "in view" block in at most `rows` rows: its title, then `entries`
-/// in order; when they overflow, the last row tells how many it replaces.
-/// Nothing at all when `rows` is 0.
-fn in_view_lines(entries: Vec<Entry>, rows: usize, theme: &Theme) -> Vec<Line<'static>> {
+/// The "in view" block in at most `rows` rows of `width` columns: its
+/// title, then `entries` in order, a monster's health right-aligned; when
+/// they overflow, the last row tells how many it replaces. Nothing at all
+/// when `rows` is 0.
+fn in_view_lines(
+    entries: Vec<Entry>,
+    rows: usize,
+    width: u16,
+    theme: &Theme,
+) -> Vec<Line<'static>> {
     if rows == 0 {
         return Vec::new();
     }
@@ -455,12 +532,12 @@ fn in_view_lines(entries: Vec<Entry>, rows: usize, theme: &Theme) -> Vec<Line<'s
         entries.len()
     };
     let hidden = entries.len() - shown;
-    lines.extend(entries.into_iter().take(shown).map(|entry| {
-        Line::from(vec![
-            Span::styled(entry.glyph.to_string(), entry.glyph_style),
-            Span::styled(format!(" {}", entry.name), theme.text),
-        ])
-    }));
+    lines.extend(
+        entries
+            .into_iter()
+            .take(shown)
+            .map(|entry| entry_line(entry, width, theme)),
+    );
     if overflows && room > 0 {
         lines.push(Line::styled(
             messages::more_in_view(hidden),
@@ -468,6 +545,26 @@ fn in_view_lines(entries: Vec<Entry>, rows: usize, theme: &Theme) -> Vec<Line<'s
         ));
     }
     lines
+}
+
+/// One line of the "in view" list, `width` columns wide: the glyph, a blank
+/// and the name in `text`, then the health, if any, right-aligned in the
+/// style of its level, at least one blank column after the name.
+fn entry_line(entry: Entry, width: u16, theme: &Theme) -> Line<'static> {
+    let name = format!(" {}", entry.name);
+    let glyph = Span::styled(entry.glyph.to_string(), entry.glyph_style);
+    let Some((health, style)) = entry.health else {
+        return Line::from(vec![glyph, Span::styled(name, theme.text)]);
+    };
+    // The glyph takes one column.
+    let used = 1 + name.chars().count() + health.chars().count();
+    let gap = usize::from(width).saturating_sub(used).max(1);
+    Line::from(vec![
+        glyph,
+        Span::styled(name, theme.text),
+        Span::raw(" ".repeat(gap)),
+        Span::styled(health, style),
+    ])
 }
 
 /// `name` followed by `×count` when `count` is above 1, cut so the whole
@@ -485,8 +582,9 @@ fn counted_name(name: &str, count: usize, width: usize, times: char) -> String {
 
 #[cfg(test)]
 mod tests {
+    use sigilfall_core::action::Action;
     use sigilfall_core::game::PLAYER_START;
-    use sigilfall_core::geometry::Position;
+    use sigilfall_core::geometry::{Direction, Position};
     use sigilfall_core::rng::Seed;
 
     use super::*;
@@ -567,7 +665,12 @@ mod tests {
         width: u16,
         theme: &Theme,
     ) -> Vec<Line<'static>> {
-        in_view_lines(in_view_entries(game, content, width, theme), rows, theme)
+        in_view_lines(
+            in_view_entries(game, content, width, theme),
+            rows,
+            width,
+            theme,
+        )
     }
 
     /// The text of `lines`.
@@ -584,7 +687,13 @@ mod tests {
 
         assert_eq!(
             texts(&lines),
-            ["IN VIEW", "@ you", "v rat ×2", "e eye", "s shade"]
+            [
+                "IN VIEW",
+                "@ you",
+                "v rat ×2        1/1",
+                "e eye           1/1",
+                "s shade         1/1",
+            ]
         );
     }
 
@@ -606,9 +715,9 @@ mod tests {
             [
                 "IN VIEW",
                 "@ you",
-                "v rat ×2",
-                "e eye",
-                "s shade",
+                "v rat ×2        1/1",
+                "e eye           1/1",
+                "s shade         1/1",
                 "¡ Healing Draugh ×2",
                 "♦ Steadying Ink",
             ]
@@ -636,13 +745,226 @@ mod tests {
 
         assert_eq!(
             texts(&lines),
-            ["IN VIEW", "@ you", "v rat x2", "and 2 more"]
+            ["IN VIEW", "@ you", "v rat x2        1/1", "and 2 more"]
         );
         assert_eq!(
             texts(&in_view_block(&game, &content, 1, 19, &theme)),
             ["IN VIEW"]
         );
         assert!(in_view_block(&game, &content, 0, 19, &theme).is_empty());
+    }
+
+    /// Rats whose defence equals the player's attack, so every blow of the
+    /// player takes exactly one hit point (`combat`: at least 1, and the
+    /// roll of -1 to +1 never adds more over a difference of 0); too slow
+    /// to move or strike more than once in a few turns. A long-named kind
+    /// and a shade complete the list.
+    const STURDY_KINDS: &str = r#"[
+        Monster(id: "rat", name: "rat", family: Vermin, elite: false,
+            speed: 1, hp: 8, attack: 0, defense: 4, min_depth: 1),
+        Monster(id: "lead", name: "lead homunculus", family: Homunculus,
+            elite: true, speed: 1, hp: 28, attack: 0, defense: 4, min_depth: 1),
+        Monster(id: "shade", name: "shade", family: Spectre, elite: false,
+            speed: 1, hp: 7, attack: 0, defense: 4, min_depth: 1),
+    ]"#;
+
+    /// The cell east of the start, where the monster the player strikes
+    /// stands.
+    const NEXT_TO_START: Position = Position::new(PLAYER_START.x + 1, PLAYER_START.y);
+
+    /// The fixed room with [`STURDY_KINDS`], the monsters `(id, cell)`
+    /// spawned in order, after the player struck the one east of the start
+    /// `blows` times; returns the game, the content and the struck monster's
+    /// hit points, checked to be its maximum less `blows`.
+    fn wounded_room(monsters: &[(&str, Position)], blows: i32) -> (Game, Content, i32) {
+        let content = Content::parse(STURDY_KINDS).unwrap();
+        let mut game = Game::in_fixed_room(Seed::new(42));
+        let mut struck = None;
+        for &(id, cell) in monsters {
+            let actor = game.spawn_monster(cell, content.monster(id).unwrap());
+            if cell == NEXT_TO_START {
+                struck = Some(actor);
+            }
+        }
+        let struck = struck.expect("a monster stands east of the start");
+        for _ in 0..blows {
+            game.submit(Action::Move(Direction::East));
+        }
+        let actor = game.actor(struck).expect("the struck monster lives");
+        assert_eq!(actor.hp(), actor.max_hp() - blows, "one hit point a blow");
+        let hp = actor.hp();
+        (game, content, hp)
+    }
+
+    #[test]
+    fn a_group_shows_the_health_of_its_most_wounded_member() {
+        // The unhurt rat comes first in `visible_monsters`, the struck one
+        // second: the group must not just take the first.
+        let far = Position::new(PLAYER_START.x + 4, PLAYER_START.y);
+        let (game, content, hp) = wounded_room(&[("rat", far), ("rat", NEXT_TO_START)], 3);
+        assert_eq!(hp, 5);
+        let theme = Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode);
+
+        let lines = in_view_block(&game, &content, 10, 19, &theme);
+
+        assert_eq!(texts(&lines), ["IN VIEW", "@ you", "v rat ×2        5/8"]);
+    }
+
+    #[test]
+    fn the_most_wounded_is_the_lowest_share_of_its_maximum() {
+        let mut kind = MonsterKind {
+            definition: "rat",
+            glyph: 'v',
+            style: Style::default(),
+            count: 1,
+            hp: 5,
+            max_hp: 10,
+        };
+        kind.keep_most_wounded(3, 4);
+        assert_eq!((kind.hp, kind.max_hp), (5, 10), "75 % is less wounded");
+        kind.keep_most_wounded(10, 20);
+        assert_eq!((kind.hp, kind.max_hp), (5, 10), "a tie keeps the first");
+        kind.keep_most_wounded(2, 10);
+        assert_eq!((kind.hp, kind.max_hp), (2, 10));
+        kind.keep_most_wounded(0, 10);
+        assert_eq!((kind.hp, kind.max_hp), (0, 10));
+    }
+
+    #[test]
+    fn a_long_name_is_shortened_before_the_count_or_the_health() {
+        let far = Position::new(PLAYER_START.x + 4, PLAYER_START.y);
+        let (game, content, hp) = wounded_room(&[("lead", far), ("lead", NEXT_TO_START)], 2);
+        assert_eq!(hp, 26);
+        for (glyph_set, line) in [
+            (GlyphSet::Unicode, "H lead hom ×2 26/28"),
+            (GlyphSet::Ascii, "H lead hom x2 26/28"),
+        ] {
+            let theme = Theme::new(ColorMode::Monochrome, glyph_set);
+
+            let lines = in_view_block(&game, &content, 10, 19, &theme);
+
+            assert_eq!(texts(&lines)[2], line, "{glyph_set:?}");
+        }
+
+        // Alone, the kind keeps three more letters of its name.
+        let (game, content, _) = wounded_room(&[("lead", NEXT_TO_START)], 0);
+        let theme = Theme::new(ColorMode::Monochrome, GlyphSet::Ascii);
+        let lines = in_view_block(&game, &content, 10, 19, &theme);
+        assert_eq!(texts(&lines)[2], "H lead homunc 28/28");
+    }
+
+    #[test]
+    fn the_health_takes_the_colour_of_its_level_in_every_mode() {
+        // 8/8 is high, 4/8 exactly half hence mid, 1/8 under a quarter.
+        let cases = [
+            (0, "8/8", HealthLevel::High),
+            (4, "4/8", HealthLevel::Mid),
+            (7, "1/8", HealthLevel::Low),
+        ];
+        let modes = [
+            ColorMode::TrueColorDark,
+            ColorMode::TrueColorLight,
+            ColorMode::Ansi16,
+            ColorMode::Monochrome,
+        ];
+        for (blows, figures, level) in cases {
+            let (game, content, _) = wounded_room(&[("rat", NEXT_TO_START)], blows);
+            for mode in modes {
+                for glyph_set in [GlyphSet::Unicode, GlyphSet::Ascii] {
+                    let theme = Theme::new(mode, glyph_set);
+                    let lines = in_view_block(&game, &content, 10, 19, &theme);
+                    let what = format!("{mode:?}, {glyph_set:?}, {figures}");
+
+                    let line = &lines[2];
+                    let health = line.spans.last().unwrap();
+                    assert_eq!(health.content, figures, "{what}");
+                    assert_eq!(health.style, level.style(&theme), "{what}");
+                    assert_eq!(line.spans[0].style, theme.monster_hostile, "{what}");
+                    assert_eq!(line.width(), 19, "{what}: fills the panel");
+                    // The figures say the level without colour: no mark is
+                    // added, `!` warns of the player's own danger.
+                    assert!(!line.to_string().contains('!'), "{what}");
+                }
+            }
+        }
+    }
+
+    /// The side panel of an 80 × `height` game screen for `game`: the
+    /// panel's 22 columns at the right of the screen, rows between the
+    /// status line and the log, borders and margins kept.
+    fn panel_on_screen(game: &Game, content: &Content, height: u16, theme: &Theme) -> String {
+        panel_on_screen_of(game, content, 80, height, theme)
+    }
+
+    /// [`panel_on_screen`] on a screen `width` columns wide.
+    fn panel_on_screen_of(
+        game: &Game,
+        content: &Content,
+        width: u16,
+        height: u16,
+        theme: &Theme,
+    ) -> String {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        use crate::message_log::MessageLog;
+
+        /// Columns of the side panel, its border included.
+        const PANEL_WIDTH: u16 = 22;
+        /// Rows under the panel: the log's separator, its 5 lines and the
+        /// key help.
+        const ROWS_BELOW: u16 = 7;
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| {
+                crate::ui::render(frame, game, &MessageLog::default(), content, None, theme);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        (1..height - ROWS_BELOW)
+            .map(|y| {
+                let row: String = (width - PANEL_WIDTH..width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect();
+                format!("\"{row}\"\n")
+            })
+            .collect()
+    }
+
+    /// Two lead homunculi, one struck twice, and an unhurt shade: two kinds
+    /// in view, one grouped, wounded and long-named.
+    fn two_kinds_one_grouped() -> (Game, Content) {
+        let far = Position::new(PLAYER_START.x + 4, PLAYER_START.y);
+        let shade = Position::new(PLAYER_START.x + 2, PLAYER_START.y + 2);
+        let (game, content, _) = wounded_room(
+            &[("lead", far), ("shade", shade), ("lead", NEXT_TO_START)],
+            2,
+        );
+        (game, content)
+    }
+
+    #[test]
+    fn monster_health_in_the_panel_of_an_80_by_24_screen() {
+        let (game, content) = two_kinds_one_grouped();
+        let theme = Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode);
+
+        insta::assert_snapshot!(panel_on_screen(&game, &content, 24, &theme));
+    }
+
+    #[test]
+    fn monster_health_in_the_panel_of_an_80_by_24_screen_in_ascii() {
+        let (game, content) = two_kinds_one_grouped();
+        let theme = Theme::new(ColorMode::Monochrome, GlyphSet::Ascii);
+
+        insta::assert_snapshot!(panel_on_screen(&game, &content, 24, &theme));
+    }
+
+    #[test]
+    fn monster_health_in_the_panel_of_a_120_by_40_screen() {
+        let (game, content) = two_kinds_one_grouped();
+        let theme = Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode);
+
+        insta::assert_snapshot!(panel_on_screen_of(&game, &content, 120, 40, &theme));
     }
 }
 
@@ -754,7 +1076,7 @@ mod sharing_tests {
         let list = rows.iter().position(|row| row == "IN VIEW").unwrap();
         assert_eq!(
             rows[list + 1..list + 4],
-            ["@ you", "v rat", "≡ known glyph ×5"]
+            ["@ you", "v rat           1/1", "≡ known glyph ×5"]
         );
     }
 
@@ -783,9 +1105,9 @@ mod sharing_tests {
             rows[list + 1..],
             [
                 "@ you",
-                "v rat",
-                "e eye",
-                "s shade",
+                "v rat           1/1",
+                "e eye           1/1",
+                "s shade         1/1",
                 "¡ Healing Draught",
                 "≡ known glyph ×5",
             ],
