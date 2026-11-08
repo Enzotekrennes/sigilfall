@@ -42,7 +42,7 @@ const PANEL_TOKENS: [&str; 10] = [
 const SELECTION_TOKENS: [&str; 3] = ["text", "text_muted", "item"];
 
 /// Every foreground token of `theme`, with its name.
-fn foreground_tokens(theme: &Theme) -> [(&'static str, Style); 30] {
+fn foreground_tokens(theme: &Theme) -> [(&'static str, Style); 32] {
     [
         ("text", theme.text),
         ("text_muted", theme.text_muted),
@@ -54,6 +54,8 @@ fn foreground_tokens(theme: &Theme) -> [(&'static str, Style); 30] {
         ("door", theme.door),
         ("stairs", theme.stairs),
         ("stairs_remembered", theme.stairs_remembered),
+        ("seal", theme.seal),
+        ("seal_remembered", theme.seal_remembered),
         ("engraving_unread", theme.engraving_unread),
         ("engraving_read", theme.engraving_read),
         (
@@ -258,6 +260,13 @@ fn contrast_formula_matches_the_figures_of_the_design() {
     assert_eq!(ratio(light.player, light.bg), 6.06);
     assert_eq!(ratio(ansi.text, ansi.bg), 17.47);
     assert_eq!(ratio(ansi.item, ansi.bg), 4.95);
+    // The seal (T34), on bg: the map is never drawn on a panel.
+    assert_eq!(ratio(dark.seal, dark.bg), 9.87);
+    assert_eq!(ratio(dark.seal_remembered, dark.bg), 5.70);
+    assert_eq!(ratio(light.seal, light.bg), 6.0);
+    assert_eq!(ratio(light.seal_remembered, light.bg), 4.88);
+    assert_eq!(ratio(ansi.seal, ansi.bg), 7.47);
+    assert_eq!(ratio(ansi.seal_remembered, ansi.bg), 12.18);
 }
 
 /// Checks that every token of [`SELECTION_TOKENS`] reaches the text
@@ -325,6 +334,7 @@ fn monochrome_uses_the_terminal_colours_only() {
     assert!(theme.wall_remembered.add_modifier.contains(Modifier::DIM));
     assert!(!theme.wall_seen.add_modifier.contains(Modifier::DIM));
     assert!(!theme.stairs_remembered.add_modifier.contains(Modifier::DIM));
+    assert!(!theme.seal_remembered.add_modifier.contains(Modifier::DIM));
     assert!(
         !theme
             .engraving_unread_remembered
@@ -352,6 +362,7 @@ fn emphasised_tokens_are_bold_and_text_is_never_dim_in_every_mode() {
         for (name, style) in [
             ("player", theme.player),
             ("stairs", theme.stairs),
+            ("seal", theme.seal),
             ("text_title", theme.text_title),
             ("sigil_cursor", theme.sigil_cursor),
         ] {

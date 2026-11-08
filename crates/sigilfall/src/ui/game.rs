@@ -12,7 +12,9 @@
 //! to what the player knows of it ([`Sight`]): in full when in view, only
 //! its landmarks when explored but out of view, not at all when never seen.
 //! Engraved glyphs are landmarks: `§` until the player knows their sigil,
-//! `≡` after, dimmer once out of view. Items and monsters are drawn only on
+//! `≡` after, dimmer once out of view. So are the stairs down, `▼`, and on
+//! the bottom floor the seal that takes their place, `◎`, whose key help
+//! then says "unseal" instead of "descend". Items and monsters are drawn only on
 //! cells in view, items with their family's glyph in `item`, monsters with
 //! their family's letter and colour, monsters over items, and the player is
 //! drawn over everything else. While the player casts or looks at the
@@ -27,7 +29,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use sigilfall_core::content::Content;
 use sigilfall_core::game::{Game, VisibleItem, VisibleMonster};
-use sigilfall_core::generation::Engraving;
+use sigilfall_core::generation::{self, Engraving};
 use sigilfall_core::geometry::Position;
 use sigilfall_core::map::Tile;
 
@@ -146,7 +148,11 @@ pub fn render(
         None => {}
     }
     let carries_items = game.inventory().next().is_some();
-    frame.render_widget(key_help(overlay, carries_items, theme), layout.help);
+    let bottom_floor = generation::is_bottom_floor(game.depth());
+    frame.render_widget(
+        key_help(overlay, carries_items, bottom_floor, theme),
+        layout.help,
+    );
 }
 
 /// Builds the left part of the status line: the depth of the floor, then
@@ -201,14 +207,26 @@ fn run_label(game: &Game, theme: &Theme) -> Line<'static> {
 /// The keys are those of the screen in front of the player: the game's
 /// (move, wait, trace, take, pack, descend, save & quit), which fit the
 /// 80 columns with one to spare, so the explore key (`input::EXPLORE_KEY`)
-/// is left to the README; under the sigil overlay,
+/// is left to the README; on the bottom floor (`bottom_floor` true), where
+/// the same key breaks the seal instead, "descend" becomes "unseal",
+/// which fits as well; under the sigil overlay,
 /// the overlay's (link a node, undo, cast, cancel), the direction prompt's
 /// (aim, back) or the verdict's (continue); in the inventory, its own
 /// (choose, use, drop, close), or only close while the player carries
 /// nothing (`carries_items` false).
-fn key_help(overlay: Option<Overlay<'_>>, carries_items: bool, theme: &Theme) -> Line<'static> {
+fn key_help(
+    overlay: Option<Overlay<'_>>,
+    carries_items: bool,
+    bottom_floor: bool,
+    theme: &Theme,
+) -> Line<'static> {
     let glyphs = &theme.glyphs;
     let directions = format!("{}/1-9", glyphs.arrows());
+    let descend_label = if bottom_floor {
+        messages::UNSEAL_LABEL
+    } else {
+        messages::DESCEND_LABEL
+    };
     let bindings: Vec<(String, &str)> = match overlay {
         None => vec![
             (directions, messages::MOVE_LABEL),
@@ -219,7 +237,7 @@ fn key_help(overlay: Option<Overlay<'_>>, carries_items: bool, theme: &Theme) ->
                 messages::INVENTORY_KEY.to_owned(),
                 messages::INVENTORY_LABEL,
             ),
-            (messages::DESCEND_KEY.to_owned(), messages::DESCEND_LABEL),
+            (messages::DESCEND_KEY.to_owned(), descend_label),
             (messages::QUIT_KEY.to_owned(), messages::SAVE_AND_QUIT_LABEL),
         ],
         Some(Overlay::Inventory(_)) if carries_items => vec![
@@ -294,7 +312,7 @@ impl Sight {
 ///
 /// The rule of `docs/design.md`: a cell in view is drawn in full with the
 /// "seen" tokens; an explored cell out of view shows only its landmarks
-/// (walls and stairs today; arches and engraved glyphs when they exist), in
+/// (walls, stairs and the seal today; arches when they exist), in
 /// the `*_remembered` tokens, and never its floor; a cell never seen shows
 /// nothing. The three states therefore differ by glyph as well as by colour:
 /// out of view, the floor around the landmarks disappears, which tells them
@@ -308,10 +326,8 @@ const fn cell_look(tile: Tile, sight: Sight, theme: &Theme) -> Option<(char, Sty
         (Sight::Remembered, Tile::Wall) => Some((glyphs.wall, theme.wall_remembered)),
         (Sight::Visible, Tile::StairsDown) => Some((glyphs.stairs, theme.stairs)),
         (Sight::Remembered, Tile::StairsDown) => Some((glyphs.stairs, theme.stairs_remembered)),
-        // Drawn as the stairs it replaces until the seal gets a look of its
-        // own (task T34), so the bottom floor stays playable meanwhile.
-        (Sight::Visible, Tile::Seal) => Some((glyphs.stairs, theme.stairs)),
-        (Sight::Remembered, Tile::Seal) => Some((glyphs.stairs, theme.stairs_remembered)),
+        (Sight::Visible, Tile::Seal) => Some((glyphs.seal, theme.seal)),
+        (Sight::Remembered, Tile::Seal) => Some((glyphs.seal, theme.seal_remembered)),
     }
 }
 
@@ -681,7 +697,7 @@ mod tests {
 
     #[test]
     fn cell_look_hides_unknown_cells_and_remembered_floor_in_every_mode() {
-        let tiles = [Tile::Floor, Tile::Wall, Tile::StairsDown];
+        let tiles = [Tile::Floor, Tile::Wall, Tile::StairsDown, Tile::Seal];
         for mode in MODES {
             for glyph_set in GLYPH_SETS {
                 let theme = Theme::new(mode, glyph_set);
@@ -727,6 +743,44 @@ mod tests {
                     "{mode:?}: the way down stays legible"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn the_seal_has_its_own_glyph_and_fades_like_the_stairs_in_every_mode() {
+        for mode in MODES {
+            for glyph_set in GLYPH_SETS {
+                let theme = Theme::new(mode, glyph_set);
+                let seal = theme.glyphs.seal;
+                assert_ne!(seal, theme.glyphs.stairs, "{glyph_set:?}");
+
+                let seen = cell_look(Tile::Seal, Sight::Visible, &theme);
+                let remembered = cell_look(Tile::Seal, Sight::Remembered, &theme);
+
+                assert_eq!(seen, Some((seal, theme.seal)), "{mode:?}");
+                assert_eq!(remembered, Some((seal, theme.seal_remembered)), "{mode:?}");
+                assert!(theme.seal.add_modifier.contains(Modifier::BOLD), "{mode:?}");
+                let faded = theme.seal_remembered.add_modifier;
+                assert!(!faded.contains(Modifier::BOLD), "{mode:?}");
+                assert!(
+                    !faded.contains(Modifier::DIM),
+                    "{mode:?}: the end of the run stays legible"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_key_help_says_unseal_on_the_bottom_floor_and_still_fits() {
+        for glyph_set in GLYPH_SETS {
+            let theme = Theme::new(ColorMode::TrueColorDark, glyph_set);
+            let above = key_help(None, false, false, &theme).to_string();
+            let bottom = key_help(None, false, true, &theme).to_string();
+
+            assert!(above.contains("> descend"), "{above}");
+            assert!(bottom.contains("> unseal"), "{bottom}");
+            assert!(!bottom.contains("descend"), "{bottom}");
+            assert!(bottom.chars().count() < 80, "{bottom}");
         }
     }
 

@@ -820,7 +820,7 @@ mod tests {
                 for notice in [
                     messages::save_set_aside_notice(&reason, &path),
                     messages::save_not_deleted_notice(&path, &reason),
-                    messages::dead_save_not_deleted_notice(&path, &reason),
+                    messages::finished_save_not_deleted_notice(&path, &reason),
                 ] {
                     let wrapped = wrap(&notice, NOTICE_WIDTH);
                     assert!(wrapped.len() <= NOTICE_ROWS, "{wrapped:#?}");

@@ -270,6 +270,13 @@ pub struct Theme {
     /// without its emphasis, yet still at text contrast, since the glyph
     /// marks the way down.
     pub stairs_remembered: Style,
+    /// The seal of the bottom floor in view: the gold of what matters,
+    /// emphasised like the stairs it replaces.
+    pub seal: Style,
+    /// Explored seal out of view: dimmer than [`Theme::seal`] and without
+    /// its emphasis, yet still at text contrast, since the glyph marks the
+    /// end of the run.
+    pub seal_remembered: Style,
     /// Engraved glyph not read yet.
     pub engraving_unread: Style,
     /// Engraved glyph already deciphered.
@@ -362,6 +369,8 @@ impl Theme {
             door: fg(0xC4915A),
             stairs: fg(0xF2EADB).add_modifier(Modifier::BOLD),
             stairs_remembered: fg(0x968F84),
+            seal: fg(0xE3B24F).add_modifier(Modifier::BOLD),
+            seal_remembered: fg(0xA8873F),
             engraving_unread: fg(0x5ED6B8),
             engraving_read: fg(0x4F8F82),
             engraving_unread_remembered: fg(0x3A9682),
@@ -403,6 +412,8 @@ impl Theme {
             door: fg(0x8A5428),
             stairs: fg(0x1E1824).add_modifier(Modifier::BOLD),
             stairs_remembered: fg(0x6B6258),
+            seal: fg(0x7A4F08).add_modifier(Modifier::BOLD),
+            seal_remembered: fg(0x80602A),
             engraving_unread: fg(0x0B6E58),
             engraving_read: fg(0x4F7D73),
             engraving_unread_remembered: fg(0x3A6E63),
@@ -447,6 +458,8 @@ impl Theme {
             door: named(Color::Yellow),
             stairs: named(Color::LightYellow).add_modifier(Modifier::BOLD),
             stairs_remembered: named(Color::Gray),
+            seal: named(Color::Yellow).add_modifier(Modifier::BOLD),
+            seal_remembered: named(Color::Gray),
             engraving_unread: named(Color::LightCyan),
             engraving_read: named(Color::Cyan),
             engraving_unread_remembered: named(Color::Cyan),
@@ -475,10 +488,10 @@ impl Theme {
     /// with hierarchy carried by emphasis only.
     ///
     /// Bold marks what `docs/design.md` emphasises in every mode (player,
-    /// stairs in view, titles, the sigil pen); dim fades the floor and
-    /// remembered walls, never text; the selection is reversed. Remembered
-    /// stairs lose the bold of stairs in view but are not dimmed: they still
-    /// mark the way down; likewise a remembered unread glyph, a sigil left
+    /// stairs and seal in view, titles, the sigil pen); dim fades the floor
+    /// and remembered walls, never text; the selection is reversed.
+    /// Remembered stairs and seal lose the bold they have in view but are
+    /// not dimmed: they still mark the way down and the end of the run; likewise a remembered unread glyph, a sigil left
     /// to learn, is not dimmed, while a remembered read glyph is. Every
     /// piece of
     /// information is also carried by a glyph, a word or a prefix, so
@@ -501,6 +514,8 @@ impl Theme {
             door: plain,
             stairs: bold,
             stairs_remembered: plain,
+            seal: bold,
+            seal_remembered: plain,
             engraving_unread: plain,
             engraving_read: plain,
             engraving_unread_remembered: plain,

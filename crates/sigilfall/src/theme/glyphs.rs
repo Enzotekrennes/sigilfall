@@ -43,6 +43,10 @@ pub struct Glyphs {
     pub player: char,
     /// Stairs down: `▼`, or `>` in ASCII.
     pub stairs: char,
+    /// The seal of the bottom floor, which ends the run once broken: `◎`,
+    /// or `0` in ASCII. A ring like the nodes of a sigil, but drawn on the
+    /// map only, where no node ever appears.
+    pub seal: char,
     /// Common vermin: `v` in both sets; `V` for the elite form.
     pub vermin: char,
     /// Common acolyte: `a` in both sets; `A` for the elite form.
@@ -131,6 +135,7 @@ impl Glyphs {
                 wall: '▒',
                 player: '@',
                 stairs: '▼',
+                seal: '◎',
                 vermin: 'v',
                 acolyte: 'a',
                 homunculus: 'h',
@@ -172,6 +177,7 @@ impl Glyphs {
                 wall: '#',
                 player: '@',
                 stairs: '>',
+                seal: '0',
                 vermin: 'v',
                 acolyte: 'a',
                 homunculus: 'h',
@@ -258,12 +264,13 @@ mod tests {
     use super::*;
 
     /// Every glyph of `glyphs`, with its field name for failure messages.
-    fn all(glyphs: Glyphs) -> [(&'static str, char); 39] {
+    fn all(glyphs: Glyphs) -> [(&'static str, char); 40] {
         [
             ("floor", glyphs.floor),
             ("wall", glyphs.wall),
             ("player", glyphs.player),
             ("stairs", glyphs.stairs),
+            ("seal", glyphs.seal),
             ("vermin", glyphs.vermin),
             ("acolyte", glyphs.acolyte),
             ("homunculus", glyphs.homunculus),
@@ -311,6 +318,7 @@ mod tests {
             ("wall", '\u{2592}'),
             ("player", '\u{0040}'),
             ("stairs", '\u{25BC}'),
+            ("seal", '\u{25CE}'),
             ("vermin", 'v'),
             ("acolyte", 'a'),
             ("homunculus", 'h'),
@@ -389,6 +397,7 @@ mod tests {
                 glyphs.wall,
                 glyphs.player,
                 glyphs.stairs,
+                glyphs.seal,
                 glyphs.engraving_unread,
                 glyphs.engraving_read,
             ];

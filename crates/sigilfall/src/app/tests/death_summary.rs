@@ -57,7 +57,7 @@ fn dark() -> Theme {
 }
 
 /// The text of every row of `app` drawn on a `width` × `height` screen.
-fn screen_rows(app: &App, width: u16, height: u16) -> Vec<String> {
+pub(super) fn screen_rows(app: &App, width: u16, height: u16) -> Vec<String> {
     let terminal = render(app, width, height);
     (0..height)
         .map(|y| row_text(terminal.backend().buffer(), y))
@@ -66,7 +66,7 @@ fn screen_rows(app: &App, width: u16, height: u16) -> Vec<String> {
 
 /// The value written after the leader dots of the count `label`, and the
 /// detail after it (empty when there is none), as read on the screen.
-fn count(rows: &[String], label: &str) -> (String, String) {
+pub(super) fn count(rows: &[String], label: &str) -> (String, String) {
     let row = rows
         .iter()
         .find(|row| row.trim_start().starts_with(&format!("{label} .")))

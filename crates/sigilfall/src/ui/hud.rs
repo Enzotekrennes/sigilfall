@@ -10,7 +10,8 @@
 //! "Essence" with its value, a blank row, "SIGILS" with the count known out
 //! of those that exist and their names, a blank row, then "IN VIEW" with
 //! the player, one line per kind of monster, one per kind of item, one per
-//! kind of engraved glyph and one for the stairs down in view.
+//! kind of engraved glyph and one for the way down in view: the stairs, or
+//! on the bottom floor the seal that ends the run.
 //!
 //! Each monster line ends with that monster's hit points, current out of
 //! maximum ("4/9"), right-aligned like the player's value above and in the
@@ -379,8 +380,8 @@ impl MonsterKind<'_> {
 /// the player, then one entry per kind of monster in view, in the order of
 /// `Game::visible_monsters`, then one per kind of item in view, in the
 /// order of `Game::visible_items`, then the engraved glyphs in view, unread
-/// ones first, then the stairs down when in view, with "×2" after the name
-/// when several of a kind are in view. A monster entry also carries the
+/// ones first, then the stairs down or the seal when in view, with "×2"
+/// after the name when several of a kind are in view. A monster entry also carries the
 /// health of the most wounded monster of its kind in view, and its name is
 /// shortened so that name, count and health share the `width` columns.
 /// Monsters come first since they threaten the player; items, which the
@@ -477,26 +478,37 @@ fn in_view_entries(game: &Game, content: &Content, width: u16, theme: &Theme) ->
             health: None,
         },
     ));
-    if stairs_in_view(game) {
-        entries.push(Entry {
-            glyph: theme.glyphs.stairs,
-            glyph_style: theme.stairs,
-            name: counted_name(
-                messages::STAIRS_IN_VIEW,
-                1,
-                name_width,
-                theme.glyphs.dimension,
-            ),
-            health: None,
-        });
+    let ways_down = [
+        (
+            Tile::StairsDown,
+            theme.glyphs.stairs,
+            theme.stairs,
+            messages::STAIRS_IN_VIEW,
+        ),
+        (
+            Tile::Seal,
+            theme.glyphs.seal,
+            theme.seal,
+            messages::SEAL_IN_VIEW,
+        ),
+    ];
+    for (tile, glyph, glyph_style, name) in ways_down {
+        if tile_in_view(game, tile) {
+            entries.push(Entry {
+                glyph,
+                glyph_style,
+                name: counted_name(name, 1, name_width, theme.glyphs.dimension),
+                health: None,
+            });
+        }
     }
     entries
 }
 
-/// Returns whether the player sees stairs down: a cell in view holds
-/// [`Tile::StairsDown`]. Stairs only remembered do not count, like every
-/// other entry of the list.
-fn stairs_in_view(game: &Game) -> bool {
+/// Returns whether the player sees a cell holding `tile`: the stairs down,
+/// or the seal of the bottom floor. A tile only remembered does not count,
+/// like every other entry of the list.
+fn tile_in_view(game: &Game, tile: Tile) -> bool {
     let map = game.map();
     // Floors are 80 × 40 (`generation::FLOOR_WIDTH` and `FLOOR_HEIGHT`), so
     // their sides always fit an `i32`.
@@ -505,7 +517,7 @@ fn stairs_in_view(game: &Game) -> bool {
     };
     (0..height)
         .flat_map(|y| (0..width).map(move |x| Position::new(x, y)))
-        .any(|cell| map.tile(cell) == Some(Tile::StairsDown) && game.is_visible(cell))
+        .any(|cell| map.tile(cell) == Some(tile) && game.is_visible(cell))
 }
 
 /// The "in view" block in at most `rows` rows of `width` columns: its

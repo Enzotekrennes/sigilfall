@@ -22,12 +22,14 @@
 //!
 //! The application keeps the message log of the game in progress: the
 //! events of each action are turned into English lines by the `messages`
-//! module and appended to it. Once the player has died, the death summary
-//! (`ui::death`) replaces the game; Enter goes back to the title screen.
-//! For [`END_SCREEN_GRACE`] after the death, every key but Ctrl+C is
-//! thrown away, so a key the player was already pressing (the Enter of a
-//! deadly cast, a held movement key) never closes a summary nobody has
-//! seen. The time, and today's UTC date, are read from a [`Clock`], which
+//! module and appended to it. Once the game is over, its end screen
+//! replaces it: the death summary (`ui::death`) once the player has died,
+//! the victory screen (`ui::victory`) once it has broken the seal of the
+//! bottom floor; both are [`State::GameOver`], and Enter goes back to the
+//! title screen. For [`END_SCREEN_GRACE`] after the end, every key but
+//! Ctrl+C is thrown away, so a key the player was already pressing (the
+//! Enter of a deadly cast, a held movement key, the `>` that broke the
+//! seal) never closes a summary nobody has seen. The time, and today's UTC date, are read from a [`Clock`], which
 //! tests replace.
 //!
 //! The quit keys are `q`, on the game, end and title screens, and Ctrl+C
@@ -56,7 +58,9 @@
 //! game replaces the floor and its field of view, the screen draws the new
 //! one around the player with the depth on the status line, and the log
 //! keeps the floors above. Off the stairs the game refuses it at no cost,
-//! and the log says so.
+//! and the log says so. On the bottom floor the same key, on the seal,
+//! breaks it and wins the run; anywhere else there it is refused the same
+//! way.
 //!
 //! `x` explores the floor automatically: the application submits
 //! `Action::Explore` again and again, drawing the screen after every step,
@@ -67,7 +71,8 @@
 //!
 //! The launched application is tied to the player's save file
 //! (`persist::SaveFile`): "Continue" resumes the saved game, the save is
-//! deleted the moment the player dies, before the end screen is drawn, and
+//! deleted the moment the game is over (death or victory), before the end
+//! screen is drawn, and
 //! [`App::save_on_exit`] writes the game in progress when the event loop
 //! ends. The rules of the launch are given at [`App::launch`].
 
@@ -111,8 +116,8 @@ use crate::ui::options::{self as options_screen, OptionRow, OptionsMenu};
 use crate::ui::title::{Confirmation, NewRun, SeedEntry, TitleItem, TitleMenu, TitleStep};
 use crate::ui::{self, MenuScreen, Overlay};
 
-/// How long the end screen ignores every key but Ctrl+C once the player
-/// has died (fix B1 of the F9 test).
+/// How long the end screen ignores every key but Ctrl+C once the game is
+/// over, by death or by victory (fix B1 of the F9 test).
 ///
 /// The death comes from a key the player was in the middle of typing: the
 /// Enter that validates a deadly trace, a movement key held down to walk
@@ -147,9 +152,11 @@ pub enum State {
     /// The inventory is open over the game: the player chooses an item to
     /// use or drop.
     Inventory(InventoryScreen),
-    /// The player has died: the end screen is shown, the game takes no
-    /// more actions, Enter goes back to the title and the quit keys work,
-    /// once [`END_SCREEN_GRACE`] has passed (Ctrl+C works at once).
+    /// The game is over, the player having died or broken the seal: the
+    /// end screen of its outcome is shown (`ui::render` sorts them on
+    /// `Game::status`), the game takes no more actions, Enter goes back to
+    /// the title and the quit keys work, once [`END_SCREEN_GRACE`] has
+    /// passed (Ctrl+C works at once).
     GameOver,
     /// The player asked to leave; the event loop stops.
     Quit,
@@ -378,7 +385,7 @@ impl App {
     /// when the end screen's grace period ([`END_SCREEN_GRACE`]) is over.
     ///
     /// Give it before the player dies: the grace period starts at the
-    /// instant `clock` reads at the death. On an application already on
+    /// instant `clock` reads at the end of the game. On an application already on
     /// the end screen, the period restarts from `clock`'s current time.
     #[cfg(test)]
     pub fn with_clock(mut self, clock: ManualClock) -> Self {
@@ -446,7 +453,7 @@ impl App {
     }
 
     /// Returns whether the end screen still ignores every key but Ctrl+C:
-    /// less than [`END_SCREEN_GRACE`] has passed since the death. `false`
+    /// less than [`END_SCREEN_GRACE`] has passed since the game ended. `false`
     /// when no game is over.
     fn end_screen_is_settling(&self) -> bool {
         self.ended_at
@@ -528,11 +535,11 @@ impl App {
     ///   the inventory ([`State::Inventory`], see
     ///   [`App::handle_inventory_key`]); `x` starts automatic exploration
     ///   (see [`App::explore_further`]), during which any key press only
-    ///   stops it ([`App::handle_exploring_key`]). If the player died, the
-    ///   application moves to [`State::GameOver`].
+    ///   stops it ([`App::handle_exploring_key`]). If the player died or
+    ///   broke the seal, the application moves to [`State::GameOver`].
     /// - End screen (`input::end_command_for`): Enter goes back to the
     ///   title screen, `q` quits, once [`END_SCREEN_GRACE`] has passed
-    ///   since the death; Ctrl+C quits at once (see
+    ///   since the game ended; Ctrl+C quits at once (see
     ///   [`App::handle_end_key`]).
     ///
     /// Once the application has quit, keys are ignored. While the last
@@ -856,8 +863,8 @@ impl App {
     /// goes back to the title screen (see [`App::back_to_title`]), `q` and
     /// Ctrl+C quit.
     ///
-    /// Until [`END_SCREEN_GRACE`] has passed since the death, only Ctrl+C
-    /// works: Enter and `q` are thrown away, and do not wait for the end of
+    /// Until [`END_SCREEN_GRACE`] has passed since the end of the game,
+    /// only Ctrl+C works: Enter and `q` are thrown away, and do not wait for the end of
     /// the period to act.
     fn handle_end_key(&mut self, key: KeyEvent) {
         match input::end_command_for(key) {
@@ -872,14 +879,14 @@ impl App {
 
     /// Leaves the finished game for the title menu.
     ///
-    /// The save of the dead character was deleted at the death; if that
-    /// failed, it is tried again here, and a second failure is shown on
+    /// The save of the finished game was deleted when it ended (death or
+    /// victory); if that failed, it is tried again here, and a second failure is shown on
     /// the title screen. Nothing is left to continue.
     fn back_to_title(&mut self) {
         if let Some(save) = &self.save
             && let Err(error) = save.delete()
         {
-            self.save_notice = Some(messages::dead_save_not_deleted_notice(
+            self.save_notice = Some(messages::finished_save_not_deleted_notice(
                 &save.path().display().to_string(),
                 &error.root_cause().to_string(),
             ));
@@ -1088,12 +1095,13 @@ impl App {
     }
 
     /// Submits the player's `action` to the game in progress, adds what
-    /// happened to the log, moves to [`State::GameOver`] if the player
-    /// died, and returns the events; without a game, does nothing.
+    /// happened to the log, moves to [`State::GameOver`] if the game is
+    /// over (the player died or broke the seal), and returns the events;
+    /// without a game, does nothing.
     ///
-    /// The death of the player deletes the save at once, before the end
-    /// screen is drawn, so the dead character cannot be resumed even if the
-    /// game is killed rather than quit.
+    /// The end of the game deletes the save at once, before the end screen
+    /// is drawn, so a finished run cannot be resumed even if the game is
+    /// killed rather than quit.
     fn play(&mut self, action: Action) -> Vec<GameEvent> {
         let Some(run) = &mut self.run else {
             return Vec::new();
@@ -1108,7 +1116,8 @@ impl App {
         events
     }
 
-    /// Deletes the save of the dead character, if the application has one.
+    /// Deletes the save of the finished game (the player died or broke the
+    /// seal), if the application has one.
     ///
     /// A failure is not lost: the log says so, and [`App::save_on_exit`]
     /// (or going back to the title) tries again and reports a second
@@ -1292,6 +1301,7 @@ mod tests {
     mod options_screen;
     mod save_files;
     mod title_screen;
+    mod victory_screen;
 
     /// Seed of every test game: its written form, `7F3A-91C2-0B5E-D4A8`,
     /// is the one of the game screen mock-up in `docs/design.md`.

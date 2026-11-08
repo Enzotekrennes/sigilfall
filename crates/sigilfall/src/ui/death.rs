@@ -1,14 +1,17 @@
 //! The death summary, shown once the player has died: how the run ended,
 //! what the player did, the seed to replay it, and a line to share.
 //!
-//! Exposes [`render`] and [`MAX_KILL_ROWS`]. The screen follows the
+//! Exposes [`render`] and [`MAX_KILL_ROWS`], and to the victory screen
+//! (`ui::victory`) the part both end screens share, [`render_summary`]:
+//! everything below the lines that say how the run ended. The screen follows the
 //! "Récapitulatif de mort" mock-up of `docs/design.md`, from top to bottom:
 //! the title, an epitaph chosen from the seed, the cause of death with the
 //! depth and the turn, the counts of the run (deepest floor, turns,
 //! creatures slain by kind, glyphs learnt, sigils cast by quality, items
 //! used), the seed in a frame, the command that replays it, the line to
 //! share (`messages::share_line`: the daily date or the seed, then the
-//! depth, turns, kills and casts), and the key help. Every count comes from
+//! depth, or "victory" for a won run, turns, kills and casts), and the key
+//! help. Every count comes from
 //! `Game::stats`, which the game keeps from its events; this module only
 //! lays them out.
 //!
@@ -60,16 +63,49 @@ const SEED_LABEL_GAP: usize = 3;
 /// the rows above the last one, and the key help on the last row. Monster
 /// names come from `content`.
 ///
-/// The cause line is only written when the game is over; called on a game
-/// still in progress (a caller's mistake), the screen still shows the
-/// counts and the seed. The background is expected to be painted already,
+/// The cause line is only written when the player died
+/// (`Status::GameOver`); called on a game still in progress or won (a
+/// caller's mistake: `ui::render` sends a won game to `ui::victory`), the
+/// screen still shows the counts and the seed. The background is expected to be painted already,
 /// and an area too small for the text is clipped without panicking.
 pub fn render(frame: &mut Frame, area: Rect, game: &Game, content: &Content, theme: &Theme) {
+    let mut head = vec![
+        Line::styled(messages::DEATH_TITLE, theme.text_title),
+        Line::styled(messages::epitaph(game.seed()), theme.text_muted),
+        Line::default(),
+    ];
+    if let Status::GameOver { killed_by } = game.status() {
+        head.push(Line::styled(
+            messages::cause_of_death(killed_by, game.depth(), game.player_turns(), content),
+            theme.text,
+        ));
+        head.push(Line::default());
+    }
+    render_summary(frame, area, head, game, content, theme);
+}
+
+/// Draws an end screen of `game` over `area`: the `head` lines, which say
+/// how the run ended, then the summary both end screens share (see
+/// [`summary`]), centred as one block in the rows above the last one, and
+/// the key help ("Enter title screen   q quit") on the last row. Monster
+/// names come from `content`.
+///
+/// The background is expected to be painted already, and an area too small
+/// for the text is clipped without panicking.
+pub(super) fn render_summary(
+    frame: &mut Frame,
+    area: Rect,
+    head: Vec<Line<'static>>,
+    game: &Game,
+    content: &Content,
+    theme: &Theme,
+) {
     let summary_area = Rect {
         height: area.height.saturating_sub(1),
         ..area
     };
-    let lines = summary(game, content, theme);
+    let mut lines = head;
+    lines.extend(summary(game, content, theme));
     let text_height = u16::try_from(lines.len()).unwrap_or(u16::MAX);
     let top = summary_area.height.saturating_sub(text_height) / 2;
     let text_area = Rect {
@@ -97,23 +133,13 @@ pub fn render(frame: &mut Frame, area: Rect, game: &Game, content: &Content, the
     frame.render_widget(help, help_area);
 }
 
-/// The centred lines of the summary, top to bottom. Lines of one block (the
-/// counts, the frame of the seed) are padded to the same width, so that
-/// centring each line keeps the block aligned on its left edge.
+/// The centred lines of the summary shared by both end screens, top to
+/// bottom: the counts, the seed in its frame, the replay command and the
+/// line to share. Lines of one block (the counts, the frame of the seed)
+/// are padded to the same width, so that centring each line keeps the
+/// block aligned on its left edge.
 fn summary(game: &Game, content: &Content, theme: &Theme) -> Vec<Line<'static>> {
-    let mut lines = vec![
-        Line::styled(messages::DEATH_TITLE, theme.text_title),
-        Line::styled(messages::epitaph(game.seed()), theme.text_muted),
-        Line::default(),
-    ];
-    if let Status::GameOver { killed_by } = game.status() {
-        lines.push(Line::styled(
-            messages::cause_of_death(killed_by, game.depth(), game.player_turns(), content),
-            theme.text,
-        ));
-        lines.push(Line::default());
-    }
-    lines.extend(padded(counts(game.stats(), content, theme)));
+    let mut lines = padded(counts(game.stats(), content, theme));
     lines.push(Line::default());
     lines.extend(seed_frame(game, theme));
     lines.push(Line::default());
@@ -125,7 +151,7 @@ fn summary(game: &Game, content: &Content, theme: &Theme) -> Vec<Line<'static>> 
     // keeps a row of margin above and below on 80 × 24 with the longest
     // list of kills; in the text style, as the line meant to be copied.
     lines.push(Line::styled(
-        messages::share_line(game.daily_date(), game.seed(), game.stats()),
+        messages::share_line(game.daily_date(), game.seed(), game.stats(), game.status()),
         theme.text,
     ));
     lines

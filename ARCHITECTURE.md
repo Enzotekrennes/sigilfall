@@ -98,7 +98,8 @@ library, and the terminal application in a binary that depends on it.
 | `ui::sigil` | The sigil overlay: the grid with the trace stroke by stroke, the time and essence it costs, the direction prompt and the verdict. |
 | `ui::grimoire` | The grimoire beside the grid. |
 | `ui::inventory` | The inventory over the map. |
-| `ui::death` | The death summary: cause, depth, kills, sigils cast, the seed to replay. |
+| `ui::death` | The death summary: cause, depth, kills, sigils cast, the seed to replay; and the summary it shares with the victory screen. |
+| `ui::victory` | The victory screen, once the seal is broken: the same summary as a death, under its own title and line. |
 | `ui::title` | The title screen, its menu, the seed entry and the confirmation before a saved game is abandoned. |
 | `ui::options` | The options screen. |
 
@@ -121,8 +122,9 @@ library, and the terminal application in a binary that depends on it.
 5. Everything that happened comes back as `Vec<Event>`, which also feeds
    `Stats`.
 6. The application turns the events into sentences (`messages`), appends
-   them to the `message_log`, moves to the end screen if the player died,
-   and the next frame draws the new state.
+   them to the `message_log`, moves to the end screen if the game is over
+   (the death summary or, once the seal is broken, the victory screen,
+   chosen on `Game::status`), and the next frame draws the new state.
 
 ### Generation from a seed
 

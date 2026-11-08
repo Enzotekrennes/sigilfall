@@ -12,9 +12,11 @@ workflow (run it by hand or push a version tag), then committed by hand. -->
 Every stroke of a trace costs time, and the monsters act while you draw:
 a long sigil is a strong spell, but a slow one. The first floors are rooms
 joined by corridors; deeper down, natural caves take their place more and
-more often, and the tenth floor is always one. Each run is generated from a
-seed you can share, so a friend can play the same dungeon, and every day
-brings a daily dungeon, the same for every player on that UTC date.
+more often, and the tenth floor is always one. There are no stairs on the
+tenth floor but a seal, `◎` on the map (`0` in ASCII): break it to win the
+run. Each run is generated from a seed you can share, so a friend can play
+the same dungeon, and every day brings a daily dungeon, the same for every
+player on that UTC date.
 
 ## Install
 
@@ -77,7 +79,7 @@ On the map:
 | `t` | Open the sigil grid to trace a sigil |
 | `g`, `,` | Pick up the item underfoot |
 | `i` | Open the inventory |
-| `>`, `D` | Go down the stairs, when standing on them |
+| `>`, `D` | Go down the stairs, when standing on them; on the tenth floor, break the seal standing on it |
 | `x` | Explore: walk towards the nearest unexplored place, step by step (see below) |
 | `q` | Save and quit |
 | Ctrl+C | Quit from any screen, saving the game in progress |
@@ -118,10 +120,13 @@ erases, Enter starts, Escape goes back. On the options screen: Up and Down
 change the value, Escape goes back. After death, the summary shows the seed
 of the run and a line to copy and share, such as
 `Sigilfall daily 2026-11-08 - depth 4, turn 812, 23 slain, 9 sigils` (or
-`Sigilfall seed 7F3A-91C2-0B5E-D4A8 - …` for a run of a seed); Enter goes
-back to the title, `q` quits. For one second after
-the death only Ctrl+C works, so a key already on its way does not close the
-summary unseen.
+`Sigilfall seed 7F3A-91C2-0B5E-D4A8 - …` for a run of a seed). Breaking the
+seal opens the victory screen, with the same summary and a line that says
+`victory` where the depth would be, such as
+`Sigilfall daily 2026-11-08 - victory, turn 4120, 96 slain, 31 sigils`.
+On either screen Enter goes back to the title, `q` quits. For one second
+after the end of the run only Ctrl+C works, so a key already on its way does
+not close the summary unseen.
 
 ### How sigils work
 
@@ -150,9 +155,9 @@ The game keeps two files in the data folder of your system:
 | macOS | `~/Library/Application Support/Sigilfall` |
 
 - `save.ron` holds the game in progress. It is written when you quit and
-  deleted when you die: death is final. A save that cannot be read back
-  (damaged, or written by another version) is renamed `save.ron.bad`, the
-  title screen says why, and a new game starts.
+  deleted when you die (death is final) or break the seal. A save that
+  cannot be read back (damaged, or written by another version) is renamed
+  `save.ron.bad`, the title screen says why, and a new game starts.
 - `options.ron` holds the options. If it cannot be read, the default
   options are used and the file is replaced at the next change.
 

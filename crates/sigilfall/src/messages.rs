@@ -9,7 +9,8 @@
 //! [`save_set_aside`]), the save notice [`save_not_deleted`], why automatic
 //! exploration stopped ([`exploration_halted`]), the words of
 //! the death summary (its [`epitaph`], [`cause_of_death`], the labels of its
-//! counts, [`cast_breakdown`] and the [`share_line`]), monster, sigil and item names
+//! counts, [`cast_breakdown`] and the [`share_line`]) and of the victory
+//! screen ([`victory_line`], [`victory_outcome`]), monster, sigil and item names
 //! ([`monster_name`], [`sigil_name`], [`item_name`]), what a sigil or an
 //! item does in a few words ([`effect_summary`], [`item_summary`]), the time
 //! a cast takes ([`cast_time`]), why the game refused an item
@@ -35,7 +36,8 @@ use sigilfall_core::content::{
     Content, Effect, ItemDef, ItemEffect, ItemFamily, SigilDef, Targeting,
 };
 use sigilfall_core::event::Event;
-use sigilfall_core::game::Game;
+use sigilfall_core::game::{Game, Status};
+use sigilfall_core::generation;
 use sigilfall_core::item::{INVENTORY_CAPACITY, ItemId, ItemRefusal};
 use sigilfall_core::rng::{DailyDate, Seed};
 use sigilfall_core::schedule::{MOVE_COST, STROKE_COST, cast_cost};
@@ -105,6 +107,10 @@ pub const READ_GLYPH_IN_VIEW: &str = "known glyph";
 
 /// Name of the stairs down in the "in view" list, after their glyph.
 pub const STAIRS_IN_VIEW: &str = "stairs down";
+
+/// Name of the seal of the bottom floor in the "in view" list, after its
+/// glyph: the word of the log and of the key help ("unseal").
+pub const SEAL_IN_VIEW: &str = "seal";
 
 /// Title of the separator above the message log.
 pub const LOG_TITLE: &str = "Log";
@@ -183,6 +189,25 @@ pub const EPITAPHS: [&str; 8] = [
     "Your essence seeps into the old carvings.",
     "The grimoire closes; its margins remember you.",
     "Dust settles over an unfinished pattern.",
+];
+
+/// Title of the victory screen, letter-spaced like [`DEATH_TITLE`], which
+/// it answers.
+pub const VICTORY_TITLE: &str = "T H E   S E A L   B R E A K S";
+
+/// Lines under the victory screen's title, one per run, chosen from the
+/// seed by [`victory_line`]: each tells what the broken seal and the
+/// player's trace leave behind, in the voice of [`EPITAPHS`]. At most 60
+/// characters, like them.
+pub const VICTORY_LINES: [&str; 8] = [
+    "Your trace was true. The dungeon heard it.",
+    "The last sigil was the one that opened the way.",
+    "The wax runs, and the dark lets go of you.",
+    "Ten floors of stone remember a steady hand.",
+    "The carvings fall silent behind you.",
+    "The grimoire closes on a finished page.",
+    "What the seal held is yours to read now.",
+    "Somewhere above, the first glyph still glows.",
 ];
 
 /// Label inside the frame around the seed on the death summary.
@@ -296,6 +321,11 @@ pub const DESCEND_KEY: &str = ">";
 
 /// What [`DESCEND_KEY`] does.
 pub const DESCEND_LABEL: &str = "descend";
+
+/// What [`DESCEND_KEY`] does on the bottom floor, where it breaks the seal
+/// instead: one word, shorter than "break seal", so the game screen's help
+/// still fits 80 columns.
+pub const UNSEAL_LABEL: &str = "unseal";
 
 /// Title of the inventory's frame.
 pub const INVENTORY_TITLE: &str = "Inventory";
@@ -562,16 +592,16 @@ pub fn save_not_deleted_notice(path: &str, cause: &str) -> String {
     )
 }
 
-/// The notice of the title screen when the save of the dead character, at
-/// `path`, could still not be deleted on the way back to the title, for
-/// the reason `cause`.
+/// The notice of the title screen when the save of a finished game (the
+/// player died, or broke the seal), at `path`, could still not be deleted
+/// on the way back to the title, for the reason `cause`.
 ///
 /// A long `cause` and the start of a long `path` are cut, as in
 /// [`save_not_deleted_notice`].
-pub fn dead_save_not_deleted_notice(path: &str, cause: &str) -> String {
+pub fn finished_save_not_deleted_notice(path: &str, cause: &str) -> String {
     let (path, cause) = (bounded_path(path), bounded_reason(cause));
     format!(
-        "The save {path} of the dead character could not be deleted ({cause}). \
+        "The save {path} of the finished game could not be deleted ({cause}). \
          Delete it by hand so it is not resumed."
     )
 }
@@ -620,8 +650,8 @@ pub fn save_set_aside(reason: &str, moved_to: &str) -> Message {
     )
 }
 
-/// The message logged when the save of the dead character could not be
-/// deleted: deleting it is tried again when the player quits, and a failure
+/// The message logged when the save of a finished game (death or victory)
+/// could not be deleted: deleting it is tried again when the player quits, and a failure
 /// then is reported on leaving.
 pub fn save_not_deleted() -> Message {
     Message::new(
@@ -768,7 +798,13 @@ fn bounded_path(path: &str) -> String {
 ///   a descent: "You descend to depth 2." ([`Tone::Info`]: the status line
 ///   and the new floor already show the change, and the line marks in the
 ///   history where the floor above ends); a descent off the stairs, which
-///   took no time: "There are no stairs here." ([`Tone::Info`]);
+///   took no time: "There are no stairs here." ([`Tone::Info`]), or on the
+///   bottom floor, which has a seal instead (`generation::is_bottom_floor`
+///   of the game's depth): "No stairs lead deeper: stand on the seal to
+///   break it." ([`Tone::Info`]);
+/// - the seal broken, which wins the run: "You break the seal. The dungeon
+///   falls silent." ([`Tone::Success`]); the victory screen follows at
+///   once, and the line stays in the log's history;
 /// - a step of automatic exploration refused because nothing is left to
 ///   explore, which took no time: "There is nothing left to explore within
 ///   reach." ([`Tone::Info`]); a step taken is a move, and says nothing;
@@ -996,9 +1032,19 @@ pub fn describe(events: &[Event], game: &Game, content: &Content) -> Vec<Message
                 Tone::Info,
                 format!("You descend to depth {depth}."),
             )),
+            Event::NoStairsHere { .. } if generation::is_bottom_floor(game.depth()) => {
+                Some(Message::new(
+                    Tone::Info,
+                    "No stairs lead deeper: stand on the seal to break it.",
+                ))
+            }
             Event::NoStairsHere { .. } => {
                 Some(Message::new(Tone::Info, "There are no stairs here."))
             }
+            Event::SealBroken { .. } => Some(Message::new(
+                Tone::Success,
+                "You break the seal. The dungeon falls silent.",
+            )),
             Event::NothingToExplore { .. } => Some(Message::new(
                 Tone::Info,
                 "There is nothing left to explore within reach.",
@@ -1009,9 +1055,6 @@ pub fn describe(events: &[Event], game: &Game, content: &Content) -> Vec<Message
             | Event::MoveBlocked { .. }
             | Event::TurnLost { .. }
             | Event::Backlash { .. } => None,
-            // Not worded yet: the victory's line and screen come with the
-            // victory screen (task T34).
-            Event::SealBroken { .. } => None,
         };
         messages.extend(message);
     }
@@ -1110,13 +1153,39 @@ pub fn cause_of_death(killed_by: &Combatant, depth: u32, turn: u64, content: &Co
 /// one of [`EPITAPHS`]: the same seed always gets the same line, so a
 /// replayed run ends the same way.
 pub fn epitaph(seed: Seed) -> &'static str {
+    line_of_seed(seed, &EPITAPHS)
+}
+
+/// Returns the line under the victory screen's title for the run of
+/// `seed`, one of [`VICTORY_LINES`]: the same seed always gets the same
+/// line, as with [`epitaph`].
+pub fn victory_line(seed: Seed) -> &'static str {
+    line_of_seed(seed, &VICTORY_LINES)
+}
+
+/// Returns the line of `lines` that `seed` picks, always the same for the
+/// same seed; an empty `lines` gives an empty line.
+fn line_of_seed(seed: Seed, lines: &[&'static str]) -> &'static str {
     let value = seed.value();
     // Folding the high half in spreads the seeds typed by hand (small
     // numbers) and the random ones alike over the whole list.
     let mixed = value ^ (value >> 32);
-    let count = EPITAPHS.len() as u64;
+    let count = lines.len() as u64;
+    if count == 0 {
+        return "";
+    }
     let index = usize::try_from(mixed % count).unwrap_or_default();
-    EPITAPHS[index]
+    lines[index]
+}
+
+/// Returns the sentence of the victory screen that says where and when the
+/// player broke the seal, in the place of the cause of death: "You broke
+/// the seal at depth 10, on turn 1283."
+///
+/// `depth` is the floor of the seal and `turn` the player's turn it was
+/// broken on, counted as in [`cause_of_death`].
+pub fn victory_outcome(depth: u32, turn: u64) -> String {
+    format!("You broke the seal at depth {depth}, on turn {turn}.")
 }
 
 /// Returns the sigils cast by quality, as the death summary details them:
@@ -1134,12 +1203,17 @@ pub fn replay_hint(seed: Seed) -> String {
     format!("Replay this seed: {} --seed {seed}", env!("CARGO_BIN_NAME"))
 }
 
-/// Returns the line of the death summary a player copies to share the run:
+/// Returns the line of the end screens a player copies to share the run:
 /// which dungeon it was, then how far it went, such as
 /// "Sigilfall daily 2026-11-08 - depth 4, turn 812, 23 slain, 9 sigils"
 /// for the daily run of `daily`, or
 /// "Sigilfall seed 7F3A-91C2-0B5E-D4A8 - depth 4, turn 812, 23 slain, 9 sigils"
 /// for a run of `seed` when `daily` is `None`.
+///
+/// A run whose `status` is [`Status::Won`] says "victory" where the depth
+/// would be ("Sigilfall daily 2026-11-08 - victory, turn 4120, 96 slain,
+/// 31 sigils"): the seal lies on the bottom floor only, so the word tells
+/// the depth as well, and it is one character shorter than "depth 10".
 ///
 /// The counts come from `stats`: the deepest floor reached, the turns
 /// played, the creatures slain and the sigils cast, whatever their
@@ -1147,15 +1221,18 @@ pub fn replay_hint(seed: Seed) -> String {
 /// pastes intact anywhere and two players' lines compare as text; its
 /// longest realistic form (depth 10, five-digit turns, three-digit kills,
 /// two-digit casts, a seed) still fits 80 columns.
-pub fn share_line(daily: Option<DailyDate>, seed: Seed, stats: &Stats) -> String {
+pub fn share_line(daily: Option<DailyDate>, seed: Seed, stats: &Stats, status: &Status) -> String {
     let run = match daily {
         Some(date) => format!("daily {date}"),
         None => format!("seed {seed}"),
     };
+    let reached = match status {
+        Status::Won => "victory".to_owned(),
+        Status::Playing | Status::GameOver { .. } => format!("depth {}", stats.deepest()),
+    };
     let casts = stats.casts().total();
     format!(
-        "Sigilfall {run} - depth {}, turn {}, {} slain, {casts} {}",
-        stats.deepest(),
+        "Sigilfall {run} - {reached}, turn {}, {} slain, {casts} {}",
         stats.turns(),
         stats.total_kills(),
         if casts == 1 { "sigil" } else { "sigils" }
@@ -1670,11 +1747,16 @@ mod tests {
         let fresh = Stats::default();
 
         assert_eq!(
-            share_line(Some(date), Seed::daily(date), &fresh),
+            share_line(Some(date), Seed::daily(date), &fresh, &Status::Playing),
             "Sigilfall daily 2026-11-08 - depth 1, turn 0, 0 slain, 0 sigils"
         );
         assert_eq!(
-            share_line(None, Seed::new(0x7F3A_91C2_0B5E_D4A8), &fresh),
+            share_line(
+                None,
+                Seed::new(0x7F3A_91C2_0B5E_D4A8),
+                &fresh,
+                &Status::Playing
+            ),
             "Sigilfall seed 7F3A-91C2-0B5E-D4A8 - depth 1, turn 0, 0 slain, 0 sigils"
         );
     }
@@ -1697,7 +1779,7 @@ mod tests {
         assert_eq!(stats.casts().total(), 1, "one cast, fizzled");
 
         assert_eq!(
-            share_line(None, SEED, stats),
+            share_line(None, SEED, stats, game.status()),
             format!(
                 "Sigilfall seed {SEED} - depth 1, turn {}, 1 slain, 1 sigil",
                 stats.turns()
@@ -1713,11 +1795,59 @@ mod tests {
         // 2 to 7, a few hundred turns).
         // A fresh run writes one digit for each count: the longest line
         // has 1 + 4 + 2 + 1 more.
-        let fresh = share_line(None, Seed::new(u64::MAX), &Stats::default());
+        let fresh = share_line(
+            None,
+            Seed::new(u64::MAX),
+            &Stats::default(),
+            &Status::Playing,
+        );
         let longest = fresh.len() + 1 + 4 + 2 + 1;
 
         assert!(fresh.is_ascii(), "{fresh}");
         assert!(longest <= 80, "{longest} columns: {fresh}");
+        // A victory writes "victory" in the place of "depth 1", which
+        // leaves room for "depth 10": its longest line is shorter still.
+        let won = share_line(None, Seed::new(u64::MAX), &Stats::default(), &Status::Won);
+        assert!(won.is_ascii(), "{won}");
+        assert!(won.len() + 4 + 2 + 1 < longest, "{won}");
+    }
+
+    #[test]
+    fn the_share_line_of_a_victory_says_so_in_place_of_the_depth() {
+        let date = DailyDate::new(2026, 11, 8).expect("a real date");
+        let fresh = Stats::default();
+
+        assert_eq!(
+            share_line(Some(date), Seed::daily(date), &fresh, &Status::Won),
+            "Sigilfall daily 2026-11-08 - victory, turn 0, 0 slain, 0 sigils"
+        );
+        assert_eq!(
+            share_line(None, Seed::new(0x7F3A_91C2_0B5E_D4A8), &fresh, &Status::Won),
+            "Sigilfall seed 7F3A-91C2-0B5E-D4A8 - victory, turn 0, 0 slain, 0 sigils"
+        );
+    }
+
+    #[test]
+    fn the_victory_line_follows_the_seed_and_every_one_can_be_drawn() {
+        let seed = Seed::new(0x7F3A_91C2_0B5E_D4A8);
+        assert_eq!(victory_line(seed), victory_line(seed), "deterministic");
+
+        let drawn: HashSet<&str> = (0..64)
+            .map(|value| victory_line(Seed::new(value)))
+            .collect();
+        assert_eq!(
+            drawn.len(),
+            VICTORY_LINES.len(),
+            "small seeds reach them all"
+        );
+        for line in VICTORY_LINES {
+            assert!(line.is_ascii() && line.len() <= 60, "{line}");
+            assert!(!EPITAPHS.contains(&line), "{line}");
+        }
+        assert_eq!(
+            victory_outcome(10, 1283),
+            "You broke the seal at depth 10, on turn 1283."
+        );
     }
 
     #[test]
@@ -2435,7 +2565,7 @@ mod tests {
             save_set_aside(&reason, &path).text,
             save_set_aside_notice(&reason, &path),
             save_not_deleted_notice(&path, &reason),
-            dead_save_not_deleted_notice(&path, &reason),
+            finished_save_not_deleted_notice(&path, &reason),
         ] {
             assert!(text.contains(&shown), "{text}");
             assert!(text.contains(r"\save.ron.bad"), "{text}");

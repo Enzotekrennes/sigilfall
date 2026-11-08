@@ -5,7 +5,8 @@
 //! the screens before a game ([`MenuScreen`]); the [`Overlay`] drawn over
 //! the map; one module per screen ([`title`], the title screen with its
 //! seed entry and confirmation, [`options`], [`game`] while playing,
-//! [`death`], the death summary, once the player has died); the parts of
+//! [`death`], the death summary, once the player has died, and
+//! [`victory`], once the player has broken the seal); the parts of
 //! the game screen ([`hud`], the side panel, [`log`], the message log,
 //! [`sigil`], the overlay where sigils are traced, with its [`grimoire`],
 //! and [`inventory`], the overlay of what the player carries); and the
@@ -25,6 +26,7 @@ pub mod log;
 pub mod options;
 pub mod sigil;
 pub mod title;
+pub mod victory;
 
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
@@ -33,7 +35,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget as _, Wrap};
 use sigilfall_core::content::Content;
-use sigilfall_core::game::Game;
+use sigilfall_core::game::{Game, Status};
 use sigilfall_core::rng::DailyDate;
 
 use self::inventory::InventoryScreen;
@@ -104,7 +106,9 @@ pub const fn fits(size: Size) -> bool {
 /// Draws the screen for `game` over the whole frame, with `theme`: the game
 /// screen with the messages of `log` while the game is played, with
 /// `overlay` over its map while the player casts or looks at the
-/// inventory, and the death summary once the game is over. Monster and sigil
+/// inventory, and once the game is over the end screen its status calls
+/// for: the death summary after a death ([`Status::GameOver`]), the victory
+/// screen after the seal was broken ([`Status::Won`]). Monster and sigil
 /// names come from `content`.
 ///
 /// The theme's background is painted on every cell first. When the frame
@@ -124,10 +128,12 @@ pub fn render(
     frame.buffer_mut().set_style(area, theme.bg);
     if !fits(area.as_size()) {
         render_too_small(frame, area, theme);
-    } else if game.is_over() {
-        death::render(frame, area, game, content, theme);
     } else {
-        game::render(frame, area, game, log, content, overlay, theme);
+        match game.status() {
+            Status::Playing => game::render(frame, area, game, log, content, overlay, theme),
+            Status::GameOver { .. } => death::render(frame, area, game, content, theme),
+            Status::Won => victory::render(frame, area, game, content, theme),
+        }
     }
 }
 

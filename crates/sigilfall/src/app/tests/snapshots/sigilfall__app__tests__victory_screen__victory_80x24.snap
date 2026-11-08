@@ -1,0 +1,28 @@
+---
+source: crates/sigilfall/src/app/tests/victory_screen.rs
+expression: text
+---
+                                                                                
+                                                                                
+                          T H E   S E A L   B R E A K S                         
+                   The wax runs, and the dark lets go of you.                   
+                                                                                
+                  You broke the seal at depth 10, on turn 977.                  
+                                                                                
+                     Depth reached ....... 10                                   
+                     Turns ............... 977                                  
+                     Creatures slain ..... 2     2 dust mote                    
+                     Glyphs learnt ....... 0                                    
+                     Sigils cast ......... 0                                    
+                     Items used .......... 0                                    
+                                                                                
+                      ╭──────────────────────────────────╮                      
+                      │    SEED   7F3A-91C2-0B5E-D4A8    │                      
+                      ╰──────────────────────────────────╯                      
+                                                                                
+             Replay this seed: sigilfall --seed 7F3A-91C2-0B5E-D4A8             
+    Sigilfall seed 7F3A-91C2-0B5E-D4A8 - victory, turn 977, 2 slain, 0 sigils   
+                                                                                
+                                                                                
+                                                                                
+ Enter title screen   q quit
