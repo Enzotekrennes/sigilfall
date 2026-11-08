@@ -2440,4 +2440,32 @@ mod tests {
         }
         assert!(options_unreadable(&reason).chars().count() < 200);
     }
+
+    #[test]
+    fn the_readme_names_the_colour_values_as_the_options_screen_shows_them() {
+        /// The README, from the root of the repository.
+        const README: &str = include_str!("../../../README.md");
+        let options = README
+            .split("### Options")
+            .nth(1)
+            .and_then(|section| {
+                section
+                    .split(
+                        "
+## ",
+                    )
+                    .next()
+            })
+            .expect("the README has an Options section");
+        let options = options.split_whitespace().collect::<Vec<_>>().join(" ");
+
+        let listed = format!(
+            "**Colours** ({}, {ANSI16_VALUE} or {MONOCHROME_VALUE})",
+            auto_colors(ColorSupport::None, '=')
+                .split_whitespace()
+                .next()
+                .unwrap()
+        );
+        assert!(options.contains(&listed), "{listed} in {options}");
+    }
 }

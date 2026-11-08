@@ -453,6 +453,53 @@ fn the_settings_pick_the_mode_of_the_options_and_the_terminal() {
 }
 
 #[test]
+fn an_explicit_colour_choice_reaches_the_terminal_under_no_color_and_auto_does_not() {
+    use ratatui::backend::IntoCrossterm as _;
+    use ratatui::crossterm::Command as _;
+    use ratatui::crossterm::style::{SetForegroundColor, force_color_output};
+
+    /// The escape sequence crossterm writes for the foreground of `style`.
+    fn written(style: Style) -> String {
+        let colour = style.fg.unwrap_or(Color::Reset).into_crossterm();
+        let mut sequence = String::new();
+        SetForegroundColor(colour)
+            .write_ansi(&mut sequence)
+            .unwrap();
+        sequence
+    }
+
+    let no_color = ColorSupport::from_env(env_of(&[("NO_COLOR", "1")]));
+    let ansi16 = Options {
+        colors: ColorChoice::Ansi16,
+        ..Options::default()
+    };
+    let explicit = settings(ansi16, no_color, false).theme();
+
+    // The state crossterm puts itself in when it finds NO_COLOR set, reached
+    // without changing the environment the other tests read: every colour
+    // is dropped.
+    force_color_output(false);
+    assert_eq!(written(explicit.player), "\x1b[m", "crossterm drops it");
+
+    let_the_theme_decide_colours();
+
+    let sequence = written(explicit.player);
+    assert!(sequence.starts_with("\x1b[38;5;"), "{sequence:?}");
+    // Auto still honours NO_COLOR: its theme sets no colour of its own.
+    let auto = settings(Options::default(), no_color, false).theme();
+    for style in [
+        auto.bg,
+        auto.text,
+        auto.player,
+        auto.monster_hostile,
+        auto.hp_low,
+    ] {
+        assert!(matches!(style.fg, None | Some(Color::Reset)), "{style:?}");
+        assert!(matches!(style.bg, None | Some(Color::Reset)), "{style:?}");
+    }
+}
+
+#[test]
 fn ascii_on_the_command_line_wins_over_the_glyph_option() {
     let unicode = Options::default();
     let ascii = Options {

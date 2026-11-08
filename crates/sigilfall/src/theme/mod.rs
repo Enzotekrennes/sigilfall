@@ -123,6 +123,23 @@ impl ColorChoice {
     }
 }
 
+/// Makes the theme the only judge of colour for the rest of the process:
+/// every colour it resolves reaches the terminal.
+///
+/// Crossterm, which writes to the terminal, reads `NO_COLOR` on its own
+/// and then drops every colour sequence it is asked to write. That would
+/// silently undo an explicit [`ColorChoice::Ansi16`] made while `NO_COLOR`
+/// is set, which [`ColorChoice::support`] lets win. `NO_COLOR` is already
+/// honoured where it belongs: [`ColorSupport::detect`] turns it into
+/// [`ColorSupport::None`], so [`ColorChoice::Auto`] draws in monochrome,
+/// whose theme sets no colour but the terminal's own.
+///
+/// Called once by `main`, before the first frame is drawn. Changes a
+/// process-wide setting of crossterm (`crossterm::style::force_color_output`).
+pub fn let_the_theme_decide_colours() {
+    ratatui::crossterm::style::force_color_output(true);
+}
+
 /// The display options the player chooses on the options screen and keeps
 /// between runs (`persist::OptionsFile`). The default is Unicode glyphs,
 /// automatic colours and the dark theme.

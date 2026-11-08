@@ -387,23 +387,180 @@ fn unreadable(reason: &str) -> LoadedOptions {
     }
 }
 
-/// Reads the text of an options file, or returns why it cannot be: another
-/// format version, or the parser's message (with its line and column) for
-/// anything malformed.
+/// Reads the text of an options file, or returns why it cannot be, in
+/// the words of the file rather than of the program: it is empty, it has
+/// another format version, or what is wrong and on which line (see
+/// [`describe_parse_error`]).
 fn parse_options(text: &str) -> Result<Options, String> {
-    let version: OptionsVersion = ron::from_str(text).map_err(|error| error.to_string())?;
+    if text.trim().is_empty() {
+        return Err("it is empty".to_owned());
+    }
+    let version: OptionsVersion =
+        ron::from_str(text).map_err(|error| describe_parse_error(text, &error))?;
     if version.format_version != OPTIONS_FORMAT_VERSION {
         return Err(format!(
             "it has format version {}, but this game reads version {OPTIONS_FORMAT_VERSION}",
             version.format_version
         ));
     }
-    let record: OptionsRecord = ron::from_str(text).map_err(|error| error.to_string())?;
+    let record: OptionsRecord =
+        ron::from_str(text).map_err(|error| describe_parse_error(text, &error))?;
     Ok(Options {
         glyphs: record.glyphs,
         colors: record.colors,
         appearance: record.theme,
     })
+}
+
+/// The settings of the options file: the name serde gives the type of each
+/// value in its errors, and the key that names the setting in the file.
+///
+/// The parser reports an unknown value with the type's name (`GlyphSet`),
+/// which means nothing to a player; the key (`glyphs`) is what they read in
+/// the file.
+const SETTING_KEYS: [(&str, &str); 3] = [
+    ("GlyphSet", "glyphs"),
+    ("ColorChoice", "colors"),
+    ("Appearance", "theme"),
+];
+
+/// Key of the format version in the options file.
+const VERSION_KEY: &str = "format_version";
+
+/// Describes why the options file `text` could not be parsed, as `error`
+/// says, in a short reason that names the line and, when it can, the
+/// setting at fault in the file's own words, such as "line 1: unknown
+/// value `Braille` for glyphs (Unicode or Ascii)".
+///
+/// The parser's own messages are never shown: they name the program's
+/// types ("enum `GlyphSet`", "struct `OptionsVersion`"). An error the
+/// function does not recognise gives "this is not valid RON" with its line
+/// and column.
+fn describe_parse_error(text: &str, error: &ron::error::SpannedError) -> String {
+    use ron::error::Error;
+
+    let at = error.span.start;
+    let line = format!("line {}", at.line);
+    let place = format!("line {}, column {}", at.line, at.col);
+    match &error.code {
+        Error::NoSuchEnumVariant {
+            expected,
+            found,
+            outer,
+        } => {
+            let key = outer.as_deref().and_then(setting_key);
+            match key {
+                Some(key) => format!(
+                    "{line}: unknown value `{found}` for {key} ({})",
+                    one_of(expected)
+                ),
+                None => format!("{line}: unknown value `{found}`"),
+            }
+        }
+        Error::MissingStructField { field, .. } => {
+            format!("{} is missing", setting_name(field))
+        }
+        Error::DuplicateStructField { field, .. } => {
+            format!("{line}: {} is given twice", setting_name(field))
+        }
+        // The format version is the only number of the file.
+        Error::ExpectedInteger | Error::IntegerOutOfBounds | Error::InvalidIntegerDigit { .. } => {
+            format!("{line}: the format version must be a whole number")
+        }
+        Error::ExpectedIdentifier
+        | Error::SuggestRawIdentifier(_)
+        | Error::InvalidValueForType { .. } => match key_before(text, at) {
+            Some(key) => format!("{line}: wrong kind of value for {key}"),
+            None => format!("{place}: wrong kind of value"),
+        },
+        Error::ExpectedNamedStructLike(_)
+        | Error::ExpectedStructLike
+        | Error::ExpectedDifferentStructName { .. } => {
+            format!("{line}: the settings must be inside ( and )")
+        }
+        Error::Eof => format!("{line}: the file ends too early"),
+        Error::ExpectedComma => format!("{place}: a comma is missing"),
+        Error::ExpectedMapColon => format!("{place}: a colon is missing"),
+        Error::ExpectedStructLikeEnd => format!("{place}: a closing ) is missing"),
+        Error::TrailingCharacters => format!("{place}: unexpected text after the closing )"),
+        Error::UnexpectedChar(character) => {
+            format!("{place}: unexpected character `{character}`")
+        }
+        _ => format!("{place}: this is not valid RON"),
+    }
+}
+
+/// The key in the file of the setting whose values have the type named
+/// `type_name` in the parser's errors, if it is one of [`SETTING_KEYS`].
+fn setting_key(type_name: &str) -> Option<&'static str> {
+    SETTING_KEYS
+        .iter()
+        .find(|(name, _)| *name == type_name)
+        .map(|(_, key)| *key)
+}
+
+/// How a reason names the field `field` of the file: "the format version"
+/// for [`VERSION_KEY`], "the `glyphs` setting" for a setting.
+fn setting_name(field: &str) -> String {
+    if field == VERSION_KEY {
+        "the format version".to_owned()
+    } else {
+        format!("the `{field}` setting")
+    }
+}
+
+/// The accepted values `values` as a reason lists them: "Unicode or Ascii",
+/// "Auto, Ansi16 or Monochrome".
+fn one_of(values: &[&str]) -> String {
+    match values {
+        [] => String::new(),
+        [only] => (*only).to_owned(),
+        [first @ .., last] => format!("{} or {last}", first.join(", ")),
+    }
+}
+
+/// The key of the setting whose value starts at `at` in `text`, as in
+/// `glyphs: 3`, when it is one of [`SETTING_KEYS`].
+///
+/// The parser does not say which field a value of the wrong kind belongs
+/// to, only where that value starts; the key is the word just before the
+/// colon that precedes it. `None` when the text before `at` does not end
+/// with a known key and a colon.
+fn key_before(text: &str, at: ron::error::Position) -> Option<&'static str> {
+    let before = text[..byte_offset(text, at)?]
+        .trim_end()
+        .strip_suffix(':')?
+        .trim_end();
+    let start = before
+        .char_indices()
+        .rev()
+        .find(|(_, character)| !(character.is_ascii_alphanumeric() || *character == '_'))
+        .map_or(0, |(index, character)| index + character.len_utf8());
+    let key = &before[start..];
+    SETTING_KEYS
+        .iter()
+        .map(|(_, setting)| *setting)
+        .find(|setting| *setting == key)
+}
+
+/// The byte offset in `text` of the character at `at`, a 1-based line and
+/// column (in characters) as the parser reports them, or `None` when `text`
+/// has no such position. The position just after the last character is the
+/// length of `text`.
+fn byte_offset(text: &str, at: ron::error::Position) -> Option<usize> {
+    let (mut line, mut column) = (1, 1);
+    for (offset, character) in text.char_indices() {
+        if (line, column) == (at.line, at.col) {
+            return Some(offset);
+        }
+        if character == '\n' {
+            line += 1;
+            column = 1;
+        } else {
+            column += 1;
+        }
+    }
+    ((line, column) == (at.line, at.col)).then_some(text.len())
 }
 
 /// Writes `text` to `path` so that a crash leaves the old file or the new
@@ -908,6 +1065,176 @@ mod tests {
             reason,
             "it has format version 2, but this game reads version 1"
         );
+    }
+
+    /// The reason given for an options file whose text is `text`.
+    fn reason_for(text: &str) -> String {
+        parse_options(text).expect_err(text)
+    }
+
+    #[test]
+    fn an_unknown_value_names_the_setting_and_its_values() {
+        assert_eq!(
+            reason_for("(format_version: 1, glyphs: Braille, colors: Auto, theme: Dark)"),
+            "line 1: unknown value `Braille` for glyphs (Unicode or Ascii)"
+        );
+        assert_eq!(
+            reason_for("(format_version: 1, glyphs: Ascii, colors: Rainbow, theme: Dark)"),
+            "line 1: unknown value `Rainbow` for colors (Auto, Ansi16 or Monochrome)"
+        );
+        assert_eq!(
+            reason_for(
+                "(\n  format_version: 1,\n  glyphs: Ascii,\n  colors: Auto,\n  theme: Sepia,\n)"
+            ),
+            "line 5: unknown value `Sepia` for theme (Dark or Light)"
+        );
+    }
+
+    #[test]
+    fn a_value_of_the_wrong_kind_names_the_setting() {
+        for (text, expected) in [
+            (
+                "(format_version: 1, glyphs: 3, colors: Auto, theme: Dark)",
+                "line 1: wrong kind of value for glyphs",
+            ),
+            (
+                "(format_version: 1, glyphs: Ascii, colors: \"Auto\", theme: Dark)",
+                "line 1: wrong kind of value for colors",
+            ),
+            (
+                "(\n  format_version: 1,\n  glyphs: Ascii,\n  colors: Auto,\n  theme:\n    [1],\n)",
+                "line 6: wrong kind of value for theme",
+            ),
+            (
+                "(format_version: 1, glyphs: true, colors: Auto, theme: Dark)",
+                "line 1: unknown value `true` for glyphs (Unicode or Ascii)",
+            ),
+        ] {
+            assert_eq!(reason_for(text), expected, "{text}");
+        }
+    }
+
+    #[test]
+    fn a_missing_or_repeated_setting_is_named() {
+        assert_eq!(
+            reason_for("(format_version: 1, glyphs: Ascii, theme: Dark)"),
+            "the `colors` setting is missing"
+        );
+        assert_eq!(
+            reason_for(
+                "(format_version: 1, glyphs: Ascii, glyphs: Ascii, colors: Auto, theme: Dark)"
+            ),
+            "line 1: the `glyphs` setting is given twice"
+        );
+    }
+
+    #[test]
+    fn a_missing_or_malformed_version_is_named_as_the_format_version() {
+        for (text, expected) in [
+            (
+                "(glyphs: Ascii, colors: Auto, theme: Dark)",
+                "the format version is missing",
+            ),
+            (
+                "(format_version: \"one\", glyphs: Ascii, colors: Auto, theme: Dark)",
+                "line 1: the format version must be a whole number",
+            ),
+            (
+                "(format_version: -1, glyphs: Ascii, colors: Auto, theme: Dark)",
+                "line 1: the format version must be a whole number",
+            ),
+            (
+                "(format_version: 99999999999, glyphs: Ascii, colors: Auto, theme: Dark)",
+                "line 1: the format version must be a whole number",
+            ),
+        ] {
+            assert_eq!(reason_for(text), expected, "{text}");
+        }
+    }
+
+    #[test]
+    fn invalid_ron_gives_the_line_and_a_short_reason() {
+        for (text, expected) in [
+            ("", "it is empty"),
+            ("  \n ", "it is empty"),
+            ("42", "line 1: the settings must be inside ( and )"),
+            (
+                "this is not ron {{{",
+                "line 1: the settings must be inside ( and )",
+            ),
+            (
+                "Options(format_version: 1, glyphs: Ascii, colors: Auto, theme: Dark)",
+                "line 1: the settings must be inside ( and )",
+            ),
+            (
+                "(format_version: 1, glyphs: As",
+                "line 1, column 29: a comma is missing",
+            ),
+            (
+                "(format_version: 1,\n glyphs:",
+                "line 2: the file ends too early",
+            ),
+            (
+                "(format_version: 1 glyphs: Ascii)",
+                "line 1, column 20: a comma is missing",
+            ),
+            (
+                "(format_version: 1, glyphs: Ascii, colors: Auto, theme: Dark) x",
+                "line 1, column 62: unexpected text after the closing )",
+            ),
+            ("/* x", "line 1, column 3: this is not valid RON"),
+        ] {
+            assert_eq!(reason_for(text), expected, "{text}");
+        }
+    }
+
+    #[test]
+    fn no_reason_names_the_program_s_types() {
+        let internal = [
+            "OptionsVersion",
+            "OptionsRecord",
+            "GlyphSet",
+            "ColorChoice",
+            "Appearance",
+            "struct",
+            "enum",
+            "variant",
+            "identifier",
+            "u32",
+            "Expected",
+        ];
+        for text in [
+            "(format_version: 1, glyphs: Braille, colors: Auto, theme: Dark)",
+            "(format_version: 1, glyphs: Ascii, colors: Rainbow, theme: Dark)",
+            "(format_version: 1, glyphs: Ascii, colors: Auto, theme: Sepia)",
+            "(format_version: 1, glyphs: 3, colors: Auto, theme: Dark)",
+            "(format_version: 1, glyphs: [1], colors: Auto, theme: Dark)",
+            "(format_version: 1, glyphs: Ascii(2), colors: Auto, theme: Dark)",
+            "(format_version: \"one\", glyphs: Ascii, colors: Auto, theme: Dark)",
+            "(format_version: 1.5, glyphs: Ascii, colors: Auto, theme: Dark)",
+            "(glyphs: Ascii, colors: Auto, theme: Dark)",
+            "(format_version: 1, glyphs: Ascii)",
+            "(format_version: 1, format_version: 1, glyphs: Ascii, colors: Auto, theme: Dark)",
+            "OptionsVersion(format_version: 1, glyphs: Ascii, colors: Auto, theme: Dark)",
+            "Foo(format_version: 1)",
+            "42",
+            "[1, 2]",
+            "{\"a\": 1}",
+            "glyphs = ascii",
+            "(format_version 1)",
+            "(format_version: 1, glyphs: Ascii, colors: Auto, theme: Dark",
+            "(format_version: 1, glyphs: Ascii, colors: Auto, theme: Dark))",
+            "(format_version: 1, \"glyphs\": Ascii, colors: Auto, theme: Dark)",
+        ] {
+            let reason = reason_for(text);
+            for word in internal {
+                assert!(!reason.contains(word), "{text}: {reason}");
+            }
+            assert!(
+                reason.starts_with("line ") || reason.starts_with("the "),
+                "{text}: {reason}"
+            );
+        }
     }
 
     #[test]

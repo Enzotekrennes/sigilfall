@@ -132,9 +132,10 @@ of a turn for each node linked, and the monsters keep moving meanwhile.
 
 ### Options
 
-**Glyphs** (Unicode or ASCII), **Colours** (automatic, 16 colours or none)
+**Glyphs** (Unicode or ASCII), **Colours** (Auto, 16 colours or Monochrome)
 and **Theme** (dark, or light for 24-bit colour terminals) apply at once and
-are kept for the next sessions.
+are kept for the next sessions. Auto follows the terminal and `NO_COLOR`;
+16 colours and Monochrome apply whatever they say.
 
 ## Files
 
@@ -160,7 +161,7 @@ Both are readable RON text.
 | Variable | Effect |
 |---|---|
 | `SIGILFALL_DATA_DIR` | Use this folder instead of the system's data folder, for the save and the options. Created if missing; ignored when empty. |
-| `NO_COLOR` | When set to a non-empty value, draw without colour ([no-color.org](https://no-color.org)). |
+| `NO_COLOR` | When set to a non-empty value and **Colours** is Auto, draw without colour ([no-color.org](https://no-color.org)). Choosing 16 colours in the options wins over it. |
 | `COLORTERM` | `truecolor` or `24bit` turns on 24-bit colour; otherwise the 16 ANSI colours are used, except in Windows Terminal (detected by `WT_SESSION`), which gets 24-bit colour. |
 
 ## Build and test

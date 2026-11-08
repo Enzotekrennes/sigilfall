@@ -65,6 +65,24 @@ fn help_lists_the_seed_daily_and_ascii_options() {
 }
 
 #[test]
+fn help_is_wrapped_to_the_width_in_columns() {
+    // Under `cargo test` the output is a pipe, not a terminal, so the width
+    // comes from COLUMNS, as in a shell that exports it.
+    let output = Command::new(env!("CARGO_BIN_EXE_sigilfall"))
+        .arg("--help")
+        .env("COLUMNS", "80")
+        .output()
+        .expect("start the sigilfall executable");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success(), "{stdout}");
+    assert!(stdout.contains("--seed <SEED>"), "{stdout}");
+    for line in stdout.lines() {
+        assert!(line.chars().count() <= 80, "{line:?} in\n{stdout}");
+    }
+}
+
+#[test]
 fn a_redirected_output_is_refused_at_once_with_a_clear_message() {
     // Under `cargo test`, the pipes set up below are not terminals, just
     // like `sigilfall --seed 42 > out.txt`.

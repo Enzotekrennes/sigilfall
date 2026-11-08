@@ -81,6 +81,10 @@ fn main() -> anyhow::Result<()> {
     require_terminal_output()?;
     install_panic_hook();
 
+    // NO_COLOR is applied by the colour option (Auto), not by crossterm, so
+    // an explicit choice of colours wins over it.
+    theme::let_the_theme_decide_colours();
+
     let content = Content::load().context("the game data built into this binary is invalid")?;
     let mut app = App::launch(ColorSupport::detect(), &cli, &content, SaveFile::locate()?)?;
     let outcome = enter_terminal().and_then(|mut terminal| app.run(&mut terminal));

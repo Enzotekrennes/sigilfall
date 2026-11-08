@@ -1,7 +1,11 @@
 //! The command line: options the game is started with.
 //!
 //! Exposes [`Cli`], read from the process arguments by clap, which also
-//! generates `--help` and `--version`. An invalid value, such as
+//! generates `--help` and `--version`. The help is wrapped to the width of
+//! the terminal (clap's `wrap_help` feature; when the output is not a
+//! terminal, to `COLUMNS`, else 100 columns), so it reads whole in an
+//! 80-column terminal. An invalid
+//! value, such as
 //! `--seed abc` or `--seed -1`, is reported by clap with the accepted forms of the value
 //! and ends the process with a non-zero exit code, before the terminal is
 //! touched. So is `--daily` given with `--seed`: the daily dungeon has its
@@ -64,6 +68,28 @@ mod tests {
     #[test]
     fn the_command_line_definition_is_consistent() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn the_help_fits_an_80_column_terminal() {
+        /// Width of the smallest terminal the game supports.
+        const COLUMNS: usize = 80;
+
+        let mut command = Cli::command().term_width(COLUMNS);
+        let long = command.render_long_help().to_string();
+        let short = command.render_help().to_string();
+
+        for help in [&long, &short] {
+            for line in help.lines() {
+                assert!(line.chars().count() <= COLUMNS, "{line:?} in\n{help}");
+            }
+        }
+        // Wrapped, not cut: the end of the longest description is still there.
+        let words = long.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            words.contains("abandon it from the title screen first"),
+            "{long}"
+        );
     }
 
     #[test]
