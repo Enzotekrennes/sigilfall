@@ -3,7 +3,9 @@
 //! Only invocations that end before the game takes over the terminal are
 //! run here (invalid or conflicting arguments, `--help`, `--version`, a
 //! redirected output), so the tests need no terminal and leave none in a
-//! changed state.
+//! changed state. Among them, `--seed` with a value that is not a seed:
+//! each such run must end before the terminal is touched, with a clean
+//! refusal that names the formats expected.
 
 use std::io::Read as _;
 use std::process::{Command, Output, Stdio};
@@ -130,4 +132,100 @@ fn a_redirected_output_is_refused_at_once_with_a_clear_message() {
         stderr.contains("standard output is not a terminal"),
         "{stderr}"
     );
+}
+
+/// Runs the built `sigilfall_without_input` executable with `arguments`, with no input.
+fn sigilfall_without_input(arguments: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_sigilfall"))
+        .args(arguments)
+        .stdin(Stdio::null())
+        .output()
+        .expect("start the sigilfall executable")
+}
+
+/// Checks that `output` is a clean refusal of the seed `value`.
+fn assert_clear_refusal(value: &str, output: &Output) {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert_eq!(output.status.code(), Some(2), "{value:?}: {stderr}");
+    assert!(output.stdout.is_empty(), "{value:?}: nothing on stdout");
+    assert!(
+        !stderr.contains('\x1b'),
+        "{value:?}: no terminal escape in the message: {stderr:?}"
+    );
+    assert!(!stderr.contains("panicked"), "{value:?}: {stderr}");
+    assert!(stderr.contains("--seed"), "{value:?}: {stderr}");
+    assert!(stderr.contains("such as 42"), "{value:?}: {stderr}");
+    assert!(
+        stderr.contains("7F3A-91C2-0B5E-D4A8"),
+        "{value:?}: {stderr}"
+    );
+}
+
+#[test]
+fn seed_abc_is_refused_and_says_which_formats_are_expected() {
+    let output = sigilfall_without_input(&["--seed", "abc"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert_clear_refusal("abc", &output);
+    assert!(
+        stderr.contains("'abc'"),
+        "the bad value is quoted: {stderr}"
+    );
+}
+
+#[test]
+fn the_equals_form_is_refused_the_same_way() {
+    assert_clear_refusal("abc", &sigilfall_without_input(&["--seed=abc"]));
+}
+
+#[test]
+fn other_malformed_seeds_are_refused_the_same_way() {
+    for value in [
+        "",
+        " 42",
+        "42 ",
+        "4.2",
+        "0x2A",
+        "18446744073709551616",
+        "7F3A-91C2-0B5E",
+        "7F3A-91C2-0B5E-D4A8-0000",
+        "7F3A-91C2-0B5E-D4AG",
+        "7F3A91C20B5ED4A8",
+        "'; rm -rf / #",
+        &"9".repeat(5000),
+    ] {
+        assert_clear_refusal(value, &sigilfall_without_input(&["--seed", value]));
+    }
+}
+
+#[test]
+fn a_bad_seed_is_refused_even_when_other_options_are_valid() {
+    assert_clear_refusal(
+        "abc",
+        &sigilfall_without_input(&["--ascii", "--seed", "abc"]),
+    );
+}
+
+#[test]
+fn a_seed_option_without_a_value_is_refused() {
+    let output = sigilfall_without_input(&["--seed"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert_eq!(output.status.code(), Some(2), "{stderr}");
+    assert!(output.stdout.is_empty());
+    assert!(stderr.contains("--seed"), "{stderr}");
+}
+
+#[test]
+fn a_negative_seed_given_with_an_equals_sign_is_refused_with_the_format() {
+    assert_clear_refusal("-1", &sigilfall_without_input(&["--seed=-1"]));
+}
+
+/// Non-regression test of bug B1 of the F2 test: with a space, `-1` was
+/// read as an unknown option and the message did not mention the seed
+/// formats.
+#[test]
+fn a_negative_seed_given_after_a_space_is_refused_with_the_format() {
+    assert_clear_refusal("-1", &sigilfall_without_input(&["--seed", "-1"]));
 }

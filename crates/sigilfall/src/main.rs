@@ -14,24 +14,6 @@ mod app;
 mod casting;
 mod cli;
 mod clock;
-#[cfg(test)]
-mod f10_acceptance;
-#[cfg(test)]
-mod f11_acceptance;
-#[cfg(test)]
-mod f12_acceptance;
-#[cfg(test)]
-mod f14_acceptance;
-#[cfg(test)]
-mod f3_acceptance;
-#[cfg(test)]
-mod f6_acceptance;
-#[cfg(test)]
-mod f7_acceptance;
-#[cfg(test)]
-mod f8_acceptance;
-#[cfg(test)]
-mod f9_acceptance;
 mod input;
 mod message_log;
 mod messages;

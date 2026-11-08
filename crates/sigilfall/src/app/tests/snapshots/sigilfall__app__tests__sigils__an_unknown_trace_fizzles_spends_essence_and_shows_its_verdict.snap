@@ -1,0 +1,28 @@
+---
+source: crates/sigilfall/src/app/tests/sigils.rs
+expression: text
+---
+" Depth 1 · Turn 2                                      Seed 7F3A-91C2-0B5E-D4A8 "
+"╭─ Failed trace ────────────────────────────────────────╮ │ HP            30/30 "
+"│                                                       │ │ ██████████████████  "
+"│  ○     ●     ○   FAILED                               │ │ Essence         4/6 "
+"│      ╱   ╲       no known pattern                     │ │                     "
+"│    ╱       ╲     traced    4·8·6                      │ │ SIGILS          0/5 "
+"│  ●     ○     ×                                        │ │ none yet            "
+"│                                                       │ │                     "
+"│                                                       │ │ IN VIEW             "
+"│  ○     ○     ○   The spell fizzles.                   │ │ @ you               "
+"│                                                       │ │                     "
+"│                                                       │ │                     "
+"│                                                       │ │                     "
+"│                                                       │ │                     "
+"│                                                       │ │                     "
+"╰───────────────────────────────────────────────────────╯ │                     "
+"                                                          │                     "
+"─ Log ────────────────────────────────────────────────────┴─────────────────────"
+"   You enter the dungeon.                                                       "
+" ~ The trace matches no sigil you know and fizzles.                             "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+" Enter continue                                                                 "

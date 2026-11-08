@@ -1,20 +1,27 @@
-//! The title screen (T26), driven by simulated keys on scratch folders
-//! only: the menu with and without "Continue", its moves and the quit
-//! keys, a new game with and without a saved one (and the confirmation
-//! that guards it), the seed entry with valid and invalid seeds, the way
-//! back from the end screen, `--seed` and `--ascii` on the command line,
-//! the styles of the chosen line in every rendering mode, and the
-//! snapshots of each step.
+//! The title screen, driven by simulated keys on scratch folders only: the menu
+//! with and without "Continue", its order, its moves and the quit keys, a new
+//! game with and without a saved one (and the confirmation that guards it), the
+//! seed entry with valid and invalid seeds, the way back from the end screen,
+//! `--seed` and `--ascii` on the command line, the styles of the chosen line in
+//! every rendering mode, and the snapshots of each step.
 
-use std::fs;
-
-use ratatui::style::{Color, Modifier};
-
+use super::player_view::{
+    SIZES, chosen, ctrl_c, files, go_to, launch_with_arguments, row_of, rows, save_game, text,
+};
 use super::save_files::{WALK, doomed_app, launch, log_lines, state_of, type_keys, wait_for_death};
 use super::*;
+use crate::app::{App, State};
+use crate::cli::Cli;
+use crate::clock::ManualClock;
 use crate::persist::ScratchFolder;
 use crate::theme::{Appearance, ColorChoice, ColorSupport, Options};
 use crate::ui::title::{Confirmation, SeedEntry, SeedProblem, TitleItem, TitleMenu};
+use ratatui::buffer::Buffer;
+use ratatui::crossterm::event::KeyCode;
+use ratatui::style::{Color, Modifier};
+use sigilfall_core::game::Game;
+use sigilfall_core::rng::Seed;
+use std::fs;
 
 /// The command line `sigilfall`, with `--seed` and `--ascii` as given.
 const fn command_line(seed: Option<Seed>, ascii: bool) -> Cli {
@@ -666,4 +673,366 @@ fn every_title_step_keeps_the_terminal_colours_in_monochrome() {
             );
         }
     }
+}
+
+// --- Scenario 1: the title screen offers every entry ------------------------
+
+#[test]
+fn the_title_lists_new_game_seed_daily_options_and_quit_in_that_order_without_a_save() {
+    let folder = ScratchFolder::new("f10-title-empty");
+    let app = launch_with_arguments(&folder, &[]).unwrap();
+
+    for (width, height) in SIZES {
+        let screen = rows(&app, width, height);
+        let at: Vec<Option<usize>> = ["New game", "Seed", "Daily", "Options", "Quit"]
+            .iter()
+            .map(|label| row_of(&screen, label))
+            .collect();
+        assert!(at.iter().all(Option::is_some), "{width}x{height}: {at:?}");
+        assert!(at.windows(2).all(|pair| pair[0] < pair[1]), "{at:?}");
+        assert_eq!(row_of(&screen, "Continue"), None, "no save, no Continue");
+    }
+    assert_eq!(
+        chosen(&app),
+        TitleItem::NewGame,
+        "the first entry is chosen"
+    );
+    assert!(!app.has_saved_game());
+}
+
+#[test]
+fn with_a_save_continue_comes_first_is_chosen_and_says_where_the_game_stands() {
+    let folder = ScratchFolder::new("f10-title-save");
+    save_game(&folder, 42, 4);
+    let app = launch_with_arguments(&folder, &[]).unwrap();
+
+    for (width, height) in SIZES {
+        let screen = rows(&app, width, height);
+        let at: Vec<Option<usize>> = ["Continue", "New game", "Seed", "Daily", "Options", "Quit"]
+            .iter()
+            .map(|label| row_of(&screen, label))
+            .collect();
+        assert!(at.iter().all(Option::is_some), "{width}x{height}: {at:?}");
+        assert!(at.windows(2).all(|pair| pair[0] < pair[1]), "{at:?}");
+        let continue_row = &screen[at[0].unwrap()];
+        assert!(continue_row.contains("depth 1"), "{continue_row}");
+        assert!(
+            continue_row.contains("turn 5"),
+            "4 waits: the turn shown is the fifth: {continue_row}"
+        );
+    }
+    assert_eq!(chosen(&app), TitleItem::Continue);
+}
+
+#[test]
+fn the_menu_wraps_around_and_every_entry_does_what_it_says() {
+    let folder = ScratchFolder::new("f10-title-keys");
+    let mut app = launch_with_arguments(&folder, &[]).unwrap();
+
+    app.handle_key(press(KeyCode::Up));
+    assert_eq!(
+        chosen(&app),
+        TitleItem::Quit,
+        "Up from the first wraps to Quit"
+    );
+    app.handle_key(press(KeyCode::Down));
+    assert_eq!(chosen(&app), TitleItem::NewGame, "Down from Quit wraps");
+    app.handle_key(press(KeyCode::End));
+    assert_eq!(chosen(&app), TitleItem::Quit);
+    app.handle_key(press(KeyCode::Home));
+    assert_eq!(chosen(&app), TitleItem::NewGame);
+    app.handle_key(press(KeyCode::Char('j')));
+    assert_eq!(chosen(&app), TitleItem::Seed);
+    app.handle_key(press(KeyCode::Char('k')));
+    assert_eq!(chosen(&app), TitleItem::NewGame);
+    app.handle_key(press(KeyCode::Esc));
+    assert_eq!(chosen(&app), TitleItem::NewGame, "Escape does nothing here");
+
+    go_to(&mut app, TitleItem::Seed);
+    app.handle_key(press(KeyCode::Enter));
+    assert!(matches!(app.state(), State::SeedEntry(_)));
+    app.handle_key(press(KeyCode::Esc));
+    assert_eq!(
+        chosen(&app),
+        TitleItem::Seed,
+        "Escape goes back to the menu"
+    );
+
+    go_to(&mut app, TitleItem::Quit);
+    app.handle_key(press(KeyCode::Enter));
+    assert_eq!(app.state(), State::Quit);
+
+    let mut app = launch_with_arguments(&folder, &[]).unwrap();
+    app.handle_key(press(KeyCode::Char('q')));
+    assert_eq!(app.state(), State::Quit, "q quits from the title");
+    let mut app = launch_with_arguments(&folder, &[]).unwrap();
+    app.handle_key(ctrl_c());
+    assert_eq!(app.state(), State::Quit, "Ctrl+C quits from the title");
+    assert_eq!(
+        files(&folder),
+        Vec::<String>::new(),
+        "quitting the title writes nothing"
+    );
+
+    let mut app = launch_with_arguments(&folder, &[]).unwrap();
+    app.handle_key(press(KeyCode::Enter));
+    assert_eq!(app.state(), State::Playing, "New game starts a game");
+}
+
+// --- The seed entry ---------------------------------------------------------
+
+/// Types `entry` on the seed entry of the title screen and presses Enter.
+fn submit_seed(app: &mut App, entry: &str) {
+    go_to(app, TitleItem::Seed);
+    app.handle_key(press(KeyCode::Enter));
+    type_text(app, entry);
+    app.handle_key(press(KeyCode::Enter));
+}
+
+#[test]
+fn a_valid_seed_starts_the_game_of_that_seed_whatever_form_it_is_typed_in() {
+    let accepted: [(&str, u64); 8] = [
+        ("42", 42),
+        ("0", 0),
+        ("7F3A-91C2-0B5E-D4A8", 0x7F3A_91C2_0B5E_D4A8),
+        ("7f3a-91c2-0b5e-d4a8", 0x7F3A_91C2_0B5E_D4A8),
+        ("FFFF-FFFF-FFFF-FFFF", u64::MAX),
+        ("18446744073709551615", u64::MAX),
+        ("000042", 42),
+        ("42 ", 42),
+    ];
+    for (typed, value) in accepted {
+        let folder = ScratchFolder::new("f10-seed-valid");
+        let mut app = launch_with_arguments(&folder, &[]).unwrap();
+        submit_seed(&mut app, typed);
+        assert_eq!(app.state(), State::Playing, "{typed:?}");
+        assert_eq!(app.game().seed(), Seed::from(value), "{typed:?}");
+        assert!(
+            rows(&app, 80, 24)[0].contains(&Seed::from(value).to_string()),
+            "{typed:?}: the status line shows the seed"
+        );
+    }
+    // The seed typed is the seed of --seed.
+    let typed_folder = ScratchFolder::new("f10-seed-typed");
+    let mut typed = launch_with_arguments(&typed_folder, &[]).unwrap();
+    submit_seed(&mut typed, "7F3A-91C2-0B5E-D4A8");
+    let flag_folder = ScratchFolder::new("f10-seed-flag");
+    let flagged = launch_with_arguments(&flag_folder, &["--seed", "7F3A-91C2-0B5E-D4A8"]).unwrap();
+    assert_eq!(rows(&typed, 80, 24), rows(&flagged, 80, 24));
+    assert_eq!(rows(&typed, 120, 40), rows(&flagged, 120, 40));
+}
+
+#[test]
+fn an_invalid_seed_is_refused_with_a_reason_and_the_entry_stays_open() {
+    let long = "9".repeat(300);
+    let refused: [(&str, &str); 11] = [
+        ("abc", "\"abc\" is not a seed"),
+        ("-1", "\"-1\" is not a seed"),
+        ("18446744073709551616", "is not a seed"),
+        ("7F3A-91C2-0B5E-D4A", "is not a seed"),
+        ("4 2", "\"4 2\" is not a seed"),
+        ("!@#$%^&*()", "is not a seed"),
+        ("0x2A", "is not a seed"),
+        ("12e3", "is not a seed"),
+        ("", "Type a seed first"),
+        ("   ", "Type a seed first"),
+        (&long, "is not a seed"),
+    ];
+    for (typed, reason) in refused {
+        let folder = ScratchFolder::new("f10-seed-invalid");
+        let mut app = launch_with_arguments(&folder, &[]).unwrap();
+        submit_seed(&mut app, typed);
+        assert!(
+            matches!(app.state(), State::SeedEntry(_)),
+            "{typed:?} must not start a game"
+        );
+        for (width, height) in SIZES {
+            let screen = rows(&app, width, height);
+            assert!(
+                screen.iter().any(|row| row.contains(reason)),
+                "{typed:?}: a reason ({reason}):\n{}",
+                screen.join("\n")
+            );
+            assert!(
+                screen
+                    .iter()
+                    .all(|row| row.chars().count() <= usize::from(width))
+            );
+        }
+        assert_eq!(
+            files(&folder),
+            Vec::<String>::new(),
+            "{typed:?}: nothing written"
+        );
+        // Typing goes on after a refusal, and a valid seed then starts.
+        app.handle_key(press(KeyCode::Esc));
+        submit_seed(&mut app, "5");
+        assert_eq!(app.state(), State::Playing, "{typed:?}: the next try works");
+    }
+}
+
+#[test]
+fn the_seed_field_edits_like_a_text_field_and_a_q_is_a_letter() {
+    let folder = ScratchFolder::new("f10-seed-edit");
+    let mut app = launch_with_arguments(&folder, &[]).unwrap();
+    go_to(&mut app, TitleItem::Seed);
+    app.handle_key(press(KeyCode::Enter));
+    type_text(&mut app, "q4x");
+    assert!(
+        matches!(app.state(), State::SeedEntry(_)),
+        "q does not quit here"
+    );
+    assert!(text(&app).contains("Seed  q4x_"), "{}", text(&app));
+    app.handle_key(press(KeyCode::Backspace));
+    assert!(text(&app).contains("Seed  q4_"));
+    for _ in 0..6 {
+        app.handle_key(press(KeyCode::Backspace));
+    }
+    assert!(
+        text(&app).contains("Seed  _"),
+        "more Backspaces than letters are harmless"
+    );
+    type_text(&mut app, &"1".repeat(100));
+    let field = rows(&app, 80, 24)
+        .into_iter()
+        .find(|row| row.contains("Seed  1"))
+        .unwrap();
+    assert!(
+        field.trim().chars().count() <= 40,
+        "the field is bounded: {field}"
+    );
+    app.handle_key(press(KeyCode::Esc));
+    assert_eq!(chosen(&app), TitleItem::Seed);
+    app.handle_key(press(KeyCode::Enter));
+    assert!(text(&app).contains("Seed  _"), "a new entry starts empty");
+    app.handle_key(ctrl_c());
+    assert_eq!(app.state(), State::Quit);
+}
+
+// --- The confirmation before a saved game is abandoned ------------------------
+
+#[test]
+fn abandoning_a_saved_game_asks_first_and_only_the_second_answer_deletes_it() {
+    let folder = ScratchFolder::new("f10-confirm");
+    save_game(&folder, 42, 4);
+    let saved = fs::read(folder.save_file().path()).unwrap();
+    let mut app = launch_with_arguments(&folder, &[]).unwrap();
+
+    go_to(&mut app, TitleItem::NewGame);
+    app.handle_key(press(KeyCode::Enter));
+    assert!(
+        matches!(app.state(), State::Confirm(_)),
+        "{:?}",
+        app.state()
+    );
+    let screen = rows(&app, 80, 24);
+    for part in [
+        "Start a new game?",
+        "abandoned",
+        "deleted for good",
+        "Keep the game in progress",
+        "Abandon it and start anew",
+        "depth 1",
+    ] {
+        assert!(
+            screen.iter().any(|row| row.contains(part)),
+            "{part}:\n{}",
+            screen.join("\n")
+        );
+    }
+    let keep = row_of(&screen, "Keep the game in progress").unwrap();
+    let abandon = row_of(&screen, "Abandon it and start anew").unwrap();
+    assert!(keep < abandon, "Keep comes first");
+    assert!(
+        screen[keep].contains('›') || screen[keep].contains('>'),
+        "and is chosen: {}",
+        screen[keep]
+    );
+    assert_eq!(
+        fs::read(folder.save_file().path()).unwrap(),
+        saved,
+        "untouched while asking"
+    );
+
+    app.handle_key(press(KeyCode::Char('q')));
+    assert!(
+        matches!(app.state(), State::Confirm(_)),
+        "q does nothing here"
+    );
+    app.handle_key(press(KeyCode::Down));
+    let on_abandon = rows(&app, 80, 24);
+    assert!(
+        on_abandon[row_of(&on_abandon, "Abandon it and start anew").unwrap()].contains(['›', '>'])
+    );
+    app.handle_key(press(KeyCode::Up));
+    app.handle_key(press(KeyCode::Esc));
+    assert_eq!(
+        chosen(&app),
+        TitleItem::NewGame,
+        "Escape goes back to the menu"
+    );
+    assert_eq!(fs::read(folder.save_file().path()).unwrap(), saved);
+
+    app.handle_key(press(KeyCode::Enter));
+    app.handle_key(press(KeyCode::Enter));
+    assert!(
+        matches!(app.state(), State::Title(_)),
+        "Enter on Keep goes back"
+    );
+    assert!(app.has_saved_game());
+    assert_eq!(
+        fs::read(folder.save_file().path()).unwrap(),
+        saved,
+        "Keep keeps"
+    );
+
+    app.handle_key(press(KeyCode::Enter));
+    app.handle_key(press(KeyCode::Down));
+    app.handle_key(press(KeyCode::Enter));
+    assert_eq!(app.state(), State::Playing, "Abandon starts the new game");
+    assert!(
+        !folder.save_file().path().exists(),
+        "and deletes the old save"
+    );
+    assert!(!app.has_saved_game());
+    assert_eq!(app.game().player_turns(), 0, "a brand new game");
+    // A second Enter sent at once changes nothing: still the one new game.
+    app.handle_key(press(KeyCode::Enter));
+    assert_eq!(app.state(), State::Playing);
+}
+
+#[test]
+fn a_seed_and_the_daily_dungeon_ask_before_abandoning_a_save_too_and_ctrl_c_keeps_it() {
+    let folder = ScratchFolder::new("f10-confirm-others");
+    save_game(&folder, 42, 2);
+    let saved = fs::read(folder.save_file().path()).unwrap();
+    let mut app = launch_with_arguments(&folder, &[]).unwrap();
+
+    go_to(&mut app, TitleItem::Daily);
+    app.handle_key(press(KeyCode::Enter));
+    assert!(matches!(app.state(), State::Confirm(_)));
+    app.handle_key(press(KeyCode::Enter));
+    assert_eq!(chosen(&app), TitleItem::Daily, "Keep returns on Daily");
+
+    submit_seed(&mut app, "5");
+    assert!(
+        matches!(app.state(), State::Confirm(_)),
+        "a valid seed asks first"
+    );
+    app.handle_key(press(KeyCode::Esc));
+    assert_eq!(chosen(&app), TitleItem::Seed, "Escape returns on Seed");
+
+    submit_seed(&mut app, "5");
+    app.handle_key(ctrl_c());
+    assert_eq!(app.state(), State::Quit);
+    assert_eq!(
+        fs::read(folder.save_file().path()).unwrap(),
+        saved,
+        "the save survived"
+    );
+
+    let mut next = launch_with_arguments(&folder, &[]).unwrap();
+    next.handle_key(press(KeyCode::Enter));
+    assert_eq!(next.state(), State::Playing, "Continue resumes it");
+    assert_eq!(next.game().player_turns(), 2);
 }

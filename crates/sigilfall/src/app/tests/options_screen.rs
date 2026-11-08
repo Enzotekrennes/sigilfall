@@ -1,19 +1,30 @@
-//! The options screen (T26), driven by simulated keys on scratch folders
-//! only: each option changed in place and applied to the screen at once,
-//! kept in `options.ron` and found again at the next launch, `--ascii`
-//! winning over the glyph option for its session, an unreadable or
-//! unwritable options file handled with a notice and never a crash, and the
-//! styles of the screen in every rendering mode.
+//! The options screen and the colour modes, driven by simulated keys on scratch
+//! folders only: each option changed in place and applied to the screen at
+//! once, kept in `options.ron` and found again at the next launch, `--ascii`
+//! winning over the glyph option for its session, an unreadable or unwritable
+//! options file handled with a notice and never a crash, the data folder
+//! created by the first option kept, the monochrome and `NO_COLOR` modes on
+//! every screen, and the styles of the options screen in every rendering mode.
 
-use std::fs;
-
-use ratatui::style::{Color, Modifier};
-
+use super::player_view::{
+    SIZES, background_brightness, buffer, change_option, enter_options, files, go_to, go_to_row,
+    launch_with_arguments, launch_with_terminal, options_text, paint, row_of, rows, save_game,
+    shipped, text, type_text,
+};
 use super::*;
-use crate::persist::{LoadedOptions, ScratchFolder};
-use crate::theme::{Appearance, ColorChoice, ColorSupport, Options};
-use crate::ui::options::OptionsMenu;
+use crate::app::{App, State};
+use crate::cli::Cli;
+use crate::clock::ManualClock;
+use crate::persist::{LoadedOptions, OptionsFile, ScratchFolder};
+use crate::theme::{Appearance, ColorChoice, ColorSupport, GlyphSet, Options, Settings};
+use crate::ui::options::{OptionRow, OptionsMenu};
 use crate::ui::title::{TitleItem, TitleMenu};
+use ratatui::crossterm::event::KeyCode;
+use ratatui::style::{Color, Modifier};
+use sigilfall_core::game::Game;
+use sigilfall_core::rng::Seed;
+use std::fs;
+use std::path::PathBuf;
 
 /// Launches the application as `main` does on `folder`, with `--ascii` if
 /// `ascii`, on a terminal `detected` as such.
@@ -412,4 +423,564 @@ fn the_options_screen_reads_without_colour_in_every_mode() {
         );
         assert_eq!(Some(buffer[(0, 0)].bg), theme.bg.bg, "{label}");
     }
+}
+
+// --- Scenario 2: the options apply at once and are kept ---------------------
+
+#[test]
+fn the_glyph_option_redraws_at_once_and_the_choice_is_kept_for_the_next_session() {
+    let folder = ScratchFolder::new("f10-glyphs");
+    let mut app = launch_with_arguments(&folder, &[]).unwrap();
+    assert_eq!(
+        app.options().glyphs,
+        GlyphSet::Unicode,
+        "Unicode by default"
+    );
+    assert!(
+        !text(&app).is_ascii(),
+        "the Unicode title uses Unicode glyphs"
+    );
+
+    enter_options(&mut app);
+    let before = rows(&app, 80, 24);
+    assert!(
+        before
+            .iter()
+            .any(|row| row.contains("Glyphs") && row.contains("Unicode")),
+        "{before:#?}"
+    );
+    let sample = row_of(&before, "Sample").expect("a sample line");
+    assert!(!before[sample].is_ascii(), "{}", before[sample]);
+
+    app.handle_key(press(KeyCode::Enter));
+    let after = rows(&app, 80, 24);
+    assert_eq!(app.options().glyphs, GlyphSet::Ascii, "the option changed");
+    assert!(
+        after
+            .iter()
+            .any(|row| row.contains("Glyphs") && row.contains("ASCII")),
+        "the value is shown at once"
+    );
+    assert!(
+        after[sample].is_ascii(),
+        "the sample is redrawn in ASCII: {}",
+        after[sample]
+    );
+
+    let file = options_text(&folder);
+    assert!(
+        file.contains("format_version: 1") && file.contains("glyphs: Ascii"),
+        "{file}"
+    );
+    assert_eq!(
+        files(&folder),
+        ["options.ron"],
+        "written whole, no temporary file left"
+    );
+
+    app.handle_key(press(KeyCode::Esc));
+    for (width, height) in SIZES {
+        assert!(
+            rows(&app, width, height)
+                .iter()
+                .all(|row| row.chars().all(|c| c.is_ascii() || matches!(c, '↑' | '↓'))),
+            "the title is plain ASCII now (key help arrows excepted)"
+        );
+    }
+
+    // A new session keeps the choice, on the title and in the game.
+    let mut next = launch_with_arguments(&folder, &[]).unwrap();
+    assert_eq!(next.options().glyphs, GlyphSet::Ascii);
+    next.handle_key(press(KeyCode::Enter));
+    assert_eq!(next.state(), State::Playing);
+    let map_rows = &rows(&next, 80, 24)[..23];
+    assert!(
+        map_rows.iter().all(|row| row.is_ascii()),
+        "the game screen is plain ASCII:\n{}",
+        map_rows.join("\n")
+    );
+
+    // And back to Unicode, also kept.
+    let mut again = launch_with_arguments(&folder, &[]).unwrap();
+    enter_options(&mut again);
+    again.handle_key(press(KeyCode::Left));
+    assert_eq!(again.options().glyphs, GlyphSet::Unicode, "Left goes back");
+    assert!(options_text(&folder).contains("glyphs: Unicode"));
+    again.handle_key(press(KeyCode::Char(' ')));
+    assert_eq!(
+        again.options().glyphs,
+        GlyphSet::Ascii,
+        "Space changes the value"
+    );
+}
+
+#[test]
+fn the_colour_options_apply_at_once_and_are_kept() {
+    let folder = ScratchFolder::new("f10-colours");
+    let mut app = launch_with_arguments(&folder, &[]).unwrap();
+    let auto = paint(&buffer(&app, 80, 24));
+    assert!(auto.rgb && !auto.named, "true colour by default: {auto:?}");
+
+    enter_options(&mut app);
+    go_to_row(&mut app, OptionRow::Colors);
+    app.handle_key(press(KeyCode::Enter));
+    assert_eq!(app.options().colors, ColorChoice::Ansi16);
+    let sixteen = paint(&buffer(&app, 80, 24));
+    assert!(
+        sixteen.named && !sixteen.rgb && !sixteen.indexed,
+        "16 colours: only the named ANSI colours, at once: {sixteen:?}"
+    );
+    assert!(
+        rows(&app, 80, 24)
+            .iter()
+            .any(|row| row.contains("Colours") && row.contains("16 colours"))
+    );
+    assert!(options_text(&folder).contains("colors: Ansi16"));
+
+    app.handle_key(press(KeyCode::Enter));
+    assert_eq!(app.options().colors, ColorChoice::Monochrome);
+    let mono = paint(&buffer(&app, 80, 24));
+    assert!(
+        !mono.rgb && !mono.indexed && !mono.named && mono.emphasis,
+        "none: no colour at all, hierarchy by emphasis: {mono:?}"
+    );
+    assert!(options_text(&folder).contains("colors: Monochrome"));
+
+    app.handle_key(press(KeyCode::Enter));
+    assert_eq!(
+        app.options().colors,
+        ColorChoice::Auto,
+        "the cycle comes back to Auto"
+    );
+    assert!(paint(&buffer(&app, 80, 24)).rgb);
+    app.handle_key(press(KeyCode::Left));
+    assert_eq!(
+        app.options().colors,
+        ColorChoice::Monochrome,
+        "Left goes backward"
+    );
+
+    // Kept: a new session starts monochrome, on every screen.
+    let mut next = launch_with_arguments(&folder, &[]).unwrap();
+    assert_eq!(next.options().colors, ColorChoice::Monochrome);
+    let title = paint(&buffer(&next, 80, 24));
+    assert!(!title.rgb && !title.named && !title.indexed);
+    next.handle_key(press(KeyCode::Enter));
+    let game = paint(&buffer(&next, 80, 24));
+    assert!(
+        !game.rgb && !game.named && !game.indexed && game.emphasis,
+        "{game:?}"
+    );
+}
+
+#[test]
+fn the_light_theme_paints_a_light_page_at_once_is_kept_and_needs_true_colour() {
+    let folder = ScratchFolder::new("f10-light");
+    let mut app = launch_with_arguments(&folder, &[]).unwrap();
+    let dark = background_brightness(&buffer(&app, 80, 24)).expect("a 24-bit background");
+    assert!(dark < 60, "the dark theme paints ink: {dark}");
+
+    enter_options(&mut app);
+    go_to_row(&mut app, OptionRow::Theme);
+    app.handle_key(press(KeyCode::Enter));
+    assert_eq!(app.options().appearance, Appearance::Light);
+    let light = background_brightness(&buffer(&app, 80, 24)).expect("a 24-bit background");
+    assert!(light > 180, "the light theme paints parchment: {light}");
+    assert!(options_text(&folder).contains("theme: Light"));
+    app.handle_key(press(KeyCode::Esc));
+    let title = background_brightness(&buffer(&app, 80, 24)).unwrap();
+    assert!(title > 180, "the title is light too");
+
+    let mut next = launch_with_arguments(&folder, &[]).unwrap();
+    assert_eq!(next.options().appearance, Appearance::Light);
+    next.handle_key(press(KeyCode::Enter));
+    let game_light = background_brightness(&buffer(&next, 80, 24)).unwrap();
+    assert!(game_light > 180, "the game is light: {game_light}");
+
+    // README: "light for 24-bit colour terminals". With 16 colours it is
+    // drawn without colour instead, and still readable.
+    let sixteen =
+        launch_with_terminal(&folder, &[], ColorSupport::Ansi16, &ManualClock::new()).unwrap();
+    let painted = paint(&buffer(&sixteen, 80, 24));
+    assert!(
+        !painted.rgb && !painted.named && !painted.indexed && painted.emphasis,
+        "{painted:?}"
+    );
+    assert!(
+        rows(&sixteen, 80, 24)
+            .iter()
+            .any(|row| row.contains("New game")),
+        "the title is still there"
+    );
+}
+
+#[test]
+fn no_color_and_the_terminal_report_decide_the_colours_as_the_readme_says() {
+    use std::ffi::OsString;
+    let support = |pairs: &[(&str, &str)]| {
+        ColorSupport::from_env(|name| {
+            pairs
+                .iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| OsString::from(value))
+        })
+    };
+    assert_eq!(support(&[("NO_COLOR", "1")]), ColorSupport::None);
+    assert_eq!(support(&[("NO_COLOR", "anything")]), ColorSupport::None);
+    assert_eq!(
+        support(&[
+            ("NO_COLOR", "1"),
+            ("COLORTERM", "truecolor"),
+            ("WT_SESSION", "x")
+        ]),
+        ColorSupport::None,
+        "NO_COLOR beats every announcement of colour"
+    );
+    assert_eq!(
+        support(&[("NO_COLOR", ""), ("COLORTERM", "truecolor")]),
+        ColorSupport::TrueColor,
+        "an empty NO_COLOR counts as unset"
+    );
+    assert_eq!(
+        support(&[("COLORTERM", "truecolor")]),
+        ColorSupport::TrueColor
+    );
+    assert_eq!(support(&[("COLORTERM", "24bit")]), ColorSupport::TrueColor);
+    assert_eq!(support(&[("COLORTERM", "24BIT")]), ColorSupport::TrueColor);
+    assert_eq!(support(&[("WT_SESSION", "any")]), ColorSupport::TrueColor);
+    assert_eq!(support(&[("COLORTERM", "yes")]), ColorSupport::Ansi16);
+    assert_eq!(
+        support(&[]),
+        ColorSupport::Ansi16,
+        "otherwise the 16 ANSI colours"
+    );
+}
+
+/// Every screen of the application on a terminal that supports `support`,
+/// with `options`: the title, the options, the seed entry, the
+/// confirmation, the game, the trace and the inventory.
+fn every_screen(support: ColorSupport, options: Options) -> Vec<(&'static str, App)> {
+    let content = shipped();
+    let settings = Settings {
+        options,
+        detected: support,
+        forced_ascii: false,
+    };
+    let folder = ScratchFolder::new("f10-screens");
+    save_game(&folder, 7, 3);
+    // The options reach the screens through the file, as a player's do.
+    folder.options_file().write(&options).unwrap();
+    let fresh = || launch_with_terminal(&folder, &[], support, &ManualClock::new()).unwrap();
+
+    let mut screens = vec![("title", fresh())];
+    let mut on_options = fresh();
+    enter_options(&mut on_options);
+    screens.push(("options", on_options));
+    let mut on_seed = fresh();
+    go_to(&mut on_seed, TitleItem::Seed);
+    on_seed.handle_key(press(KeyCode::Enter));
+    type_text(&mut on_seed, "zz");
+    on_seed.handle_key(press(KeyCode::Enter));
+    screens.push(("seed entry with an error", on_seed));
+    let mut on_confirm = fresh();
+    go_to(&mut on_confirm, TitleItem::NewGame);
+    on_confirm.handle_key(press(KeyCode::Enter));
+    assert!(matches!(on_confirm.state(), State::Confirm(_)));
+    screens.push(("confirmation", on_confirm));
+
+    let game = || Game::new(Seed::from(7), &content);
+    let mut playing = App::with_game(settings.theme(), game(), content.clone());
+    type_text(&mut playing, "..");
+    screens.push(("game", playing));
+    let mut trace = App::with_game(settings.theme(), game(), content.clone());
+    type_text(&mut trace, "t75");
+    screens.push(("trace", trace));
+    let mut pack = App::with_game(settings.theme(), game(), content.clone());
+    pack.handle_key(press(KeyCode::Char('i')));
+    screens.push(("inventory", pack));
+    screens
+}
+
+#[test]
+fn with_no_colour_every_screen_is_drawn_without_colour_but_not_without_hierarchy() {
+    let none = every_screen(ColorSupport::None, Options::default());
+    assert_eq!(none.len(), 7);
+    for (name, app) in &none {
+        for (width, height) in SIZES {
+            let painted = paint(&buffer(app, width, height));
+            assert!(
+                !painted.rgb && !painted.indexed && !painted.named,
+                "{name} at {width}x{height} is coloured: {painted:?}"
+            );
+        }
+    }
+    let with_emphasis = none
+        .iter()
+        .filter(|(_, app)| paint(&buffer(app, 80, 24)).emphasis)
+        .count();
+    assert!(
+        with_emphasis >= 6,
+        "bold, reversed or dim carry the hierarchy: {with_emphasis}/{}",
+        none.len()
+    );
+
+    // The same screens do have colour when colour is available: the test
+    // above is not passing because nothing is ever painted.
+    for support in [ColorSupport::TrueColor, ColorSupport::Ansi16] {
+        let coloured = every_screen(support, Options::default());
+        for (name, app) in &coloured {
+            let painted = paint(&buffer(app, 80, 24));
+            assert!(
+                painted.rgb || painted.named,
+                "{name} with {support:?}: {painted:?}"
+            );
+            assert_eq!(
+                painted.rgb,
+                support == ColorSupport::TrueColor,
+                "{name}: {painted:?}"
+            );
+            assert!(!painted.indexed, "{name}: no 256-colour palette is used");
+        }
+    }
+}
+
+#[test]
+fn the_explicit_ascii_and_monochrome_choices_hold_on_every_screen() {
+    let options = Options {
+        glyphs: GlyphSet::Ascii,
+        colors: ColorChoice::Monochrome,
+        appearance: Appearance::Dark,
+    };
+    for (name, app) in every_screen(ColorSupport::TrueColor, options) {
+        let painted = paint(&buffer(&app, 80, 24));
+        assert!(
+            !painted.rgb && !painted.named && !painted.indexed,
+            "{name}: {painted:?}"
+        );
+        let screen = rows(&app, 80, 24);
+        // Only the arrows of the key help are left outside ASCII.
+        let strange: Vec<&String> = screen
+            .iter()
+            .filter(|row| {
+                !row.chars()
+                    .all(|c| c.is_ascii() || matches!(c, '↑' | '↓' | '←' | '→'))
+            })
+            .collect();
+        assert!(strange.is_empty(), "{name}: {strange:#?}");
+    }
+}
+
+// --- --ascii wins over the option ------------------------------------------
+
+#[test]
+fn ascii_on_the_command_line_beats_the_saved_option_for_the_session_only() {
+    let folder = ScratchFolder::new("f10-ascii-flag");
+    folder.options_file().write(&Options::default()).unwrap();
+    let saved = options_text(&folder);
+    assert!(saved.contains("glyphs: Unicode"));
+
+    let mut app = launch_with_arguments(&folder, &["--ascii"]).unwrap();
+    assert_eq!(
+        app.options().glyphs,
+        GlyphSet::Unicode,
+        "the option is untouched"
+    );
+    assert!(
+        rows(&app, 80, 24)
+            .iter()
+            .all(|row| row.chars().all(|c| c.is_ascii() || matches!(c, '↑' | '↓'))),
+        "the title is drawn in ASCII"
+    );
+    enter_options(&mut app);
+    assert!(
+        text(&app).contains("--ascii is on"),
+        "the options screen says the flag is in force:\n{}",
+        text(&app)
+    );
+    // Changing another option writes the file, with the glyph option as the
+    // player had it, not as the flag forces it.
+    go_to_row(&mut app, OptionRow::Colors);
+    app.handle_key(press(KeyCode::Enter));
+    let file = options_text(&folder);
+    assert!(
+        file.contains("glyphs: Unicode") && file.contains("colors: Ansi16"),
+        "{file}"
+    );
+    app.handle_key(press(KeyCode::Esc));
+    app.handle_key(press(KeyCode::Enter));
+    assert!(
+        rows(&app, 80, 24)[..23].iter().all(|row| row.is_ascii()),
+        "the game too is ASCII"
+    );
+
+    // Without the flag, Unicode is back.
+    let plain = launch_with_arguments(&folder, &[]).unwrap();
+    assert!(!text(&plain).is_ascii());
+
+    // And an option saved as ASCII needs no flag.
+    let other = ScratchFolder::new("f10-ascii-option");
+    other
+        .options_file()
+        .write(&Options {
+            glyphs: GlyphSet::Ascii,
+            ..Options::default()
+        })
+        .unwrap();
+    let by_option = launch_with_arguments(&other, &[]).unwrap();
+    assert!(by_option.options().glyphs == GlyphSet::Ascii);
+    assert!(
+        rows(&by_option, 80, 24)
+            .iter()
+            .all(|row| row.chars().all(|c| c.is_ascii() || matches!(c, '↑' | '↓')))
+    );
+}
+
+// --- An options file that cannot be read ------------------------------------
+
+#[test]
+fn an_options_file_that_cannot_be_read_gives_the_defaults_a_notice_and_is_replaced_by_the_first_change()
+ {
+    let huge = format!("(format_version: 1, glyphs: {})", "U".repeat(20_000));
+    let cases: [(&str, Vec<u8>); 9] = [
+        ("garbage", b"this is not ron {{{".to_vec()),
+        ("empty", Vec::new()),
+        ("binary", vec![0xff, 0xfe, 0x00, 0x80]),
+        (
+            "another version",
+            b"(format_version: 99, glyphs: Ascii, colors: Auto, theme: Dark)".to_vec(),
+        ),
+        (
+            "unknown value",
+            b"(format_version: 1, glyphs: Braille, colors: Auto, theme: Dark)".to_vec(),
+        ),
+        (
+            "missing field",
+            b"(format_version: 1, glyphs: Ascii)".to_vec(),
+        ),
+        ("truncated", b"(format_version: 1, glyphs: As".to_vec()),
+        ("huge", huge.into_bytes()),
+        ("only a number", b"42".to_vec()),
+    ];
+    for (name, bytes) in cases {
+        let folder = ScratchFolder::new("f10-corrupt-options");
+        fs::write(folder.options_file().path(), &bytes).unwrap();
+
+        let mut app =
+            launch_with_arguments(&folder, &[]).unwrap_or_else(|error| panic!("{name}: {error:#}"));
+        assert_eq!(
+            app.options(),
+            Options::default(),
+            "{name}: the defaults apply"
+        );
+        for (width, height) in SIZES {
+            let screen = rows(&app, width, height);
+            assert!(
+                screen
+                    .iter()
+                    .any(|row| row.contains("options file could not be read")),
+                "{name} at {width}x{height}: a notice says so:\n{}",
+                screen.join("\n")
+            );
+            assert!(
+                row_of(&screen, "New game").is_some(),
+                "{name}: the menu is there"
+            );
+        }
+        let notice_rows: Vec<String> = rows(&app, 80, 24)
+            .into_iter()
+            .skip_while(|row| !row.contains("options file could not be read"))
+            .take_while(|row| !row.contains("choose"))
+            .collect();
+        assert!(
+            notice_rows.len() <= 6,
+            "{name}: the notice stays short: {notice_rows:#?}"
+        );
+        assert!(
+            notice_rows.iter().all(|row| row.chars().count() <= 80),
+            "{name}: and fits the screen"
+        );
+        assert!(
+            notice_rows
+                .join(" ")
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .contains("changing one rewrites the file"),
+            "{name}: it says what to do: {notice_rows:#?}"
+        );
+
+        // A plain session leaves the file as it found it.
+        app.save_on_exit().unwrap();
+        assert_eq!(
+            fs::read(folder.options_file().path()).unwrap(),
+            bytes,
+            "{name}"
+        );
+
+        // The first change replaces it with a valid file.
+        change_option(&mut app, OptionRow::Glyphs);
+        let file = options_text(&folder);
+        assert!(
+            file.contains("format_version: 1") && file.contains("glyphs: Ascii"),
+            "{name}: {file}"
+        );
+        assert!(
+            !text(&app).contains("options file could not be read"),
+            "{name}: the notice is gone once the file is rewritten"
+        );
+        assert!(matches!(
+            OptionsFile::in_folder(folder.path()).load(),
+            LoadedOptions::Found(_)
+        ));
+        let next = launch_with_arguments(&folder, &[]).unwrap();
+        assert!(!text(&next).contains("could not be read"), "{name}");
+        assert_eq!(next.options().glyphs, GlyphSet::Ascii, "{name}");
+    }
+}
+
+#[test]
+fn an_options_file_that_is_a_folder_or_cannot_be_written_never_crashes_the_game() {
+    let folder = ScratchFolder::new("f10-options-folder");
+    fs::create_dir(folder.options_file().path()).unwrap();
+    let mut app = launch_with_arguments(&folder, &[]).unwrap();
+    assert!(text(&app).contains("options file could not be read"));
+
+    enter_options(&mut app);
+    app.handle_key(press(KeyCode::Enter));
+    assert_eq!(
+        app.options().glyphs,
+        GlyphSet::Ascii,
+        "the option applies for the session"
+    );
+    let screen = text(&app);
+    assert!(
+        screen.contains("could not be saved"),
+        "the screen says why:\n{screen}"
+    );
+    assert!(
+        screen.contains("until you quit"),
+        "and for how long:\n{screen}"
+    );
+    assert!(
+        folder.options_file().path().is_dir(),
+        "the folder is left alone"
+    );
+    // The game still starts.
+    app.handle_key(press(KeyCode::Esc));
+    app.handle_key(press(KeyCode::Home));
+    app.handle_key(press(KeyCode::Enter));
+    assert_eq!(app.state(), State::Playing);
+}
+
+#[test]
+fn the_data_folder_is_created_when_the_first_option_is_kept() {
+    let folder = ScratchFolder::new("f10-created");
+    let nested: PathBuf = folder.path().join("a").join("b");
+    let options = OptionsFile::in_folder(&nested);
+    assert!(!nested.exists());
+    options.write(&Options::default()).unwrap();
+    assert!(
+        nested.join("options.ron").is_file(),
+        "README: created if missing"
+    );
 }

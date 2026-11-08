@@ -11,12 +11,17 @@
 //! game left with `q`. A change to the game that makes the recorded run
 //! drift (a new random draw, a moved glyph) fails here, not in the GIF.
 
-use clap::Parser as _;
-use sigilfall_core::rng::Seed;
-
+use super::player_view::launch_with_arguments;
+use super::readme::README;
 use super::save_files::launch;
 use super::*;
+use crate::app::{App, State};
+use crate::cli::Cli;
 use crate::persist::ScratchFolder;
+use clap::Parser as _;
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use sigilfall_core::game::Game;
+use sigilfall_core::rng::Seed;
 
 /// The VHS script, from the root of the repository.
 const TAPE: &str = include_str!("../../../../../demo.tape");
@@ -273,5 +278,182 @@ fn the_demo_reads_a_glyph_casts_ember_fights_and_goes_down_the_stairs() {
         log.iter()
             .any(|text| text.starts_with("You hit the") || text.starts_with("You kill the")),
         "the player strikes in melee: {log:?}"
+    );
+}
+
+// --- The recorded demo replays ------------------------------------------------
+
+/// One key press per character of each `Type` line of `demo.tape` after the
+/// line that starts the game, with `Down`, `Enter`, `Escape` as keys. A
+/// second, independent reader of the tape.
+fn keys_of_the_tape(tape: &str) -> Vec<KeyEvent> {
+    let mut keys = Vec::new();
+    let mut started = false;
+    let mut typed_line = String::new();
+    for line in tape
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+    {
+        let mut parts = line.splitn(2, ' ');
+        let word = parts.next().unwrap();
+        let rest = parts.next().unwrap_or("").trim();
+        let word = word.split('@').next().unwrap();
+        let command: Vec<KeyEvent> = match word {
+            "Type" => {
+                let text = rest.trim_matches('"');
+                if !started {
+                    typed_line.push_str(text);
+                    continue;
+                }
+                text.chars().map(|c| press(KeyCode::Char(c))).collect()
+            }
+            "Enter" => {
+                if !started {
+                    started = typed_line.trim() == "sigilfall";
+                    typed_line.clear();
+                    continue;
+                }
+                vec![press(KeyCode::Enter)]
+            }
+            "Down" if started => vec![press(KeyCode::Down)],
+            "Up" if started => vec![press(KeyCode::Up)],
+            "Escape" if started => vec![press(KeyCode::Esc)],
+            "Backspace" if started => vec![press(KeyCode::Backspace)],
+            _ => continue,
+        };
+        keys.extend(command);
+    }
+    keys
+}
+
+/// What the recorded run shows, played from the title of a fresh folder.
+struct DemoRun {
+    /// The game at the end (kept before the final `q`).
+    depth: u32,
+    /// Sigils cast.
+    casts: u32,
+    /// Creatures slain.
+    kills: u32,
+    /// Glyphs read.
+    glyphs: u32,
+    /// The seed of the run.
+    seed: Seed,
+    /// Whether the last key quit the game.
+    quit: bool,
+}
+
+/// Replays `keys` from the title screen of a fresh folder.
+fn replay(keys: &[KeyEvent]) -> DemoRun {
+    let folder = ScratchFolder::new("f10-demo");
+    let mut app = launch_with_arguments(&folder, &[]).unwrap();
+    let mut last = None;
+    for key in keys {
+        if matches!(app.state(), State::Quit) {
+            break;
+        }
+        if app.state() == State::Playing || matches!(app.state(), State::Casting(_)) {
+            last = Some(app.game().clone());
+        }
+        app.handle_key(*key);
+    }
+    let game = last.expect("the run reached a game");
+    let stats = game.stats();
+    DemoRun {
+        depth: game.depth().max(stats.deepest()),
+        casts: stats.casts().total(),
+        kills: stats.total_kills(),
+        glyphs: stats.glyphs_learnt(),
+        seed: game.seed(),
+        quit: app.state() == State::Quit,
+    }
+}
+
+#[test]
+fn the_recorded_demo_reads_a_glyph_casts_fights_goes_down_and_quits() {
+    let tape = include_str!("../../../../../demo.tape");
+    let keys = keys_of_the_tape(tape);
+    assert!(keys.len() > 50, "the tape sends many keys: {}", keys.len());
+
+    let run = replay(&keys);
+    assert_eq!(run.seed, Seed::from(9940), "the seed typed on the title");
+    assert!(run.glyphs >= 1, "a glyph is read");
+    assert!(run.casts >= 1, "a sigil is cast");
+    assert!(run.kills >= 1, "a creature is slain");
+    assert!(run.depth >= 2, "the stairs are taken: depth {}", run.depth);
+    assert!(run.quit, "the run ends with q");
+
+    // The checks can fail: take the tape apart and the run no longer
+    // satisfies them (no walk to the glyph, no cast, no descent).
+    for (needle, what) in [
+        ("Type@110ms \"bbbbyybbyyyyykk\"", "the walk to the glyph"),
+        ("Type \"t\"", "opening the grid"),
+        ("Type \">\"", "going down"),
+    ] {
+        assert!(tape.contains(needle), "the tape still contains {what}");
+        let broken = tape.replace(needle, "Sleep 1s");
+        let broken_run = replay(&keys_of_the_tape(&broken));
+        let still_whole = broken_run.glyphs >= 1
+            && broken_run.casts >= 1
+            && broken_run.kills >= 1
+            && broken_run.depth >= 2;
+        assert!(
+            !still_whole,
+            "without {what} the run must lose something: {:?}",
+            (
+                broken_run.glyphs,
+                broken_run.casts,
+                broken_run.kills,
+                broken_run.depth
+            )
+        );
+    }
+}
+
+#[test]
+fn the_demo_tape_uses_only_commands_vhs_has_and_the_replay_can_play() {
+    let tape = include_str!("../../../../../demo.tape");
+    let allowed = [
+        "Output",
+        "Require",
+        "Set",
+        "Hide",
+        "Show",
+        "Type",
+        "Enter",
+        "Down",
+        "Up",
+        "Escape",
+        "Backspace",
+        "Space",
+        "Tab",
+        "Left",
+        "Right",
+        "Sleep",
+        "Ctrl+C",
+    ];
+    for line in tape
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+    {
+        let word = line.split([' ', '@']).next().unwrap();
+        assert!(
+            allowed.contains(&word),
+            "`{line}`: {word} is not a command the replay understands"
+        );
+    }
+    assert!(
+        tape.contains("Output assets/demo.gif"),
+        "the GIF the README shows"
+    );
+    assert!(tape.contains("Require sigilfall"));
+    assert!(
+        tape.contains("stty cols 80 rows 24"),
+        "80 x 24, the smallest supported size"
+    );
+    assert!(
+        README.contains("![A run of seed 9940"),
+        "the README shows the GIF of seed 9940"
     );
 }

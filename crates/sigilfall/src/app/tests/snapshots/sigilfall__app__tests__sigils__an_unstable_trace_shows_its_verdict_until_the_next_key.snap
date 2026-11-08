@@ -1,0 +1,28 @@
+---
+source: crates/sigilfall/src/app/tests/sigils.rs
+expression: text(&app)
+---
+" Depth 1 · Turn 4                                      Seed 7F3A-91C2-0B5E-D4A8 "
+"╭─ Unstable trace ──────────────────────────────────────╮ │ HP            30/30 "
+"│                                                       │ │ ██████████████████  "
+"│  ●     ○     ○   UNSTABLE                             │ │ Essence         4/6 "
+"│    ╲             Ember, one node off                  │ │                     "
+"│      ╲           expected  7·5·3                      │ │ SIGILS          1/5 "
+"│  ○     ●     ○   traced    7·5·2                      │ │ Ember               "
+"│        │                                              │ │                     "
+"│        │                                              │ │ IN VIEW             "
+"│  ○     ×     ○   The magic lashes back.               │ │ @ you               "
+"│                                                       │ │ v cave gnat 993/999 "
+"│                                                       │ │ ≡ known glyph       "
+"│                                                       │ │                     "
+"│                                                       │ │                     "
+"│                                                       │ │                     "
+"╰───────────────────────────────────────────────────────╯ │                     "
+"                                                          │                     "
+"─ Log ────────────────────────────────────────────────────┴─────────────────────"
+"   You enter the dungeon.                                                       "
+" ~ Ember, unstable trace: the cave gnat is seared (6).                          "
+" ! The backlash dazes you: you lose 1 turn.                                     "
+"                                                                                "
+"                                                                                "
+" Enter continue                                                                 "
