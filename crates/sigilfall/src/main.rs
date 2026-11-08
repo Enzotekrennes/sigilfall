@@ -19,6 +19,8 @@ mod f6_acceptance;
 mod f7_acceptance;
 #[cfg(test)]
 mod f8_acceptance;
+#[cfg(test)]
+mod f9_acceptance;
 mod input;
 mod message_log;
 mod messages;
