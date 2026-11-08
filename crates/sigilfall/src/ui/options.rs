@@ -31,7 +31,7 @@ use crate::theme::{Appearance, ColorChoice, ColorSupport, GlyphSet, Options, Set
 pub enum OptionRow {
     /// Unicode or ASCII glyphs.
     Glyphs,
-    /// Automatic colours, 16 colours or none.
+    /// Automatic colours, 16 colours or Monochrome.
     Colors,
     /// Dark or light theme.
     Theme,

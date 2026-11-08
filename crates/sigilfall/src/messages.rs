@@ -494,7 +494,7 @@ pub fn auto_colors(detected: ColorSupport, separator: char) -> String {
 /// the chosen one: glyphs, colours, theme, back.
 pub const OPTION_HELP: [&str; 4] = [
     "Unicode draws stone walls and sigils; ASCII suits any font.",
-    "Auto follows the terminal; 16 colours or none suit plain ones.",
+    "Auto follows the terminal; 16 colours or Monochrome suit plain ones.",
     "Dark ink or light parchment. Light needs true colour.",
     "Options are saved as soon as they change.",
 ];
@@ -2467,5 +2467,13 @@ mod tests {
                 .unwrap()
         );
         assert!(options.contains(&listed), "{listed} in {options}");
+    }
+
+    #[test]
+    fn the_colour_help_names_the_values_as_the_options_screen_shows_them() {
+        let help = OPTION_HELP[1];
+        assert!(help.contains(ANSI16_VALUE), "{help}");
+        assert!(help.contains(MONOCHROME_VALUE), "{help}");
+        assert!(!help.contains("none"), "{help}");
     }
 }

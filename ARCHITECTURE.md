@@ -32,7 +32,7 @@ library, and the terminal application in a binary that depends on it.
 | `actor` | `Actor` and `ActorId`: the player and the monsters, their position, speed, energy, hit points, essence and held turns. |
 | `ai` | `choose_action`: a monster chases the player it sees by A*, goes to where it last saw it, then waits. |
 | `combat` | The player's starting values and the damage formula of a blow. |
-| `content` | `Content`: the monster, sigil and item definitions and the spawn tables, parsed from the RON files embedded in the crate and validated, with errors naming the file, entry, field and line. |
+| `content` | `Content`: the monster, sigil and item definitions, the spawn tables and the floor kinds, parsed from the RON files embedded in the crate and validated, with errors naming the file, entry, field and line. |
 | `content::check` | Field checks shared by every kind of entry. |
 | `content::entry_file` | Reads a content file's RON text into raw entries, keeping their line numbers. |
 | `content::error` | `ContentError`, every way a content file can be wrong. |
@@ -40,6 +40,7 @@ library, and the terminal application in a binary that depends on it.
 | `content::sigil`, `content::sigil_file` | Sigil definitions (pattern, effect, power, targeting, depth), their rules, and the shape of a sigil entry. |
 | `content::item`, `content::item_file` | Item definitions, their rules, and the shape of an item entry. |
 | `content::spawn`, `content::spawn_file` | Spawn tables: how often each monster and item is drawn, floor by floor. |
+| `content::floor`, `content::floor_file` | `FloorKind` (rooms or caves) and the floor rules: the weight of each kind, floor by floor, with the checks a rule must pass. |
 | `event` | `Event`: what happened during a turn (moved, attacked, died, sigil cast, glyph learned, picked up, descended…). |
 | `explore` | `explore_step`: the step of automatic exploration towards the nearest unseen cell next to known ground, by a Dijkstra map planned on what the player remembers. |
 | `fov` | Symmetric shadowcasting in integer fractions, with a sight radius of 8. |
@@ -50,8 +51,9 @@ library, and the terminal application in a binary that depends on it.
 | `game::descent` | What `Action::Descend` does: the next floor of the seed, with the player's belongings. |
 | `game::explore` | What `Action::Explore` does: a move chosen by `explore`, never a blow, refused when nothing is left to explore. |
 | `game::saved` | Turns a game into the records of a save and back, checking every value read. |
-| `generation` | A floor built from the seed and the depth: layout, start, stairs, monsters, glyphs and items. |
+| `generation` | A floor built from the seed and the depth: its kind, layout, start, stairs, monsters, glyphs and items. |
 | `generation::bsp` | Rooms and corridors laid out by binary space partitioning. |
+| `generation::caves` | One natural cave grown by a cellular automaton, cut down to its largest connected area, and grown again (8 times at most) while that area is under 900 cells. |
 | `geometry` | `Position` and the eight `Direction`s. |
 | `item` | `Item` and `ItemId`: things on the floor or in the player's pack, and the pack's capacity. |
 | `map` | `Map` and `Tile`: the grid of a floor, the cells in view and those remembered. |
@@ -77,7 +79,7 @@ library, and the terminal application in a binary that depends on it.
 | Module | Responsibility |
 |---|---|
 | `main` | Reads the command line, prepares and restores the terminal (also on a panic), runs the application and saves the game on leaving. |
-| `cli` | `Cli`: the `--seed` and `--ascii` options, parsed by clap. |
+| `cli` | `Cli`: the `--seed`, `--daily` and `--ascii` options, parsed by clap. |
 | `app` | `App`: the screen state machine (title, seed entry, confirmation, options, game, sigil overlay, inventory, end screen), the handling of each key, and the event loop. |
 | `app::exploring` | The walk of automatic exploration (`x`): when it stops, its step limit and the pause between steps. |
 | `input` | The keymaps: one function per kind of screen, from a key press to a command. Only presses count, not releases. |
@@ -125,11 +127,18 @@ library, and the terminal application in a binary that depends on it.
 ### Generation from a seed
 
 A run has one `Seed` (a `u64`). `Seed::stream(depth, purpose)` derives an
-independent ChaCha8 stream for each floor and each purpose: `Generation`
-builds the floor (BSP layout, stairs on the cell farthest from the start by
-a Dijkstra map, monsters out of sight of the start, two glyphs, items),
+independent ChaCha8 stream for each floor and each purpose. `FloorKind`
+draws the kind of the floor first, rooms or caves, weighted by the rules of
+`floors.ron` for that depth; it has a stream of its own so that choosing a
+kind never shifts the draws of a layout, and a floor of rooms stays the one
+it was before caves existed. `Generation` then builds the floor: the layout
+(rooms and corridors by BSP, or one cave grown by a cellular automaton),
+the start (a random room, or one end of the cave), stairs on the cell
+farthest from the start by a Dijkstra map, monsters out of sight of the
+start, two glyphs and items, placed by the same steps for both kinds.
 `Gameplay` draws the damage rolls and backlashes on that floor. A floor is
-a pure function of the seed and its depth, whatever was played above.
+a pure function of the seed, its depth and the content, whatever was played
+above.
 The daily dungeon is a run of `Seed::daily(date)`: the UTC date, packed
 as year, month and day, mixed with a fixed tag through SplitMix64, so two
 dates never share a seed. The binary reads the date from its clock; the
@@ -137,12 +146,13 @@ core never does.
 
 ### Content
 
-`monsters.ron`, `sigils.ron`, `items.ron` and `spawns.ron` live in
-`crates/sigilfall-core/content` and are embedded in the binary with
+`monsters.ron`, `sigils.ron`, `items.ron`, `spawns.ron` and `floors.ron`
+live in `crates/sigilfall-core/content` and are embedded in the binary with
 `include_str!`. `Content::load` parses them at start-up and validates every
 entry (bounds, cross references, sigil patterns at least 3 edits apart, a
-sigil to find on the first floor…); a test checks that the shipped files are
-valid, so an installed binary never meets an invalid one.
+sigil to find on the first floor, a floor kind for every floor…); a test
+checks that the shipped files are valid, so an installed binary never meets
+an invalid one.
 
 ### Saves
 
@@ -183,3 +193,4 @@ the alternative set aside.
 | D19 | One `Action::Cast` per trace: 50 energy plus 25 per node, 2 essence per cast (6 at most, 1 back every 12 ticks), glyphs read by stepping on them. | Node-by-node tracing in the core, essence cost per sigil, a dedicated "read" action. |
 | D20 | `Action::Descend` on the stairs only; a gameplay stream per floor; weighted spawn tables in `spawns.ron`; more monsters deeper (6 + depth − 1, at most 12). | Spawn weights inside each definition, difficulty by stats only. |
 | D21 | Readable RON saves with a format version (v3 since T28: the date of a daily run), state only (definitions by id), the exact gameplay stream and slot-map reuse order. | `slotmap`'s own serde form, or a binary format. |
+| D22 | Floor kinds in data (`floors.ron`, weights by band of floors), drawn on a stream of their own (`FloorKind`); caves grown by a cellular automaton (45 % rock, 5 passes, rule 4-5), the largest area kept, regrown below 900 cells; floors 1-2 always rooms, 10 and deeper always caves. | Floor weights added to `spawns.ron`, and the kind drawn on the generation stream, which would have changed every existing floor and the demo. |

@@ -10,7 +10,9 @@ workflow (run it by hand or push a version tag), then committed by hand. -->
 ![A run of seed 9940: a glyph read, Ember traced and cast, a fight, the stairs down](assets/demo.gif)
 
 Every stroke of a trace costs time, and the monsters act while you draw:
-a long sigil is a strong spell, but a slow one. Each run is generated from a
+a long sigil is a strong spell, but a slow one. The first floors are rooms
+joined by corridors; deeper down, natural caves take their place more and
+more often, and the tenth floor is always one. Each run is generated from a
 seed you can share, so a friend can play the same dungeon, and every day
 brings a daily dungeon, the same for every player on that UTC date.
 
