@@ -14,6 +14,14 @@
 //! kinds and energies, the layouts, glyphs and items did not). The full
 //! hashes were taken again then; the bare ones are unchanged.
 //!
+//! A second change was made on purpose: since Ember is known from the start
+//! of a run (`known_at_start` in `content/sigils.ron`), its glyph is no
+//! longer carved. Glyphs are drawn after the monsters and before the items,
+//! from the same stream, so the glyphs and items of the full floors that
+//! used to draw Ember moved (every floor 1, and floor 2 of two seeds); their
+//! layouts, monsters and energies did not, and the bare hashes, layouts
+//! alone, are unchanged. The full hashes were taken again then.
+//!
 //! Since the bottom floor (10) has a seal where its stairs were (decision
 //! D23), the dump writes the seal as `>`, like the stairs it replaces: the
 //! frozen floors 10 thus prove that the layout, the start and the cell of the
@@ -73,32 +81,32 @@ fn dump(floor: &Floor) -> String {
 /// `(seed, depth, "bare" | "full", hash)` for floors generated before caves
 /// existed: the bare layout of rooms, and the full floor with monsters,
 /// glyphs and items for floors 1 and 2 (monster positions since sight became
-/// an ellipse).
+/// an ellipse, glyphs and items since Ember is known from the start).
 const BEFORE_CAVES: &[(u64, u32, &str, u64)] = &[
     (0, 1, "bare", 0x753ba0fc96a2a4cb),
-    (0, 1, "full", 0x934ca905b13cd564),
+    (0, 1, "full", 0x17a8efb0614461fc),
     (0, 2, "bare", 0xdb1383726a7f4059),
     (0, 2, "full", 0xf009adc19ecfdcfb),
     (1, 1, "bare", 0xac35e5164c003aa5),
-    (1, 1, "full", 0x3bd42a2fb170d435),
+    (1, 1, "full", 0x92e5699f436e98b4),
     (1, 2, "bare", 0x3cf05770c23d536e),
     (1, 2, "full", 0xf72e66c6ee23cb20),
     (42, 1, "bare", 0xa6b102c9168a7448),
-    (42, 1, "full", 0x74d3752876efd84a),
+    (42, 1, "full", 0x631dbddd9c666176),
     (42, 2, "bare", 0xfd46457738006f39),
     (42, 2, "full", 0xa4a2fa5e5158fa38),
     (9940, 1, "bare", 0x8a518556f43a5ce6),
-    (9940, 1, "full", 0xdd953059236c28b4),
+    (9940, 1, "full", 0x0c0391ce7d90743f),
     (9940, 2, "bare", 0xc9d4b2309a4c776b),
-    (9940, 2, "full", 0x277d2f17fbbd8f19),
+    (9940, 2, "full", 0xefcbd723ac42a879),
     (9167800254066513064, 1, "bare", 0x2eef9c52cc9837e3),
-    (9167800254066513064, 1, "full", 0xcc61e94fba477964),
+    (9167800254066513064, 1, "full", 0x123455ef4a4ea551),
     (9167800254066513064, 2, "bare", 0x06d86fbf29f9b8de),
     (9167800254066513064, 2, "full", 0xba5ae13caf9324cd),
     (18446744073709551615, 1, "bare", 0x80611dbe0eb97b62),
-    (18446744073709551615, 1, "full", 0x3a91eb0d7b2afefc),
+    (18446744073709551615, 1, "full", 0x964923662f96d45f),
     (18446744073709551615, 2, "bare", 0x9c81b912b5f29345),
-    (18446744073709551615, 2, "full", 0x1e8cce4790e6384d),
+    (18446744073709551615, 2, "full", 0x2a769b507c0e0db0),
     (0, 3, "bare", 0x58646a555618db6c),
     (0, 7, "bare", 0xa731dbf88086d05f),
     (0, 10, "bare", 0xb74735cdde612c4e),

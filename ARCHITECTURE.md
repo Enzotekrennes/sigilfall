@@ -37,7 +37,7 @@ library, and the terminal application in a binary that depends on it.
 | `content::entry_file` | Reads a content file's RON text into raw entries, keeping their line numbers. |
 | `content::error` | `ContentError`, every way a content file can be wrong. |
 | `content::monster`, `content::monster_file` | Monster definitions, their rules, and the shape of a monster entry. |
-| `content::sigil`, `content::sigil_file` | Sigil definitions (pattern, effect, power, targeting, depth), their rules, and the shape of a sigil entry. |
+| `content::sigil`, `content::sigil_file` | Sigil definitions (pattern, effect, power, targeting, depth, known from the start or not), their rules, and the shape of a sigil entry. |
 | `content::item`, `content::item_file` | Item definitions, their rules, and the shape of an item entry. |
 | `content::spawn`, `content::spawn_file` | Spawn tables: how often each monster and item is drawn, floor by floor. |
 | `content::floor`, `content::floor_file` | `FloorKind` (rooms or caves) and the floor rules: the weight of each kind, floor by floor, with the checks a rule must pass. |
@@ -69,8 +69,8 @@ library, and the terminal application in a binary that depends on it.
 | `schedule` | The energy-based turn order and the cost of each action. |
 | `sigil` | Sigils: traces on the 3 × 3 grid, their recognition, the grimoire and the rules of casting. |
 | `sigil::trace` | `Node` and `Trace`: the grid and the rules a trace follows. |
-| `sigil::recognition` | `recognize`: a finished trace matched against the known sigils by edit distance. |
-| `sigil::grimoire` | `Grimoire`: the sigils the player has learnt. |
+| `sigil::recognition` | `recognize`: a finished trace matched against the known sigils by edit distance; `is_unknown_pattern`: a fizzle that is no near miss of a known sigil. |
+| `sigil::grimoire` | `Grimoire`: the sigils the player knows, those every run starts with (`known_at_start`) and those learnt from glyphs. |
 | `sigil::casting` | Essence, the reach of spells (`SPELL_RANGE`, 8 cells, for spells aimed in a direction; `NEAREST_FOE_REACH`, the disc of radius 8, for spells on the nearest foe in sight), cast quality and backlash. |
 | `stats` | `Stats`: what the player did during the run, for the death summary. |
 
@@ -140,7 +140,9 @@ it was before caves existed. `Generation` then builds the floor: the layout
 the start (a random room, or one end of the cave), stairs on the cell
 farthest from the start by a Dijkstra map (on the bottom floor, 10, the
 seal takes their cell and there are no stairs), monsters out of sight of the
-start, two glyphs and items, placed by the same steps for both kinds.
+start, two glyphs (of sigils not known from the start; one only where a
+single such sigil can be found) and items, placed by the same steps for both
+kinds.
 `Gameplay` draws the damage rolls and backlashes on that floor. A floor is
 a pure function of the seed, its depth and the content, whatever was played
 above.

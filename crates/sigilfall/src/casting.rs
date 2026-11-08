@@ -139,6 +139,10 @@ pub struct Verdict {
     /// Position of the sigil an unstable trace cast in the content's sigil
     /// list (`SigilDef::index`); `None` for a fizzle.
     pub sigil: Option<usize>,
+    /// Whether the fizzled trace is a pattern the grimoire does not hold
+    /// (`Event::UnknownPattern`) rather than a near miss of a known sigil;
+    /// `false` for an unstable trace.
+    pub unknown: bool,
 }
 
 impl Verdict {
@@ -266,6 +270,7 @@ mod tests {
             trace: drawn(keys).trace(),
             quality,
             sigil: None,
+            unknown: false,
         }
     }
 

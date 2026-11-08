@@ -179,8 +179,22 @@ pub const FAILED_WORD: &str = "FAILED";
 /// always one edit.
 pub const ONE_NODE_OFF: &str = "one node off";
 
-/// Why a fizzled trace cast nothing.
+/// Why a fizzled trace cast nothing, when it was a near miss of a known
+/// sigil.
 pub const NO_KNOWN_PATTERN: &str = "no known pattern";
+
+/// Why a fizzled trace cast nothing, when its pattern is not in the
+/// grimoire at all (`Event::UnknownPattern`).
+pub const NOT_IN_GRIMOIRE: &str = "not in your grimoire";
+
+/// The lines under the verdict of a trace whose pattern is not in the
+/// grimoire: how sigils are learnt. `{glyph}` stands for the map glyph of
+/// an unread engraving. Each fits the 37 columns right of the grid.
+pub const LEARN_FROM_GLYPHS: [&str; 3] = [
+    "Sigils are learnt from the glyphs",
+    "carved in the floor, {glyph} on the",
+    "map: step on one to read it.",
+];
 
 /// Last line of the verdict of an unstable cast.
 pub const UNSTABLE_OUTCOME: &str = "The magic lashes back.";
@@ -860,8 +874,10 @@ fn bounded_path(path: &str) -> String {
 ///   trace and what the effect did, "Ember, pure trace: the shade is seared
 ///   (6)."; a spell that kills says "destroyed" and its [`Event::Died`] adds
 ///   nothing more;
-/// - a fizzle: "The trace matches no sigil you know and fizzles."
-///   ([`Tone::Sigil`]);
+/// - a fizzle near a known sigil: "The trace matches no sigil you know and
+///   fizzles." ([`Tone::Sigil`]); a fizzle whose pattern is not in the
+///   grimoire ([`Event::UnknownPattern`]) says so instead, and that sigils
+///   are learnt by reading the glyphs carved in the floor;
 /// - a backlash, on its own [`Tone::Danger`] line after the cast, with what
 ///   it cost: "The backlash scorches you (2).", "The backlash drains your
 ///   essence (4).", "The backlash dazes you: you lose 1 turn."; a backlash
@@ -962,9 +978,16 @@ pub fn describe(events: &[Event], game: &Game, content: &Content) -> Vec<Message
                 ));
                 None
             }
+            // An unknown pattern has a line of its own, which says why.
+            Event::SigilCast { sigil: None, .. } if events.contains(&Event::UnknownPattern) => None,
             Event::SigilCast { sigil: None, .. } => Some(Message::new(
                 Tone::Sigil,
                 "The trace matches no sigil you know and fizzles.",
+            )),
+            Event::UnknownPattern => Some(Message::new(
+                Tone::Sigil,
+                "That pattern is not in your grimoire, and the trace fizzles. \
+                 Sigils are learnt by reading the glyphs carved in the floor.",
             )),
             Event::Wounded {
                 actor,
@@ -2254,6 +2277,29 @@ mod tests {
                     "You decipher a carved glyph: Recall joins your grimoire."
                 ),
             ]
+        );
+    }
+
+    #[test]
+    fn an_unknown_pattern_has_one_line_that_points_to_the_glyphs() {
+        let (game, _, content) = spell_target();
+        let events = [
+            Event::SigilCast {
+                sigil: None,
+                quality: CastQuality::Fizzled,
+            },
+            Event::UnknownPattern,
+        ];
+
+        let messages = describe(&events, &game, &content);
+
+        assert_eq!(
+            lines(&messages),
+            [(
+                Tone::Sigil,
+                "That pattern is not in your grimoire, and the trace fizzles. \
+                 Sigils are learnt by reading the glyphs carved in the floor."
+            )]
         );
     }
 

@@ -1,4 +1,5 @@
-//! The grimoire: the sigils the player has learnt from engraved glyphs.
+//! The grimoire: the sigils the player knows from the start of the run or
+//! has learnt from engraved glyphs.
 //!
 //! Exposes [`Grimoire`]. A trace is only ever recognised against the sigils
 //! of the grimoire, so a perfectly drawn sigil the player has not learnt yet
@@ -18,9 +19,20 @@ pub struct Grimoire {
 }
 
 impl Grimoire {
-    /// Returns an empty grimoire, the one a new run starts with.
+    /// Returns an empty grimoire.
     pub const fn new() -> Self {
         Self { sigils: Vec::new() }
+    }
+
+    /// Returns the grimoire a new run starts with: the sigils of `sigils`
+    /// (normally `Content::sigils`) that are `SigilDef::known_at_start`, in
+    /// file order; empty when none is.
+    pub fn for_new_run(sigils: &[SigilDef]) -> Self {
+        let mut grimoire = Self::new();
+        for sigil in sigils.iter().filter(|sigil| sigil.known_at_start()) {
+            grimoire.learn(sigil);
+        }
+        grimoire
     }
 
     /// Adds `sigil` to the grimoire and returns whether it was new.
@@ -76,6 +88,17 @@ mod tests {
         assert!(grimoire.is_empty());
         assert_eq!(grimoire.len(), 0);
         assert!(!grimoire.knows("ember"));
+    }
+
+    #[test]
+    fn a_new_run_knows_only_the_sigils_known_at_start() {
+        let content = Content::load().expect("the shipped content is valid");
+
+        let grimoire = Grimoire::for_new_run(content.sigils());
+
+        assert_eq!(ids(&grimoire), ["ember"]);
+        assert!(!grimoire.knows("recall"));
+        assert!(Grimoire::for_new_run(&[]).is_empty());
     }
 
     #[test]

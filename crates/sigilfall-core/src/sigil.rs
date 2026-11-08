@@ -7,6 +7,8 @@
 //! the errors [`TraceError`] and [`PatternError`]; [`edit_distance`] between
 //! two node sequences; [`recognize`], which compares a finished trace to
 //! the known sigils and gives a [`Recognition`]: success, unstable or fizzle;
+//! [`is_unknown_pattern`], which tells a fizzle that is no near miss of a
+//! known sigil;
 //! [`Grimoire`], the sigils the player has learnt; and the casting rules:
 //! essence, reach, [`CastQuality`] and [`Backlash`].
 //!
@@ -26,6 +28,7 @@ pub use casting::{
 };
 pub use grimoire::Grimoire;
 pub use recognition::{
-    MIN_PATTERN_DISTANCE, Recognition, UNSTABLE_DISTANCE, edit_distance, recognize,
+    MIN_PATTERN_DISTANCE, NEAR_MISS_DISTANCE, Recognition, UNSTABLE_DISTANCE, edit_distance,
+    is_unknown_pattern, recognize,
 };
 pub use trace::{MIN_PATTERN_NODES, Node, PatternError, Trace, TraceError};

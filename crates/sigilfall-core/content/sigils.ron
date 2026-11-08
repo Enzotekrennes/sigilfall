@@ -1,5 +1,5 @@
-// Sigils the player can learn from glyphs carved in the floor and cast by
-// tracing them on the 3 × 3 grid. Loaded by `Content::load` and checked
+// Sigils the player knows from the start of a run or learns from glyphs
+// carved in the floor, and casts by tracing them on the 3 × 3 grid. Loaded by `Content::load` and checked
 // before a game starts. Every field is required:
 //
 // - id:        stable key used by saves and the grimoire; lower-case letters,
@@ -22,6 +22,11 @@
 //              (the nearest enemy in sight).
 // - min_depth: shallowest floor where its glyph can be found, from 1 (the
 //              first floor) to 10 (the deepest the content is written for).
+// - known_at_start: true for a sigil every new run starts with in the
+//              grimoire, so that a new player can fight with a spell before
+//              reading any glyph; its glyph is then never carved (min_depth
+//              is unused) and no page may teach it. At least one sigil must
+//              stay false and be found on the first floor.
 //
 // Powers are provisional until spells are balanced.
 [
@@ -33,6 +38,7 @@
         power: 6,
         targeting: NearestEnemy,
         min_depth: 1,
+        known_at_start: true,
     ),
     Sigil(
         id: "recall",
@@ -42,6 +48,7 @@
         power: 8,
         targeting: Caster,
         min_depth: 1,
+        known_at_start: false,
     ),
     Sigil(
         id: "veil",
@@ -51,6 +58,7 @@
         power: 2,
         targeting: NearestEnemy,
         min_depth: 2,
+        known_at_start: false,
     ),
     Sigil(
         id: "passage",
@@ -60,6 +68,7 @@
         power: 4,
         targeting: Direction,
         min_depth: 2,
+        known_at_start: false,
     ),
     Sigil(
         id: "lance",
@@ -69,5 +78,6 @@
         power: 9,
         targeting: Direction,
         min_depth: 3,
+        known_at_start: false,
     ),
 ]

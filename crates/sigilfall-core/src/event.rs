@@ -83,11 +83,18 @@ pub enum Event {
     SigilCast {
         /// Identifier of the sigil cast (`SigilDef::id`); `None` for a trace
         /// that matched no sigil of the grimoire, which fizzles with no
-        /// other event.
+        /// other event than [`Event::UnknownPattern`] when the trace is no
+        /// near miss of a known sigil.
         sigil: Option<String>,
         /// How well the trace matched: pure, unstable or fizzled.
         quality: CastQuality,
     },
+    /// The trace of a fizzled cast was no near miss of a sigil of the
+    /// grimoire (`sigil::is_unknown_pattern`): its pattern is not in the
+    /// grimoire at all, rather than a known sigil drawn badly. Comes right
+    /// after the [`Event::SigilCast`] of the fizzle and changes nothing
+    /// more: it lets the player be told that sigils are learnt from glyphs.
+    UnknownPattern,
     /// The player tried to cast without the essence a cast needs. Nothing
     /// happened: no essence, no energy and no time were spent.
     NotEnoughEssence {

@@ -413,16 +413,17 @@ fn an_unknown_trace_fizzles_spends_essence_and_shows_its_verdict() {
         panic!("{:?}", app.state());
     };
     assert_eq!(verdict.quality, CastQuality::Fizzled);
+    assert!(verdict.unknown, "nothing is known: the pattern is unknown");
     let (ticks, turns, essence, _) = clock(&app);
     assert!(ticks > before.0, "the strokes took time");
     assert_eq!(turns, before.1 + 1);
     assert_eq!(essence, before.2 - ESSENCE_COST, "the essence is lost");
-    assert_eq!(
-        log_texts(&app).last().unwrap(),
-        "The trace matches no sigil you know and fizzles."
-    );
+    assert_eq!(log_texts(&app).last().unwrap(), UNKNOWN_PATTERN_LOG);
     let text = text(&app);
     assert!(text.contains(" Enter continue"), "{text}");
+    for line in ["not in your grimoire", "carved in the floor, \u{a7} on the"] {
+        assert!(text.contains(line), "{line}\n{text}");
+    }
     assert_snapshot!(text);
 
     app.handle_key(press(KeyCode::Enter));
@@ -1333,20 +1334,18 @@ fn an_unknown_trace_fizzles_costs_the_essence_and_the_log_says_so() {
         for expected in [
             "Failed trace",
             "FAILED",
-            "no known pattern",
+            "not in your grimoire",
             "traced    2·4·5·6·8·1",
             "The spell fizzles.",
+            "Sigils are learnt from the glyphs",
+            "map: step on one to read it.",
         ] {
             assert!(
                 screen.contains(expected),
                 "seed {seed}: {expected}\n{screen}"
             );
         }
-        assert_eq!(
-            last_log(&app),
-            "The trace matches no sigil you know and fizzles.",
-            "seed {seed}"
-        );
+        assert_eq!(last_log(&app), UNKNOWN_PATTERN_LOG, "seed {seed}");
         assert_eq!(panel_essence(&app), Some(4), "the essence is lost");
         assert_eq!(
             spent(&app, before),
@@ -1361,6 +1360,73 @@ fn an_unknown_trace_fizzles_costs_the_essence_and_the_log_says_so() {
             .collect::<Vec<_>>();
         assert_eq!(after, foe_hp, "nothing was hurt");
     }
+}
+
+/// The log line of a fizzle whose pattern is not in the grimoire.
+const UNKNOWN_PATTERN_LOG: &str = "That pattern is not in your grimoire, and the trace fizzles. \
+                                   Sigils are learnt by reading the glyphs carved in the floor.";
+
+#[test]
+fn a_fizzle_near_a_known_sigil_keeps_its_verdict_and_never_mentions_glyphs() {
+    for seed in seeds() {
+        let mut app = app_of_seed_knowing(seed, &ALL, Some("sloth"));
+
+        // Ember backwards: two edits from 7-5-3, a botched ember.
+        type_trace(&mut app, "357");
+        enter(&mut app);
+
+        let State::Casting(Casting::Verdict(verdict)) = app.state() else {
+            panic!("seed {seed}: no verdict: {:?}", app.state());
+        };
+        assert!(!verdict.unknown, "seed {seed}");
+        let screen = rows_text(&app);
+        assert!(screen.contains("no known pattern"), "seed {seed}\n{screen}");
+        assert!(
+            !screen.contains("not in your grimoire"),
+            "seed {seed}\n{screen}"
+        );
+        assert!(
+            !screen.contains("Sigils are learnt"),
+            "seed {seed}\n{screen}"
+        );
+        assert_eq!(
+            last_log(&app),
+            "The trace matches no sigil you know and fizzles.",
+            "seed {seed}"
+        );
+        assert_eq!(panel_essence(&app), Some(4), "the essence is lost");
+    }
+}
+
+#[test]
+fn a_new_game_knows_ember_and_casts_it_before_reading_any_glyph() {
+    let content = Content::load().expect("the shipped content is valid");
+    let game = Game::new(Seed::new(42), &content);
+    let mut app = App::with_game(dark(), game, content);
+    let known: Vec<&str> = app
+        .game()
+        .grimoire()
+        .sigils()
+        .iter()
+        .map(SigilDef::id)
+        .collect();
+    assert_eq!(known, ["ember"]);
+    let screen = rows_text(&app);
+    assert!(screen.contains("SIGILS          1/5"), "{screen}");
+
+    type_trace(&mut app, "753");
+    enter(&mut app);
+
+    assert_eq!(
+        app.state(),
+        State::Playing,
+        "a pure cast closes the overlay"
+    );
+    assert!(
+        last_log(&app).starts_with("Ember, pure trace"),
+        "{}",
+        last_log(&app)
+    );
 }
 
 #[test]
@@ -2040,7 +2106,8 @@ fn the_screens_fit_and_the_longest_log_lines_stay_whole_at_80_by_24() {
     let monsters = r#"[Monster(id: "long", name: "Archivist of Lower Vault", family: Acolyte,
         elite: false, speed: 1, hp: 999, attack: 0, defense: 0, min_depth: 1)]"#;
     let sigils = r#"[Sigil(id: "long", name: "Ember of the Deep Hearth", pattern: [7, 5, 3],
-        effect: Damage, power: 6, targeting: NearestEnemy, min_depth: 1)]"#;
+        effect: Damage, power: 6, targeting: NearestEnemy, min_depth: 1,
+        known_at_start: false)]"#;
     let items = "[]";
     let content = Content::parse_all(monsters, sigils, items).expect("valid long names");
     let mut game = Game::in_fixed_room(ANY_SEED);

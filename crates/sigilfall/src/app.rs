@@ -1089,6 +1089,7 @@ impl App {
                 trace,
                 quality,
                 sigil,
+                unknown: events.contains(&GameEvent::UnknownPattern),
             }));
         }
     }

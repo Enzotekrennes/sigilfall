@@ -32,6 +32,8 @@ pub(super) struct SigilEntry {
     pub(super) targeting: Option<Targeting>,
     /// Shallowest floor where the sigil's glyph can be found.
     pub(super) min_depth: Option<u32>,
+    /// Whether a new run starts with the sigil in the grimoire.
+    pub(super) known_at_start: Option<bool>,
 }
 
 /// Names of the fields of a `Sigil(...)` entry, in the order of [`Field`].
@@ -43,6 +45,7 @@ const FIELDS: &[&str] = &[
     "power",
     "targeting",
     "min_depth",
+    "known_at_start",
 ];
 
 /// A field of a `Sigil(...)` entry, read from its name in the file.
@@ -63,6 +66,8 @@ pub(super) enum Field {
     Targeting,
     /// `min_depth`
     MinDepth,
+    /// `known_at_start`
+    KnownAtStart,
 }
 
 impl RawEntry for SigilEntry {
@@ -101,6 +106,7 @@ impl RawEntry for SigilEntry {
             Field::Power => fill(&mut self.power, map.next_value()?, name),
             Field::Targeting => fill(&mut self.targeting, map.next_value()?, name),
             Field::MinDepth => fill(&mut self.min_depth, map.next_value()?, name),
+            Field::KnownAtStart => fill(&mut self.known_at_start, map.next_value()?, name),
         }
     }
 }

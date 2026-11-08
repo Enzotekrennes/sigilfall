@@ -262,11 +262,24 @@ fn the_first_floor_of_every_named_seed_holds_glyphs_and_walking_onto_one_teaches
             );
         }
 
-        // Walk to the nearest glyph, fighting whatever stands in the way.
+        // Walk to the nearest glyph, fighting whatever stands in the way:
+        // with Ember, known from the start, while the essence lasts, then
+        // with blows.
         let mut learned = None;
         for _ in 0..800 {
             if game.is_over() || learned.is_some() {
                 break;
+            }
+            if game.visible_monsters().next().is_some()
+                && game.player_actor().essence() >= ESSENCE_COST
+            {
+                let events = cast(&mut game, &pattern("ember"), None);
+                if !events
+                    .iter()
+                    .any(|e| matches!(e, Event::SpellMissed { .. }))
+                {
+                    continue;
+                }
             }
             let from = game.player_actor().position();
             let dist = distances(game.map(), from);
@@ -683,10 +696,14 @@ fn a_trace_that_matches_nothing_fizzles_alone_and_loses_essence_and_time() {
                 }),
                 "seed {seed}, {digits:?}"
             );
-            // Nothing but the monsters' own turns follows: no effect, no
-            // backlash, no refusal.
+            // Nothing but whether the pattern is unknown, then the monsters'
+            // own turns, follows: no effect, no backlash, no refusal.
+            let rest = match events.get(1) {
+                Some(Event::UnknownPattern) => &events[2..],
+                _ => &events[1..],
+            };
             assert!(
-                events[1..].iter().all(|e| matches!(
+                rest.iter().all(|e| matches!(
                     e,
                     Event::Moved { .. } | Event::Waited { .. } | Event::Attacked { .. }
                 )),
@@ -725,6 +742,61 @@ fn a_valid_sigil_not_learnt_yet_fizzles_even_when_traced_exactly_or_one_off() {
             sigil_cast(&events),
             Some((Some("ember".to_owned()), CastQuality::Pure))
         );
+    }
+}
+
+#[test]
+fn a_new_run_starts_knowing_ember_and_can_cast_it_at_once() {
+    let content = shipped();
+    for seed in named_seeds() {
+        let game = Game::new(seed, &content);
+
+        let known: Vec<&str> = game.grimoire().sigils().iter().map(SigilDef::id).collect();
+        assert_eq!(known, ["ember"], "seed {seed}");
+        // Its glyph is never carved, so every glyph of the floor teaches
+        // something new.
+        assert!(
+            game.engravings()
+                .iter()
+                .all(|glyph| !game.grimoire().knows(glyph.sigil().id())),
+            "seed {seed}"
+        );
+    }
+    let mut game = Game::new(Seed::from(42), &content);
+    let events = cast(&mut game, &pattern("ember"), None);
+    assert_eq!(
+        sigil_cast(&events),
+        Some((Some("ember".to_owned()), CastQuality::Pure)),
+        "no glyph read yet"
+    );
+}
+
+#[test]
+fn an_unknown_pattern_is_told_apart_from_a_near_miss_of_a_known_sigil() {
+    for seed in named_seeds() {
+        // The exact pattern of a sigil not learnt yet: unknown.
+        let mut game = knowing(seed, &["ember"]);
+        let events = cast(&mut game, &pattern("recall"), None);
+        assert_eq!(sigil_cast(&events), Some((None, CastQuality::Fizzled)));
+        assert_eq!(events.get(1), Some(&Event::UnknownPattern), "seed {seed}");
+        assert_eq!(game.player_actor().essence(), MAX_ESSENCE - ESSENCE_COST);
+
+        // Two edits from ember (reversed): a fizzle, but a near miss.
+        let mut game = knowing(seed, &["ember"]);
+        let events = cast(&mut game, &[3, 5, 7], None);
+        assert_eq!(sigil_cast(&events), Some((None, CastQuality::Fizzled)));
+        assert!(!events.contains(&Event::UnknownPattern), "seed {seed}");
+        assert_eq!(game.player_actor().essence(), MAX_ESSENCE - ESSENCE_COST);
+
+        // One edit from ember: unstable, as before, never unknown.
+        let mut game = knowing(seed, &["ember"]);
+        foe(&mut game, "gnat", FOE_CELL);
+        let events = cast(&mut game, &[7, 5, 2], None);
+        assert_eq!(
+            sigil_cast(&events),
+            Some((Some("ember".to_owned()), CastQuality::Unstable))
+        );
+        assert!(!events.contains(&Event::UnknownPattern), "seed {seed}");
     }
 }
 

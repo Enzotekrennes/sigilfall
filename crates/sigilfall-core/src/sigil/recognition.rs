@@ -1,11 +1,13 @@
 //! Recognition of a finished trace among the known sigils (decision D7).
 //!
 //! Exposes [`recognize`] and its result [`Recognition`], [`edit_distance`],
-//! the measure of how far a trace is from a pattern, and the thresholds
-//! [`UNSTABLE_DISTANCE`] and [`MIN_PATTERN_DISTANCE`]. A trace equal to a
+//! the measure of how far a trace is from a pattern, the thresholds
+//! [`UNSTABLE_DISTANCE`], [`MIN_PATTERN_DISTANCE`] and
+//! [`NEAR_MISS_DISTANCE`], and [`is_unknown_pattern`]. A trace equal to a
 //! pattern casts that sigil; a trace one edit away casts it unstably;
-//! anything else fizzles. What success, instability or a fizzle do in the
-//! game is not decided here.
+//! anything else fizzles, either as a near miss of a known sigil or as a
+//! pattern the grimoire does not hold at all. What success, instability or
+//! a fizzle do in the game is not decided here.
 
 use super::{Node, Trace};
 use crate::content::SigilDef;
@@ -27,6 +29,16 @@ pub const UNSTABLE_DISTANCE: usize = 1;
 /// breaks such ties by a fixed rule, as a safeguard for sigil lists that do
 /// not come from a validated content file.
 pub const MIN_PATTERN_DISTANCE: usize = 2 * UNSTABLE_DISTANCE + 1;
+
+/// Largest edit distance between a fizzled trace and a known pattern for
+/// which the trace still reads as a botched attempt at that sigil, rather
+/// than as a pattern the grimoire does not hold: 2.
+///
+/// One less than [`MIN_PATTERN_DISTANCE`]: validated patterns are at least
+/// that far apart, so the exact pattern of a sigil not learnt yet is never
+/// a near miss of a known one. Traced, it is always told apart as unknown
+/// (see [`is_unknown_pattern`]), which points the player to the glyphs.
+pub const NEAR_MISS_DISTANCE: usize = MIN_PATTERN_DISTANCE - 1;
 
 /// What a finished trace casts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,6 +109,23 @@ pub fn recognize<'a>(
     unstable.map_or(Recognition::Fizzle, Recognition::Unstable)
 }
 
+/// Returns whether `trace` is further than [`NEAR_MISS_DISTANCE`] edits
+/// from the pattern of every sigil of `sigils`: a pattern the grimoire does
+/// not hold, not a slip of the hand on a known sigil.
+///
+/// `sigils` are the sigils the trace may cast, normally those the player
+/// knows; with none, every trace is unknown. Such a trace always fizzles
+/// ([`recognize`] gives [`Recognition::Fizzle`]); the converse is not true,
+/// since a fizzle two edits from a known pattern is a near miss.
+pub fn is_unknown_pattern<'a>(
+    trace: &Trace,
+    sigils: impl IntoIterator<Item = &'a SigilDef>,
+) -> bool {
+    sigils
+        .into_iter()
+        .all(|sigil| edit_distance(trace.nodes(), sigil.pattern().nodes()) > NEAR_MISS_DISTANCE)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,7 +158,7 @@ mod tests {
             .map(|(id, pattern)| {
                 format!(
                     "Sigil(id: \"{id}\", name: \"{id}\", pattern: {pattern}, effect: Damage, \
-                     power: 1, targeting: NearestEnemy, min_depth: 1)"
+                     power: 1, targeting: NearestEnemy, min_depth: 1, known_at_start: false)"
                 )
             })
             .collect();
@@ -202,6 +231,45 @@ mod tests {
         assert_eq!(cast(&[]), ("fizzle", None));
         let nothing_known = recognize(&pressed(&[7, 5, 3]), []);
         assert_eq!(verdict(nothing_known), ("fizzle", None));
+    }
+
+    #[test]
+    fn a_fizzle_two_edits_from_a_known_pattern_is_a_near_miss_not_unknown() {
+        let content = content_with(&[("ember", "[7, 5, 3]"), ("recall", "[8, 5, 2, 1]")]);
+        let unknown = |digits: &[u8]| is_unknown_pattern(&pressed(digits), content.sigils());
+
+        // Two edits from ember: it fizzles, yet reads as a botched ember.
+        assert_eq!(
+            verdict(recognize(&pressed(&[3, 5, 7]), content.sigils())),
+            ("fizzle", None)
+        );
+        assert!(!unknown(&[3, 5, 7]));
+        assert!(!unknown(&[7, 5, 3]), "a known pattern is never unknown");
+        assert!(!unknown(&[7, 5, 2]), "nor is a trace one edit off");
+        // Three edits or more from every known pattern.
+        assert!(unknown(&[4, 8, 6]));
+        assert!(unknown(&[1, 5, 9, 6]), "lance, not learnt");
+        assert!(unknown(&[]));
+        assert!(
+            is_unknown_pattern(&pressed(&[7, 5, 3]), []),
+            "nothing known"
+        );
+        assert_eq!(NEAR_MISS_DISTANCE, 2);
+    }
+
+    #[test]
+    fn the_pattern_of_a_sigil_not_learnt_is_always_unknown() {
+        let content = Content::load().expect("the shipped content is valid");
+        for learnt in content.sigils() {
+            for other in content.sigils().iter().filter(|s| s.id() != learnt.id()) {
+                assert!(
+                    is_unknown_pattern(other.pattern(), [learnt]),
+                    "{} traced while knowing only {}",
+                    other.id(),
+                    learnt.id()
+                );
+            }
+        }
     }
 
     #[test]

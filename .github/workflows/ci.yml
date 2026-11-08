@@ -65,6 +65,10 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # Without --all-targets the test-support feature is off, so code only
+      # the shipped game compiles is linted as it ships.
+      - name: Clippy (shipped code)
+        run: cargo clippy --workspace --locked -- -D warnings
       - name: Test
         run: cargo test --workspace --locked
       - name: Documentation

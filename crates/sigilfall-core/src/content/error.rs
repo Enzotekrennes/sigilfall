@@ -53,20 +53,33 @@ pub enum ContentError {
         file: &'static str,
     },
     /// No sigil can be found on the first floor, so a new run would have
-    /// no glyph to learn from.
+    /// no glyph to learn from. Sigils known from the start of a run are
+    /// never engraved, so they do not count.
     #[error(
-        "{file}: no sigil can be found on floor {first_depth}: the lowest field \
-         `min_depth` is {min_depth}, on {entry}"
+        "{file}: no sigil can be found on floor {first_depth}: among the sigils \
+         not known at the start, the lowest field `min_depth` is {min_depth}, \
+         on {entry}"
     )]
     NoSigilAtFirstDepth {
         /// Path of the faulty file, relative to the crate.
         file: &'static str,
         /// Number of the first floor.
         first_depth: u32,
-        /// The entry with the lowest `min_depth`, the one to lower first.
+        /// The entry with the lowest `min_depth` among the sigils not known
+        /// at the start, the one to lower first.
         entry: String,
         /// That entry's `min_depth`.
         min_depth: u32,
+    },
+    /// Every sigil of the file is known from the start of a run, so no
+    /// glyph would ever be engraved and nothing would be left to learn.
+    #[error(
+        "{file}: every sigil has `known_at_start: true`, at least one must be \
+         learnt from a glyph"
+    )]
+    NothingToLearn {
+        /// Path of the faulty file, relative to the crate.
+        file: &'static str,
     },
     /// The sigil file defines no entry at all.
     #[error("{file}: the file defines no sigil, at least one is needed")]
@@ -180,6 +193,13 @@ pub enum FieldProblem {
         reference: String,
         /// That entry's `min_depth`, the shallowest floor accepted.
         min_depth: u32,
+    },
+    /// The value refers to a sigil every run knows from the start, such as
+    /// a page teaching it: it would never teach anything.
+    #[error("{reference} is known from the start of every run (`known_at_start`)")]
+    KnownAtStart {
+        /// The entry referred to, such as "sigil `ember`".
+        reference: String,
     },
     /// Two spawn rules of the same creature or item cover a common floor,
     /// so its weight there would be ambiguous.

@@ -95,11 +95,12 @@ pub const MAX_MONSTERS_PER_FLOOR: usize = 12;
 /// Number of engraved glyphs placed on a floor by
 /// [`generate_with_monsters`].
 ///
-/// Two: the first floors offer two sigils each (see `content/sigils.ron`),
-/// so a careful player leaves the first floor with both and finds the next
-/// ones as they become available deeper. More would hand out the whole
-/// grimoire in a few floors; fewer would leave a floor without discovery.
-/// Fewer are placed only when fewer sigils are available at that depth.
+/// Two: the second floor offers two new sigils (see `content/sigils.ron`),
+/// so a careful player finds the next ones as they become available deeper.
+/// More would hand out the whole grimoire in a few floors; fewer would leave
+/// a floor without discovery. Fewer are placed only when fewer sigils are
+/// available at that depth: on the first floor, one, since Ember is known
+/// from the start and only Recall is left to find there.
 pub const GLYPHS_PER_FLOOR: usize = 2;
 
 /// Number of items placed on a floor by [`generate_with_monsters`].
@@ -1099,7 +1100,7 @@ mod tests {
             let available: Vec<&str> = content
                 .sigils()
                 .iter()
-                .filter(|sigil| sigil.min_depth() <= depth)
+                .filter(|sigil| sigil.can_appear_at(depth))
                 .map(SigilDef::id)
                 .collect();
             assert_eq!(
@@ -1279,13 +1280,16 @@ mod tests {
         let first: Vec<&str> = content
             .sigils()
             .iter()
-            .filter(|sigil| sigil.min_depth() == FIRST_DEPTH)
+            .filter(|sigil| sigil.can_appear_at(FIRST_DEPTH))
             .map(SigilDef::id)
             .collect();
         let mut first_sorted = first.clone();
         first_sorted.sort_unstable();
         assert_eq!(engraved(FIRST_DEPTH), first_sorted);
-        assert_eq!(engraved(DEEPEST_CHECKED).len(), content.sigils().len());
+        // Every sigil but those known from the start is found somewhere.
+        let to_learn = content.sigils().iter().filter(|s| !s.known_at_start());
+        assert_eq!(engraved(DEEPEST_CHECKED).len(), to_learn.count());
+        assert!(!engraved(DEEPEST_CHECKED).contains(&"ember".to_owned()));
 
         let a = generate_with_monsters(Seed::new(0), FIRST_DEPTH, &content);
         let b = generate_with_monsters(Seed::new(1), FIRST_DEPTH, &content);

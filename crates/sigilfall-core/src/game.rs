@@ -212,8 +212,9 @@ impl Game {
     /// energy chosen by the generation (`MonsterSpawn::energy`).
     ///
     /// The floor's engraved glyphs and items are those of the generation.
-    /// The player starts with an empty grimoire, an empty inventory and a
-    /// full reserve of essence.
+    /// The player starts with the sigils of `content` known from the start
+    /// in the grimoire (`Grimoire::for_new_run`, Ember with the shipped
+    /// content), an empty inventory and a full reserve of essence.
     ///
     /// The same seed and content always give the same floor, monsters,
     /// glyphs and items. Time is advanced until the player's first turn, so
@@ -226,6 +227,7 @@ impl Game {
             seed,
             generation::generate_with_monsters(seed, FIRST_DEPTH, content),
         );
+        game.grimoire = Grimoire::for_new_run(content.sigils());
         game.content = Some(content.clone());
         game
     }
@@ -248,8 +250,9 @@ impl Game {
     /// created in that order with their starting energy, the glyphs of
     /// `Floor::glyphs` and the items of `Floor::items`.
     ///
-    /// [`Game::new`] is this function on the first floor of the seed with
-    /// its monsters. Given a floor from `generation::generate`, which places
+    /// The player starts with an empty grimoire. [`Game::new`] is this
+    /// function on the first floor of the seed with its monsters, plus the
+    /// sigils known from the start. Given a floor from `generation::generate`, which places
     /// neither monster, glyph nor item, the player is alone: tests of
     /// movement, sight or the camera use that to walk a generated floor
     /// without a monster in the way. Time is advanced until the player's

@@ -7,6 +7,8 @@
 //! player cannot draw as written, a pattern too close to another one, a
 //! targeting that cannot aim the effect, a repeated identifier, a missing
 //! field, a value out of bounds, or no sigil to find on the first floor.
+//! A sigil may be known from the start of a run (`known_at_start`): the
+//! grimoire of a new run holds it, and its glyph is never engraved.
 //!
 //! This module describes sigils; it neither recognises traces (see the
 //! `sigil` module of the crate) nor applies effects.
@@ -99,6 +101,8 @@ pub struct SigilDef {
     targeting: Targeting,
     /// Shallowest floor where its glyph can be found.
     min_depth: u32,
+    /// Whether a new run starts with it in the grimoire.
+    known_at_start: bool,
 }
 
 impl SigilDef {
@@ -150,15 +154,23 @@ impl SigilDef {
         self.min_depth
     }
 
+    /// Returns whether a new run starts with the sigil in its grimoire, so
+    /// that a new player can cast it before reading any glyph.
+    pub const fn known_at_start(&self) -> bool {
+        self.known_at_start
+    }
+
     /// Returns whether the sigil's glyph may be engraved on floor `depth`:
-    /// `depth` is at least [`SigilDef::min_depth`].
+    /// `depth` is at least [`SigilDef::min_depth`] and the sigil is not
+    /// [`SigilDef::known_at_start`], since a glyph the player can read from
+    /// the first turn would teach nothing.
     pub const fn can_appear_at(&self, depth: u32) -> bool {
-        depth >= self.min_depth
+        !self.known_at_start && depth >= self.min_depth
     }
 
     /// Builds a sigil identified by `id` with the pattern `digits`, without
     /// any of the file's checks: a damage of power 1 aimed at the nearest
-    /// enemy, first in file order.
+    /// enemy, first in file order, to be learnt from a glyph.
     ///
     /// Only tests use it, to build sigil lists a content file would refuse,
     /// such as two patterns too close to each other.
@@ -177,6 +189,7 @@ impl SigilDef {
             power: 1,
             targeting: Targeting::NearestEnemy,
             min_depth: FIRST_DEPTH,
+            known_at_start: false,
         }
     }
 }
@@ -187,16 +200,18 @@ impl SigilDef {
 /// pattern, bounds, targeting suited to the effect), then against the
 /// entries before it (identifier not reused, pattern at least
 /// [`MIN_PATTERN_DISTANCE`] edits away from theirs). The list must hold at
-/// least one sigil whose glyph can be found on floor [`FIRST_DEPTH`], so a
-/// new run always has something to learn.
+/// least one sigil whose glyph can be found on floor [`FIRST_DEPTH`]
+/// (`SigilDef::can_appear_at`: one not known from the start), so a new run
+/// always has something to learn.
 ///
 /// # Errors
 ///
 /// Returns the first fault found: [`ContentError::InvalidField`] naming the
 /// entry and the field (for a pattern too close to another, the later entry,
 /// with the earlier one in [`FieldProblem::TooClose`]),
-/// [`ContentError::NoSigil`] for an empty list, or
-/// [`ContentError::NoSigilAtFirstDepth`].
+/// [`ContentError::NoSigil`] for an empty list,
+/// [`ContentError::NothingToLearn`] when every sigil is known from the
+/// start, or [`ContentError::NoSigilAtFirstDepth`].
 pub(super) fn validate(entries: Vec<SigilEntry>) -> Result<Vec<SigilDef>, ContentError> {
     if entries.is_empty() {
         return Err(ContentError::NoSigil { file: SIGILS_FILE });
@@ -215,13 +230,21 @@ pub(super) fn validate(entries: Vec<SigilEntry>) -> Result<Vec<SigilDef>, Conten
 }
 
 /// Refuses a non-empty sigil list that leaves floor [`FIRST_DEPTH`] without
-/// any glyph to find, naming the entry whose `min_depth` is the lowest.
+/// any glyph to find: [`ContentError::NothingToLearn`] when every sigil is
+/// known from the start, otherwise [`ContentError::NoSigilAtFirstDepth`]
+/// naming, among the sigils not known from the start, the one whose
+/// `min_depth` is the lowest.
 fn check_first_depth(sigils: &[SigilDef]) -> Result<(), ContentError> {
     if sigils.iter().any(|sigil| sigil.can_appear_at(FIRST_DEPTH)) {
         return Ok(());
     }
-    let Some(shallowest) = sigils.iter().min_by_key(|sigil| sigil.min_depth) else {
-        return Ok(());
+    let to_learn = sigils.iter().filter(|sigil| !sigil.known_at_start);
+    let Some(shallowest) = to_learn.min_by_key(|sigil| sigil.min_depth) else {
+        return if sigils.is_empty() {
+            Ok(())
+        } else {
+            Err(ContentError::NothingToLearn { file: SIGILS_FILE })
+        };
     };
     Err(ContentError::NoSigilAtFirstDepth {
         file: SIGILS_FILE,
@@ -251,6 +274,7 @@ fn validate_entry(index: usize, entry: SigilEntry) -> Result<SigilDef, ContentEr
         power,
         targeting,
         min_depth: check.depth(entry.min_depth, "min_depth")?,
+        known_at_start: check.required(entry.known_at_start, "known_at_start")?,
         id,
     })
 }
@@ -316,7 +340,7 @@ fn check_distinct_pattern(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::content::{Content, MAX_NAME_LENGTH};
+    use crate::content::{Content, MAX_DEPTH, MAX_NAME_LENGTH};
     use crate::sigil::{MIN_PATTERN_NODES, Node, PatternError, TraceError};
 
     /// The monster file shipped with the game, valid, for parsing sigils.
@@ -333,6 +357,7 @@ mod tests {
             ("power", "5".to_owned()),
             ("targeting", "NearestEnemy".to_owned()),
             ("min_depth", "1".to_owned()),
+            ("known_at_start", "false".to_owned()),
         ]
         .into()
     }
@@ -450,6 +475,7 @@ mod tests {
                 ("power", "8".to_owned()),
                 ("targeting", "Caster".to_owned()),
                 ("min_depth", "2".to_owned()),
+                ("known_at_start", "false".to_owned()),
             ]),
         ]);
 
@@ -465,6 +491,7 @@ mod tests {
         assert_eq!(recall.power(), 8);
         assert_eq!(recall.targeting(), Targeting::Caster);
         assert_eq!(recall.min_depth(), 2);
+        assert!(!recall.known_at_start());
         assert_eq!(recall.index(), 1);
         assert!(!recall.can_appear_at(1) && recall.can_appear_at(2));
         assert!(content.sigil("unknown").is_none());
@@ -695,6 +722,7 @@ mod tests {
             "power",
             "targeting",
             "min_depth",
+            "known_at_start",
         ] {
             let source = file(&[valid("ok", "[8, 5, 2, 1]"), without("hollow", field)]);
 
@@ -801,6 +829,71 @@ mod tests {
         );
         let one_at_first = source.replacen("min_depth: 3", "min_depth: 1", 1);
         assert!(parse(&one_at_first).is_ok());
+    }
+
+    #[test]
+    fn ember_alone_is_known_at_start_and_never_engraved() {
+        let content = Content::load().expect("the shipped content files are valid");
+
+        let known: Vec<&str> = content
+            .sigils()
+            .iter()
+            .filter(|sigil| sigil.known_at_start())
+            .map(SigilDef::id)
+            .collect();
+
+        assert_eq!(known, ["ember"]);
+        let ember = content.sigil("ember").expect("shipped sigil");
+        assert_eq!(ember.effect(), Effect::Damage, "a new player can attack");
+        assert!((FIRST_DEPTH..=MAX_DEPTH).all(|depth| !ember.can_appear_at(depth)));
+    }
+
+    #[test]
+    fn a_sigil_known_at_start_does_not_count_as_one_to_find_on_the_first_floor() {
+        let source = file(&[
+            with("ember", "known_at_start", "true"),
+            with("deep", "min_depth", "3").replace("[7, 5, 3]", "[8, 5, 2, 1]"),
+        ]);
+
+        let (error, message) = refused(&source);
+
+        assert_eq!(
+            error,
+            ContentError::NoSigilAtFirstDepth {
+                file: SIGILS_FILE,
+                first_depth: FIRST_DEPTH,
+                entry: "sigil `deep` (entry 2)".to_owned(),
+                min_depth: 3,
+            }
+        );
+        assert!(message.contains("not known at the start"), "{message}");
+        let one_to_learn = source.replacen("min_depth: 3", "min_depth: 1", 1);
+        let content = parse(&one_to_learn).expect("one glyph on the first floor");
+        assert!(content.sigils()[0].known_at_start());
+        assert!(!content.sigils()[0].can_appear_at(FIRST_DEPTH));
+        assert!(content.sigils()[1].can_appear_at(FIRST_DEPTH));
+    }
+
+    #[test]
+    fn a_file_whose_every_sigil_is_known_at_start_is_refused() {
+        let source = file(&[
+            with("ember", "known_at_start", "true"),
+            with("recall", "known_at_start", "true").replace("[7, 5, 3]", "[8, 5, 2, 1]"),
+        ]);
+
+        let (error, message) = refused(&source);
+
+        assert_eq!(error, ContentError::NothingToLearn { file: SIGILS_FILE });
+        assert!(message.contains(SIGILS_FILE), "{message}");
+        assert!(message.contains("known_at_start"), "{message}");
+    }
+
+    #[test]
+    fn known_at_start_must_be_a_boolean() {
+        let (error, message) = refused(&file(&[with("odd", "known_at_start", "1")]));
+
+        assert!(matches!(error, ContentError::Syntax { .. }), "{error:?}");
+        assert_names(&message, "sigil `odd` (entry 1), field", "known_at_start");
     }
 
     #[test]

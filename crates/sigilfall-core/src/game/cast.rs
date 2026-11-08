@@ -17,7 +17,8 @@
 //!    cast while the player has steadied casts left (`Game::steady_casts`,
 //!    given by items) uses one up and is cast pure instead: the event says
 //!    pure and [`Event::CastSteadied`] follows. A fizzled cast stops here:
-//!    the essence is lost.
+//!    the essence is lost; when its trace is no near miss of a known sigil,
+//!    [`Event::UnknownPattern`] follows (see `sigil::is_unknown_pattern`).
 //! 4. The effect applies to its target (see [`Game::apply_effect`]).
 //! 5. An unstable cast then suffers one backlash drawn from the gameplay
 //!    stream (see [`Game::suffer_backlash`]).
@@ -31,7 +32,7 @@ use crate::geometry::{Direction, Position};
 use crate::schedule::{action_cost, spend_energy};
 use crate::sigil::{
     Backlash, CastQuality, DAZE_TURNS, ESSENCE_COST, NEAREST_FOE_REACH, Recognition, SCORCH_DAMAGE,
-    SPELL_RANGE, Trace, draw_backlash, recognize,
+    SPELL_RANGE, Trace, draw_backlash, is_unknown_pattern, recognize,
 };
 
 impl Game {
@@ -82,6 +83,9 @@ impl Game {
             quality,
         });
         let Some(sigil) = sigil else {
+            if is_unknown_pattern(&trace, self.grimoire.sigils()) {
+                events.push(Event::UnknownPattern);
+            }
             return true;
         };
         if steadied {
@@ -349,7 +353,8 @@ mod tests {
     fn single_sigil(effect: &str, targeting: &str, power: i32) -> SigilDef {
         let source = format!(
             "[Sigil(id: \"test_sigil\", name: \"test sigil\", pattern: [7, 5, 3], \
-             effect: {effect}, power: {power}, targeting: {targeting}, min_depth: 1)]"
+             effect: {effect}, power: {power}, targeting: {targeting}, min_depth: 1, \
+             known_at_start: false)]"
         );
         let content = Content::parse_files(MONSTERS, &source).expect("valid test sigil");
         content.sigils()[0].clone()
@@ -432,7 +437,8 @@ mod tests {
 
     #[test]
     fn a_cast_costs_each_stroke_middle_nodes_included_plus_the_validation() {
-        // Unknown traces fizzle, which costs the same time as a success.
+        // Unknown traces fizzle, which costs the same time as a success;
+        // with nothing known, every pattern is unknown.
         let cases: [(&[u8], usize); 4] = [
             (&[7, 5, 3], 3),
             // 7 to 3 links 5 on the way: three strokes.
@@ -448,7 +454,13 @@ mod tests {
 
             let events = cast(&mut game, digits, None);
 
-            assert_eq!(events, [cast_event(None, CastQuality::Fizzled)]);
+            assert_eq!(
+                events,
+                [
+                    cast_event(None, CastQuality::Fizzled),
+                    Event::UnknownPattern
+                ]
+            );
             assert_eq!(cast_cost(strokes), strokes as i32 * STROKE_COST + CAST_COST);
             assert_eq!(
                 energy_spent(&game, before),
@@ -1195,7 +1207,8 @@ mod tests {
 
             assert_eq!(game.engravings(), floor.glyphs());
             assert!(!game.engravings().is_empty());
-            assert!(game.grimoire().is_empty());
+            let known: Vec<&str> = game.grimoire().sigils().iter().map(SigilDef::id).collect();
+            assert_eq!(known, ["ember"], "the sigils known at start only");
             assert_eq!(game.player_actor().essence(), MAX_ESSENCE);
         }
     }

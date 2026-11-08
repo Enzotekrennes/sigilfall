@@ -145,15 +145,17 @@ impl ItemDef {
 ///
 /// Each entry is checked in turn (identifier form, presence of every field,
 /// name length, strength of the effect within its bounds, taught sigil
-/// defined in `sigils` and found no deeper than the page, `min_depth` within
-/// bounds), then against the entries before it (identifier not
-/// reused). An empty list is accepted: floors then hold no item.
+/// defined in `sigils`, not known from the start and found no deeper than
+/// the page, `min_depth` within bounds), then against the entries before it
+/// (identifier not reused). An empty list is accepted: floors then hold no
+/// item.
 ///
 /// # Errors
 ///
 /// Returns the first fault found as [`ContentError::InvalidField`] naming
 /// the entry and the field; a sigil missing from `sigils` is a
-/// [`FieldProblem::UnknownReference`] on field `effect`, a page shallower
+/// [`FieldProblem::UnknownReference`] on field `effect`, a sigil known from
+/// the start a [`FieldProblem::KnownAtStart`] on field `effect`, a page shallower
 /// than its sigil a [`FieldProblem::ShallowerThanReference`] on field
 /// `min_depth`.
 pub(super) fn validate(
@@ -206,7 +208,9 @@ fn validate_entry(
 
 /// Returns the effect described by `entry`, the field `effect` of the entry
 /// `check` designates, refusing a missing one, a strength out of its bounds
-/// (see [`ItemEffect`]) or a taught sigil that `sigils` does not define.
+/// (see [`ItemEffect`]), a taught sigil that `sigils` does not define, or
+/// one every run already knows (`SigilDef::known_at_start`), which the page
+/// could never teach.
 fn effect(
     check: &EntryCheck,
     entry: Option<EffectEntry>,
@@ -234,6 +238,14 @@ fn effect(
                     },
                 ));
             };
+            if sigil.known_at_start() {
+                return Err(check.fail(
+                    FIELD,
+                    FieldProblem::KnownAtStart {
+                        reference: format!("sigil `{}`", sigil.id()),
+                    },
+                ));
+            }
             ItemEffect::Teach(sigil.clone())
         }
     })
@@ -389,6 +401,27 @@ mod tests {
     }
 
     #[test]
+    fn a_page_teaching_a_sigil_known_at_start_is_refused() {
+        let source = file(&[valid("ember_page", "Teach(\"ember\")")]);
+
+        let (error, message) = refused(&source);
+
+        assert_names(&message, "item `ember_page` (entry 1)", "effect");
+        assert!(message.contains("known_at_start"), "{message}");
+        assert_eq!(
+            error,
+            ContentError::InvalidField {
+                file: ITEMS_FILE,
+                entry: "item `ember_page` (entry 1)".to_owned(),
+                field: "effect",
+                problem: FieldProblem::KnownAtStart {
+                    reference: "sigil `ember`".to_owned(),
+                },
+            }
+        );
+    }
+
+    #[test]
     fn a_page_teaching_an_unknown_sigil_is_refused() {
         let source = file(&[
             valid("draught", "Heal(7)"),
@@ -418,7 +451,8 @@ mod tests {
     #[test]
     fn the_shipped_items_are_refused_without_the_sigils_they_teach() {
         let lone_sigil = "[Sigil(id: \"spark\", name: \"Spark\", pattern: [7, 5, 3], \
-                          effect: Damage, power: 1, targeting: NearestEnemy, min_depth: 1)]";
+                          effect: Damage, power: 1, targeting: NearestEnemy, min_depth: 1, \
+                          known_at_start: false)]";
         let shipped_items = include_str!("../../content/items.ron");
 
         let error = Content::parse_all(MONSTERS, lone_sigil, shipped_items)

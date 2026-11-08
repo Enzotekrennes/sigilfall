@@ -95,8 +95,10 @@ pub fn lines(grimoire: &Grimoire, rows: usize, width: u16, theme: &Theme) -> Vec
 }
 
 /// One line of the empty state, in `text_muted`, with the `{glyph}` mark
-/// replaced by the map glyph of an unread engraving in its own style.
-fn empty_state_line(text: &str, theme: &Theme) -> Line<'static> {
+/// replaced by the map glyph of an unread engraving in its own style. The
+/// verdict of an unknown pattern (`ui::sigil`) tells how to learn sigils
+/// with it too.
+pub(super) fn empty_state_line(text: &str, theme: &Theme) -> Line<'static> {
     let mut spans = Vec::new();
     for (index, part) in text.split("{glyph}").enumerate() {
         if index > 0 {

@@ -130,10 +130,13 @@ not close the summary unseen.
 
 ### How sigils work
 
-Glyphs carved in the floor (`§`) teach a sigil when you step on them, and
-the grimoire beside the grid lists the patterns you know. A trace that
-matches a known pattern exactly casts it; one node off, the spell goes off
-unstable and a backlash follows; anything else fizzles. Every cast spends
+Every run starts with Ember (`7 5 3`), a spell that burns the nearest foe.
+Glyphs carved in the floor (`§`) teach the other sigils when you step on
+them, and the grimoire beside the grid lists the patterns you know. A trace
+that matches a known pattern exactly casts it; one node off, the spell goes
+off unstable and a backlash follows; anything else fizzles, and a pattern
+that is nowhere near one you know is pointed out as missing from your
+grimoire. Every cast spends
 2 essence, which comes back slowly. A cast takes half a turn plus a quarter
 of a turn for each node linked, and the monsters keep moving meanwhile.
 
@@ -206,6 +209,7 @@ design decisions in detail.
 cargo build --release --locked          # target/release/sigilfall
 cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy --workspace --locked -- -D warnings   # the shipped code alone
 cargo fmt --all --check
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 ```

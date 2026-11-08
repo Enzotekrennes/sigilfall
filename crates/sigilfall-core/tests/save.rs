@@ -392,6 +392,28 @@ fn a_save_of_another_format_version_is_refused() {
 }
 
 #[test]
+fn a_new_run_is_saved_with_ember_and_a_save_of_a_run_without_it_still_loads() {
+    let content = content();
+    let game = Game::new(Seed::new(42), &content);
+    let text = saved(&game);
+    assert!(
+        text.contains("grimoire: [\n        \"ember\",\n    ]"),
+        "the sigils known at start are saved like any other:\n{text}"
+    );
+    let back = save::from_str(&text, &content).expect("a new run reads back");
+    assert!(back.grimoire().knows("ember"));
+
+    // A run saved before Ember was known from the start, with an empty
+    // grimoire: same format, read back as it was, without Ember.
+    let older = text.replacen("grimoire: [\n        \"ember\",\n    ]", "grimoire: []", 1);
+    assert_ne!(older, text);
+    let mut back = save::from_str(&older, &content).expect("an older run still loads");
+    assert!(back.grimoire().is_empty(), "a loaded run is never changed");
+    back.submit(Action::Wait);
+    assert!(!back.is_over());
+}
+
+#[test]
 fn a_save_that_is_not_ron_is_refused_with_its_line() {
     let content = content();
     let text = saved(&small_game(&content));

@@ -17,7 +17,7 @@
 //!
 //! The careful bot plays the whole game: it explores every floor, reads the
 //! glyphs, picks up and uses the items, heals when low, casts Lance, Ember
-//! and Recall, then goes down; on the bottom floor it breaks the seal. It
+//! (known from the start of the run) and Recall, then goes down; on the bottom floor it breaks the seal. It
 //! measures the depths a player who uses everything the game gives reaches
 //! (with the healing draughts of the deeper floors, decision D24), and
 //! checks that such a player gets past the reckless one's floors, reaching
@@ -235,7 +235,8 @@ const NEAREST_REACH_SQUARED: i32 = 72;
 /// three floors past the reckless bot's median of 3, so that care pays, yet
 /// short of the last three floors, the hardest ones (12 creatures each),
 /// which most careful runs must not reach. Measured at 7 (mean 7.05) with
-/// the shipped elites, 5 when they were stronger.
+/// the shipped elites, 5 when they were stronger; still 7 (mean 7.30) once
+/// Ember is known from the start and no longer carved.
 const CAREFUL_TARGET_DEPTHS: std::ops::RangeInclusive<u32> = 6..=7;
 
 /// Smallest share of the careful bot's runs that must end in a victory: the
@@ -243,7 +244,7 @@ const CAREFUL_TARGET_DEPTHS: std::ops::RangeInclusive<u32> = 6..=7;
 /// gives. 2 % of the 80 runs asks for 2 victories, so that a single lucky
 /// seed does not pass for a winnable game. Measured at 3 runs out of 80
 /// (and 7 out of 200) with the shipped elites, none when they were
-/// stronger.
+/// stronger; still 3 out of 80 once Ember is known from the start.
 const MIN_CAREFUL_WIN_SHARE: f64 = 0.02;
 
 /// Largest share of the careful bot's runs that may end in a victory: the

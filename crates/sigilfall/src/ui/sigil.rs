@@ -10,7 +10,8 @@
 //! fall at 45°, and the grimoire on the right (`ui::grimoire`). Under them,
 //! the trace so far, its cost in time, the essence and a notice. A verdict
 //! replaces the grimoire with the outcome: the word UNSTABLE or FAILED, the
-//! pattern expected and the one traced, and the faulty node drawn `×`.
+//! pattern expected and the one traced, and the faulty node drawn `×`; for a
+//! pattern not in the grimoire, how sigils are learnt from glyphs.
 //!
 //! Every state is readable without colour: free, linked, pen and faulty
 //! nodes have four glyphs, and verdicts and warnings are written out.
@@ -345,7 +346,9 @@ fn drawing_notice(notice: Option<Notice>, game: &Game, theme: &Theme) -> Option<
 /// Draws the verdict of an unstable or fizzled cast in the frame's `inner`
 /// area: the grid with the trace in the verdict's colour and its faulty
 /// node `×`, and on the right the verdict word, why, the patterns and the
-/// outcome.
+/// outcome. A pattern not in the grimoire is said so, and the lines under
+/// the outcome tell that sigils are learnt from the glyphs carved in the
+/// floor, with the map glyph of an unread one.
 fn draw_verdict(buffer: &mut Buffer, inner: Rect, game: &Game, verdict: &Verdict, theme: &Theme) {
     let sigil = verdict.sigil.and_then(|index| known_sigil(game, index));
     let unstable = verdict.quality != CastQuality::Fizzled;
@@ -390,8 +393,13 @@ fn draw_verdict(buffer: &mut Buffer, inner: Rect, game: &Game, verdict: &Verdict
         ));
         lines.push(traced);
     } else {
+        let why = if verdict.unknown {
+            messages::NOT_IN_GRIMOIRE
+        } else {
+            messages::NO_KNOWN_PATTERN
+        };
         lines.push(Line::styled(messages::FAILED_WORD, style));
-        lines.push(Line::styled(messages::NO_KNOWN_PATTERN, theme.text_muted));
+        lines.push(Line::styled(why, theme.text_muted));
         lines.push(traced);
     }
     let outcome = if unstable {
@@ -403,6 +411,15 @@ fn draw_verdict(buffer: &mut Buffer, inner: Rect, game: &Game, verdict: &Verdict
     let bottom_row = usize::from(GRID_HEIGHT - 1);
     lines.resize(bottom_row, Line::default());
     lines.push(Line::styled(outcome, theme.text));
+    if verdict.unknown {
+        // Under the grid, how a pattern gets into the grimoire.
+        lines.push(Line::default());
+        lines.extend(
+            messages::LEARN_FROM_GLYPHS
+                .iter()
+                .map(|text| grimoire::empty_state_line(text, theme)),
+        );
+    }
     draw_lines(buffer, column_area(inner), lines);
 }
 
