@@ -1,0 +1,107 @@
+// Creatures of the dungeon, loaded by `Content::load` and checked before a
+// game starts. Every field is required:
+//
+// - id:        stable key used by saves and spawn tables; lower-case letters,
+//              digits and underscores, starting with a letter. Never rename.
+// - name:      name shown to the player.
+// - family:    Vermin, Acolyte, Homunculus, Eye or Spectre; gives the letter
+//              drawn on the map (see docs/design.md).
+// - elite:     true for the strong form of the family (upper-case letter).
+// - speed:     energy gained per tick; 100 is the player's speed, 200 acts
+//              twice per player move.
+// - hp:        hit points of a fresh creature.
+// - attack:    attack value.
+// - defense:   defense value.
+// - min_depth: shallowest floor it can appear on; 1 is the first floor.
+//
+// Combat values are provisional until fights are balanced.
+[
+    Monster(
+        id: "ossuary_rat",
+        name: "ossuary rat",
+        family: Vermin,
+        elite: false,
+        speed: 150,
+        hp: 4,
+        attack: 2,
+        defense: 0,
+        min_depth: 1,
+    ),
+    Monster(
+        id: "wax_beetle",
+        name: "wax beetle",
+        family: Vermin,
+        elite: false,
+        speed: 75,
+        hp: 8,
+        attack: 2,
+        defense: 2,
+        min_depth: 1,
+    ),
+    Monster(
+        id: "acolyte",
+        name: "acolyte",
+        family: Acolyte,
+        elite: false,
+        speed: 100,
+        hp: 10,
+        attack: 3,
+        defense: 1,
+        min_depth: 2,
+    ),
+    Monster(
+        id: "homunculus",
+        name: "homunculus",
+        family: Homunculus,
+        elite: false,
+        speed: 100,
+        hp: 12,
+        attack: 4,
+        defense: 1,
+        min_depth: 2,
+    ),
+    Monster(
+        id: "vigil_eye",
+        name: "vigil eye",
+        family: Eye,
+        elite: false,
+        speed: 50,
+        hp: 6,
+        attack: 3,
+        defense: 0,
+        min_depth: 3,
+    ),
+    Monster(
+        id: "shade",
+        name: "shade",
+        family: Spectre,
+        elite: false,
+        speed: 125,
+        hp: 7,
+        attack: 3,
+        defense: 0,
+        min_depth: 3,
+    ),
+    Monster(
+        id: "hierophant",
+        name: "hierophant",
+        family: Acolyte,
+        elite: true,
+        speed: 100,
+        hp: 20,
+        attack: 5,
+        defense: 2,
+        min_depth: 4,
+    ),
+    Monster(
+        id: "lead_homunculus",
+        name: "lead homunculus",
+        family: Homunculus,
+        elite: true,
+        speed: 75,
+        hp: 28,
+        attack: 6,
+        defense: 4,
+        min_depth: 5,
+    ),
+]

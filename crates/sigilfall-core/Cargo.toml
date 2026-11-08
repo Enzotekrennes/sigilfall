@@ -13,7 +13,10 @@ workspace = true
 [dependencies]
 rand = { version = "0.10.3", default-features = false }
 rand_chacha = { version = "0.10.0", default-features = false }
+ron = "0.12.3"
+serde = { version = "1.0.229", features = ["derive"] }
 slotmap = "1.1.1"
+thiserror = "2.0.21"
 
 [dev-dependencies]
 insta = "1.49.0"
