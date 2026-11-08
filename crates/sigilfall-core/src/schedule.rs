@@ -40,17 +40,46 @@ pub const WAIT_COST: i32 = 100;
 /// creature of speed 200 strikes twice per normal action of the player.
 pub const ATTACK_COST: i32 = 100;
 
+/// Energy spent by each stroke of a cast: each node the trace links, a
+/// middle node linked on the way included (decision D7).
+///
+/// A quarter of a normal action: the shortest sigil (3 nodes, see
+/// `sigil::MIN_PATTERN_NODES`) costs [`CAST_COST`] plus 75, a little more
+/// than a blow, while a sigil over the nine nodes costs 275, nearly three
+/// blows. The length of a pattern is thus its price in time, the choice
+/// between a quick sigil and a strong one.
+pub const STROKE_COST: i32 = 25;
+
+/// Energy spent by validating a trace, whatever its length.
+///
+/// Half a normal action, so that even a short sigil takes longer than a
+/// blow and a spell is never a free extra attack.
+pub const CAST_COST: i32 = 50;
+
 /// Returns the energy `action` costs when it is performed as such.
 ///
-/// A move into a foe is not a step but a blow, which costs [`ATTACK_COST`]
-/// instead; the `game` module, which finds the foe, charges that cost. A
-/// blocked action costs nothing; that rule is applied by the caller, which
-/// simply does not call [`spend_energy`] for it.
+/// A cast costs [`STROKE_COST`] per node of its trace plus [`CAST_COST`]
+/// (see [`cast_cost`]). A move into a foe is not a step but a blow, which
+/// costs [`ATTACK_COST`] instead; the `game` module, which finds the foe,
+/// charges that cost. A blocked or refused action costs nothing; that rule
+/// is applied by the caller, which simply does not call [`spend_energy`]
+/// for it.
 pub const fn action_cost(action: Action) -> i32 {
     match action {
         Action::Move(_) => MOVE_COST,
         Action::Wait => WAIT_COST,
+        Action::Cast { trace, .. } => cast_cost(trace.len()),
     }
+}
+
+/// Returns the energy a cast of a trace of `strokes` nodes costs:
+/// `strokes × STROKE_COST + CAST_COST`.
+///
+/// `strokes` is at most 9, the nodes of the grid, so the result cannot
+/// overflow.
+pub const fn cast_cost(strokes: usize) -> i32 {
+    // At most 9 strokes, so the conversion is lossless.
+    strokes as i32 * STROKE_COST + CAST_COST
 }
 
 /// Charges `actor` `cost` energy for what it just did: [`action_cost`] of
@@ -171,6 +200,7 @@ mod tests {
     use crate::actor::ActorKind;
     use crate::combat::PLAYER_STATS;
     use crate::geometry::{Direction, Position};
+    use crate::sigil::{Node, Trace};
 
     /// Creates an actor moving at `speed`; its other values do not matter
     /// to the schedule.
@@ -308,6 +338,33 @@ mod tests {
         assert_eq!(actor.energy(), -MOVE_COST);
         spend_energy(&mut actor, ATTACK_COST);
         assert_eq!(actor.energy(), -MOVE_COST - ATTACK_COST);
+    }
+
+    #[test]
+    fn a_cast_costs_each_stroke_of_its_trace_plus_the_validation() {
+        let cast = |digits: &[u8]| {
+            let mut trace = Trace::new();
+            for &digit in digits {
+                trace.push(Node::new(digit).unwrap()).unwrap();
+            }
+            action_cost(Action::Cast {
+                trace,
+                direction: None,
+            })
+        };
+
+        assert_eq!(cast(&[]), CAST_COST);
+        assert_eq!(cast(&[7, 5, 3]), 3 * STROKE_COST + CAST_COST);
+        // The stroke 7 to 3 links 5 on the way: the same three strokes.
+        assert_eq!(cast(&[7, 3]), cast(&[7, 5, 3]));
+        assert_eq!(
+            cast(&[7, 8, 9, 6, 5, 4, 1, 2, 3]),
+            9 * STROKE_COST + CAST_COST
+        );
+        assert!(
+            cast(&[7, 5, 3]) > ATTACK_COST,
+            "a spell is never a free blow"
+        );
     }
 
     #[test]

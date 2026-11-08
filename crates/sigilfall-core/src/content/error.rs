@@ -8,6 +8,7 @@
 
 use thiserror::Error;
 
+use super::sigil::{Effect, Targeting};
 use crate::sigil::PatternError;
 
 /// Why the content files could not be loaded.
@@ -50,6 +51,22 @@ pub enum ContentError {
     NoMonster {
         /// Path of the faulty file, relative to the crate.
         file: &'static str,
+    },
+    /// No sigil can be found on the first floor, so a new run would have
+    /// no glyph to learn from.
+    #[error(
+        "{file}: no sigil can be found on floor {first_depth}: the lowest field \
+         `min_depth` is {min_depth}, on {entry}"
+    )]
+    NoSigilAtFirstDepth {
+        /// Path of the faulty file, relative to the crate.
+        file: &'static str,
+        /// Number of the first floor.
+        first_depth: u32,
+        /// The entry with the lowest `min_depth`, the one to lower first.
+        entry: String,
+        /// That entry's `min_depth`.
+        min_depth: u32,
     },
     /// The sigil file defines no entry at all.
     #[error("{file}: the file defines no sigil, at least one is needed")]
@@ -118,6 +135,15 @@ pub enum FieldProblem {
     /// The text is empty or only blank.
     #[error("must not be empty")]
     Empty,
+    /// The text is longer than the screens can show whole (see
+    /// `content::MAX_NAME_LENGTH`).
+    #[error("{length} characters, expected at most {max}")]
+    TooLong {
+        /// Number of characters found.
+        length: usize,
+        /// Most characters accepted.
+        max: usize,
+    },
     /// The list of nodes is not a pattern the player can draw exactly as
     /// written.
     #[error("{0}")]
@@ -134,4 +160,26 @@ pub enum FieldProblem {
         /// Smallest distance accepted.
         min: usize,
     },
+    /// The targeting cannot aim the sigil's effect, such as a blink that is
+    /// not aimed in a direction or a heal aimed at an enemy (see
+    /// `Effect::targetings`).
+    #[error(
+        "{targeting:?} cannot aim the effect {effect:?}, expected {}",
+        or_list(allowed)
+    )]
+    UnsuitedTargeting {
+        /// The sigil's effect.
+        effect: Effect,
+        /// The targeting found in the file.
+        targeting: Targeting,
+        /// Every targeting the effect accepts.
+        allowed: &'static [Targeting],
+    },
+}
+
+/// Writes `targetings` as an English alternative, such as "Direction" or
+/// "NearestEnemy or Direction", for error messages.
+fn or_list(targetings: &[Targeting]) -> String {
+    let names: Vec<String> = targetings.iter().map(|t| format!("{t:?}")).collect();
+    names.join(" or ")
 }

@@ -314,6 +314,7 @@ fn a_monster_at_zero_hit_points_dies_and_leaves_the_world() {
                 | Event::Waited { actor }
                 | Event::MoveBlocked { actor, .. } => *actor != moth,
                 Event::Died { actor, .. } => *actor != moth,
+                _ => true,
             }),
             "seed {seed}: the dead monster still acts"
         );
@@ -602,6 +603,7 @@ fn check_turn(game: &Game, events: &[Event], hp: &mut HashMap<ActorId, i32>, con
             | Event::MoveBlocked { actor, .. } => {
                 assert!(!dead.contains(actor), "{context}: a dead actor acts");
             }
+            _ => {}
         }
     }
     // The game agrees with the tracked hit points.

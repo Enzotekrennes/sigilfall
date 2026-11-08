@@ -557,6 +557,7 @@ fn the_player_always_acts_first_in_a_turn() {
                 | Event::MoveBlocked { actor, .. } => *actor,
                 Event::Attacked { attacker, .. } => *attacker,
                 Event::Died { actor, .. } => *actor,
+                other => panic!("seed {seed}, turn {turn}: a move or a wait began with {other:?}"),
             };
             assert_eq!(actor, player, "seed {seed}, turn {turn}: {events:?}");
         }

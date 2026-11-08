@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 
+use super::MAX_NAME_LENGTH;
 use super::entry_file::EntryKind;
 use super::error::{ContentError, FieldProblem};
 
@@ -58,6 +59,24 @@ impl EntryCheck {
             return Err(self.fail(field, FieldProblem::Empty));
         }
         Ok(text)
+    }
+
+    /// Returns the name in `value`, the field `name` shown to the player,
+    /// refusing a missing or blank one, or one longer than
+    /// [`MAX_NAME_LENGTH`] characters.
+    pub(super) fn name(&self, value: Option<String>) -> Result<String, ContentError> {
+        let name = self.text(value, "name")?;
+        let length = name.chars().count();
+        if length > MAX_NAME_LENGTH {
+            return Err(self.fail(
+                "name",
+                FieldProblem::TooLong {
+                    length,
+                    max: MAX_NAME_LENGTH,
+                },
+            ));
+        }
+        Ok(name)
     }
 
     /// Returns the identifier in `value`, refusing a missing one or one that

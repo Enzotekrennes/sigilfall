@@ -5,7 +5,8 @@
 //! turns the raw entries read from the sigil file into definitions, or
 //! reports the first fault with the entry and field in cause: a pattern the
 //! player cannot draw as written, a pattern too close to another one, a
-//! repeated identifier, a missing field or a value out of bounds.
+//! targeting that cannot aim the effect, a repeated identifier, a missing
+//! field, a value out of bounds, or no sigil to find on the first floor.
 //!
 //! This module describes sigils; it neither recognises traces (see the
 //! `sigil` module of the crate) nor applies effects.
@@ -40,6 +41,27 @@ pub enum Effect {
     Hold,
 }
 
+impl Effect {
+    /// Returns the targetings that can aim this effect; a sigil file pairing
+    /// the effect with any other is refused.
+    ///
+    /// - [`Effect::Damage`] and [`Effect::Hold`] work against an enemy:
+    ///   [`Targeting::NearestEnemy`] or [`Targeting::Direction`] (the first
+    ///   creature on the line). Aimed at the caster they would only hurt or
+    ///   stall the player.
+    /// - [`Effect::Heal`] mends the caster: [`Targeting::Caster`] only, since
+    ///   healing an enemy is never wanted.
+    /// - [`Effect::Blink`] moves the caster along a line, which needs a
+    ///   direction: [`Targeting::Direction`] only.
+    pub const fn targetings(self) -> &'static [Targeting] {
+        match self {
+            Self::Damage | Self::Hold => &[Targeting::NearestEnemy, Targeting::Direction],
+            Self::Heal => &[Targeting::Caster],
+            Self::Blink => &[Targeting::Direction],
+        }
+    }
+}
+
 /// Whom or where a sigil's effect applies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
 pub enum Targeting {
@@ -53,11 +75,15 @@ pub enum Targeting {
 
 /// One sigil, as described in the sigil file and validated.
 ///
-/// Its pattern is a trace the player can draw exactly as written, and it is
-/// at least [`MIN_PATTERN_DISTANCE`] edits away from the pattern of every
-/// other sigil of the file.
+/// Its pattern is a trace the player can draw exactly as written, it is at
+/// least [`MIN_PATTERN_DISTANCE`] edits away from the pattern of every other
+/// sigil of the file, and its targeting is one of `Effect::targetings` of its
+/// effect.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SigilDef {
+    /// Position of the sigil in its file, counted from 0: the order of the
+    /// grimoire and of recognition.
+    index: usize,
     /// Stable key used by saves and the grimoire.
     id: String,
     /// Name shown to the player.
@@ -75,6 +101,15 @@ pub struct SigilDef {
 }
 
 impl SigilDef {
+    /// Returns the position of the sigil in the sigil file, counted from 0:
+    /// `Content::sigils()[i].index()` is `i`.
+    ///
+    /// The grimoire lists the sigils it knows in this order, whatever the
+    /// order they were learnt in, and `sigil::recognize` expects it.
+    pub const fn index(&self) -> usize {
+        self.index
+    }
+
     /// Returns the stable identifier: lower-case letters, digits and
     /// underscores, unique among sigils.
     pub fn id(&self) -> &str {
@@ -113,21 +148,54 @@ impl SigilDef {
     pub const fn min_depth(&self) -> u32 {
         self.min_depth
     }
+
+    /// Returns whether the sigil's glyph may be engraved on floor `depth`:
+    /// `depth` is at least [`SigilDef::min_depth`].
+    pub const fn can_appear_at(&self, depth: u32) -> bool {
+        depth >= self.min_depth
+    }
+
+    /// Builds a sigil identified by `id` with the pattern `digits`, without
+    /// any of the file's checks: a damage of power 1 aimed at the nearest
+    /// enemy, first in file order.
+    ///
+    /// Only tests use it, to build sigil lists a content file would refuse,
+    /// such as two patterns too close to each other.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `digits` is not a pattern the player can draw.
+    #[cfg(test)]
+    pub(crate) fn unchecked(id: &str, digits: &[u8]) -> Self {
+        Self {
+            index: 0,
+            id: id.to_owned(),
+            name: id.to_owned(),
+            pattern: Trace::from_pattern(digits).expect("a drawable test pattern"),
+            effect: Effect::Damage,
+            power: 1,
+            targeting: Targeting::NearestEnemy,
+            min_depth: FIRST_DEPTH,
+        }
+    }
 }
 
 /// Turns the entries of the sigil file into definitions, in file order.
 ///
 /// Each entry is checked in turn (identifier form, presence of every field,
-/// pattern, bounds), then against the entries before it (identifier not
-/// reused, pattern at least [`MIN_PATTERN_DISTANCE`] edits away from theirs).
-/// The list must hold at least one sigil.
+/// pattern, bounds, targeting suited to the effect), then against the
+/// entries before it (identifier not reused, pattern at least
+/// [`MIN_PATTERN_DISTANCE`] edits away from theirs). The list must hold at
+/// least one sigil whose glyph can be found on floor [`FIRST_DEPTH`], so a
+/// new run always has something to learn.
 ///
 /// # Errors
 ///
 /// Returns the first fault found: [`ContentError::InvalidField`] naming the
 /// entry and the field (for a pattern too close to another, the later entry,
-/// with the earlier one in [`FieldProblem::TooClose`]), or
-/// [`ContentError::NoSigil`] for an empty list.
+/// with the earlier one in [`FieldProblem::TooClose`]),
+/// [`ContentError::NoSigil`] for an empty list, or
+/// [`ContentError::NoSigilAtFirstDepth`].
 pub(super) fn validate(entries: Vec<SigilEntry>) -> Result<Vec<SigilDef>, ContentError> {
     if entries.is_empty() {
         return Err(ContentError::NoSigil { file: SIGILS_FILE });
@@ -136,29 +204,77 @@ pub(super) fn validate(entries: Vec<SigilEntry>) -> Result<Vec<SigilDef>, Conten
     let mut ids = UniqueIds::new(SigilEntry::KIND);
     for (index, entry) in entries.into_iter().enumerate() {
         let position = index + 1;
-        let sigil = validate_entry(position, entry)?;
+        let sigil = validate_entry(index, entry)?;
         ids.claim(position, &sigil.id)?;
         check_distinct_pattern(position, &sigil, &sigils)?;
         sigils.push(sigil);
     }
+    check_first_depth(&sigils)?;
     Ok(sigils)
 }
 
-/// Validates the entry at `position` (counted from 1) on its own, without
+/// Refuses a non-empty sigil list that leaves floor [`FIRST_DEPTH`] without
+/// any glyph to find, naming the entry whose `min_depth` is the lowest.
+fn check_first_depth(sigils: &[SigilDef]) -> Result<(), ContentError> {
+    if sigils.iter().any(|sigil| sigil.can_appear_at(FIRST_DEPTH)) {
+        return Ok(());
+    }
+    let Some(shallowest) = sigils.iter().min_by_key(|sigil| sigil.min_depth) else {
+        return Ok(());
+    };
+    Err(ContentError::NoSigilAtFirstDepth {
+        file: SIGILS_FILE,
+        first_depth: FIRST_DEPTH,
+        entry: SigilEntry::KIND.label(shallowest.index + 1, Some(&shallowest.id)),
+        min_depth: shallowest.min_depth,
+    })
+}
+
+/// Validates the entry at `index` (counted from 0) on its own, without
 /// looking at the other entries.
-fn validate_entry(position: usize, entry: SigilEntry) -> Result<SigilDef, ContentError> {
+fn validate_entry(index: usize, entry: SigilEntry) -> Result<SigilDef, ContentError> {
     let kind = SigilEntry::KIND;
+    let position = index + 1;
     let id = EntryCheck::new(&kind, position, None).identifier(entry.id)?;
     let check = EntryCheck::new(&kind, position, Some(&id));
+    let name = check.name(entry.name)?;
+    let pattern = pattern(&check, entry.pattern)?;
+    let effect = check.required(entry.effect, "effect")?;
+    let power = check.in_range(entry.power, "power", 1, MAX_POWER)?;
+    let targeting = suited_targeting(&check, effect, entry.targeting)?;
     Ok(SigilDef {
-        name: check.text(entry.name, "name")?,
-        pattern: pattern(&check, entry.pattern)?,
-        effect: check.required(entry.effect, "effect")?,
-        power: check.in_range(entry.power, "power", 1, MAX_POWER)?,
-        targeting: check.required(entry.targeting, "targeting")?,
+        index,
+        name,
+        pattern,
+        effect,
+        power,
+        targeting,
         min_depth: check.at_least(entry.min_depth, "min_depth", FIRST_DEPTH)?,
         id,
     })
+}
+
+/// Returns `targeting`, the field `targeting` of the entry `check`
+/// designates, refusing a missing one or one that cannot aim `effect` (see
+/// [`Effect::targetings`]).
+fn suited_targeting(
+    check: &EntryCheck,
+    effect: Effect,
+    targeting: Option<Targeting>,
+) -> Result<Targeting, ContentError> {
+    let targeting = check.required(targeting, "targeting")?;
+    let allowed = effect.targetings();
+    if !allowed.contains(&targeting) {
+        return Err(check.fail(
+            "targeting",
+            FieldProblem::UnsuitedTargeting {
+                effect,
+                targeting,
+                allowed,
+            },
+        ));
+    }
+    Ok(targeting)
 }
 
 /// Returns the trace described by `digits`, the field `pattern` of the entry
@@ -199,7 +315,7 @@ fn check_distinct_pattern(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::content::Content;
+    use crate::content::{Content, MAX_NAME_LENGTH};
     use crate::sigil::{MIN_PATTERN_NODES, Node, PatternError, TraceError};
 
     /// The monster file shipped with the game, valid, for parsing sigils.
@@ -348,12 +464,14 @@ mod tests {
         assert_eq!(recall.power(), 8);
         assert_eq!(recall.targeting(), Targeting::Caster);
         assert_eq!(recall.min_depth(), 2);
+        assert_eq!(recall.index(), 1);
+        assert!(!recall.can_appear_at(1) && recall.can_appear_at(2));
         assert!(content.sigil("unknown").is_none());
         assert!(!content.monsters().is_empty(), "monsters are still read");
     }
 
     #[test]
-    fn every_effect_and_targeting_is_accepted() {
+    fn each_effect_accepts_only_the_targetings_that_can_aim_it() {
         let effects = [
             ("Damage", Effect::Damage),
             ("Heal", Effect::Heal),
@@ -365,15 +483,58 @@ mod tests {
             ("Direction", Targeting::Direction),
             ("NearestEnemy", Targeting::NearestEnemy),
         ];
+        let suited = [
+            (Effect::Damage, Targeting::NearestEnemy),
+            (Effect::Damage, Targeting::Direction),
+            (Effect::Heal, Targeting::Caster),
+            (Effect::Blink, Targeting::Direction),
+            (Effect::Hold, Targeting::NearestEnemy),
+            (Effect::Hold, Targeting::Direction),
+        ];
         for (effect_name, effect) in effects {
             for (targeting_name, targeting) in targetings {
                 let entry =
                     with("any", "effect", effect_name).replace("NearestEnemy", targeting_name);
-                let content = parse(&file(&[entry])).expect("valid sigil");
-                let sigil = &content.sigils()[0];
-                assert_eq!((sigil.effect(), sigil.targeting()), (effect, targeting));
+                let result = parse(&file(&[entry]));
+                if suited.contains(&(effect, targeting)) {
+                    let content = result.expect("suited targeting");
+                    let sigil = &content.sigils()[0];
+                    assert_eq!((sigil.effect(), sigil.targeting()), (effect, targeting));
+                    continue;
+                }
+                let error = result.expect_err("unsuited targeting");
+                let message = error.to_string();
+                assert_names(&message, "sigil `any` (entry 1)", "targeting");
+                assert!(
+                    matches!(
+                        error,
+                        ContentError::InvalidField {
+                            field: "targeting",
+                            problem: FieldProblem::UnsuitedTargeting { effect: e, targeting: t, .. },
+                            ..
+                        } if (e, t) == (effect, targeting)
+                    ),
+                    "{effect:?} with {targeting:?}: {message}"
+                );
             }
         }
+    }
+
+    #[test]
+    fn unsuited_targeting_names_the_accepted_ones() {
+        let entry = with("leap", "effect", "Blink").replace("NearestEnemy", "Caster");
+        let (_, message) = refused(&file(&[entry]));
+        assert!(
+            message.contains("Caster cannot aim the effect Blink, expected Direction"),
+            "{message}"
+        );
+
+        let entry = with("smite", "effect", "Damage").replace("NearestEnemy", "Caster");
+        let (_, message) = refused(&file(&[entry]));
+        assert!(
+            message.contains("expected NearestEnemy or Direction"),
+            "{message}"
+        );
     }
 
     #[test]
@@ -472,10 +633,35 @@ mod tests {
     }
 
     #[test]
-    fn patterns_two_edits_apart_are_accepted() {
+    fn pattern_two_edits_from_an_earlier_one_is_refused() {
+        // 9-5-1 is 7-5-3 with two nodes replaced: 7-5-1 would be one edit
+        // from both.
         let source = file(&[valid("ember", "[7, 5, 3]"), valid("frost", "[9, 5, 1]")]);
 
-        assert!(parse(&source).is_ok());
+        let (error, message) = refused(&source);
+
+        assert_names(&message, "sigil `frost` (entry 2)", "pattern");
+        assert!(message.contains("expected at least 3"), "{message}");
+        assert_pattern_problem(
+            &error,
+            &FieldProblem::TooClose {
+                other: "sigil `ember` (entry 1)".to_owned(),
+                distance: 2,
+                min: MIN_PATTERN_DISTANCE,
+            },
+        );
+    }
+
+    #[test]
+    fn patterns_three_edits_apart_are_accepted() {
+        // 9-5-1-4 is 7-5-3 with two nodes replaced and one added.
+        let source = file(&[valid("ember", "[7, 5, 3]"), valid("frost", "[9, 5, 1, 4]")]);
+
+        let content = parse(&source).expect("patterns far enough apart");
+
+        assert_eq!(MIN_PATTERN_DISTANCE, 3);
+        let indexes: Vec<usize> = content.sigils().iter().map(SigilDef::index).collect();
+        assert_eq!(indexes, [0, 1]);
     }
 
     #[test]
@@ -587,6 +773,58 @@ mod tests {
 
         let (_, message) = refused(&format!("{} trailing", file(&[valid("ok", "[7, 5, 3]")])));
         assert!(message.contains("after the last sigil"), "{message}");
+    }
+
+    #[test]
+    fn a_file_without_a_sigil_on_the_first_floor_is_refused() {
+        let source = file(&[
+            with("deep", "min_depth", "3"),
+            with("shallowest", "min_depth", "2").replace("[7, 5, 3]", "[8, 5, 2, 1]"),
+        ]);
+
+        let (error, message) = refused(&source);
+
+        assert_eq!(
+            error,
+            ContentError::NoSigilAtFirstDepth {
+                file: SIGILS_FILE,
+                first_depth: FIRST_DEPTH,
+                entry: "sigil `shallowest` (entry 2)".to_owned(),
+                min_depth: 2,
+            }
+        );
+        assert!(message.contains(SIGILS_FILE), "{message}");
+        assert!(
+            message.contains("sigil `shallowest` (entry 2)"),
+            "{message}"
+        );
+        let one_at_first = source.replacen("min_depth: 3", "min_depth: 1", 1);
+        assert!(parse(&one_at_first).is_ok());
+    }
+
+    #[test]
+    fn a_name_longer_than_the_screens_can_show_is_refused() {
+        let longest = "x".repeat(MAX_NAME_LENGTH);
+        let entry = with("wordy", "name", &format!("\"{longest}\""));
+        let content = parse(&file(&[entry])).expect("a name at the limit");
+        assert_eq!(content.sigils()[0].name(), longest);
+
+        let too_long = format!("\"{longest}y\"");
+        let (error, message) = refused(&file(&[with("wordy", "name", &too_long)]));
+
+        assert_names(&message, "sigil `wordy` (entry 1)", "name");
+        assert_eq!(
+            error,
+            ContentError::InvalidField {
+                file: SIGILS_FILE,
+                entry: "sigil `wordy` (entry 1)".to_owned(),
+                field: "name",
+                problem: FieldProblem::TooLong {
+                    length: MAX_NAME_LENGTH + 1,
+                    max: MAX_NAME_LENGTH,
+                },
+            }
+        );
     }
 
     #[test]

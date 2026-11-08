@@ -13,6 +13,7 @@
 use crate::actor::ActorId;
 use crate::combat::Combatant;
 use crate::geometry::Position;
+use crate::sigil::{Backlash, CastQuality};
 
 /// Something that happened in the game, in the order it happened.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -70,5 +71,104 @@ pub enum Event {
         /// Who dealt the killing blow: the cause of death, kept for the
         /// end-of-run summary.
         killed_by: Combatant,
+    },
+    /// The player cast a trace: the strokes, the validation and the essence
+    /// are paid. The events of the effect follow, then, for an unstable
+    /// cast, an [`Event::Backlash`].
+    SigilCast {
+        /// Identifier of the sigil cast (`SigilDef::id`); `None` for a trace
+        /// that matched no sigil of the grimoire, which fizzles with no
+        /// other event.
+        sigil: Option<String>,
+        /// How well the trace matched: pure, unstable or fizzled.
+        quality: CastQuality,
+    },
+    /// The player tried to cast without the essence a cast needs. Nothing
+    /// happened: no essence, no energy and no time were spent.
+    NotEnoughEssence {
+        /// Essence the player has.
+        essence: i32,
+        /// Essence a cast needs (`sigil::ESSENCE_COST`).
+        cost: i32,
+    },
+    /// The player traced a sigil aimed in a direction without giving one.
+    /// Nothing happened: no essence, no energy and no time were spent.
+    DirectionMissing {
+        /// Identifier of the sigil the trace would cast.
+        sigil: String,
+    },
+    /// A spell aimed at a creature found none: no enemy in sight, or none on
+    /// the line within `sigil::SPELL_RANGE`. Its cost is still paid.
+    SpellMissed {
+        /// Identifier of the sigil cast.
+        sigil: String,
+    },
+    /// An actor lost hit points to magic: a damage sigil or a scorching
+    /// backlash, not a blow.
+    Wounded {
+        /// Actor that was hurt.
+        actor: ActorId,
+        /// Hit points taken off; may exceed what the actor had left.
+        damage: i32,
+        /// Hit points left afterwards; at 0, [`Event::Died`] follows.
+        hp_left: i32,
+    },
+    /// An actor got hit points back from a sigil.
+    Healed {
+        /// Actor that was healed.
+        actor: ActorId,
+        /// Hit points actually restored: 0 when it was unhurt, never more
+        /// than what it lacked.
+        amount: i32,
+        /// Hit points it has afterwards.
+        hp: i32,
+    },
+    /// An actor will lose its next turns, held by a sigil or dazed by a
+    /// backlash.
+    Held {
+        /// Actor that is held.
+        actor: ActorId,
+        /// Number of its next turns it will lose from now on.
+        turns: u32,
+    },
+    /// A held actor lost one of its turns: it spent the energy of a wait
+    /// and did nothing.
+    TurnLost {
+        /// Actor whose turn was lost.
+        actor: ActorId,
+    },
+    /// An actor was carried along a line by a blink sigil.
+    Blinked {
+        /// Actor that blinked.
+        actor: ActorId,
+        /// Cell it left.
+        from: Position,
+        /// Cell it landed on; equal to `from` when the first cell of the
+        /// line was already blocked.
+        to: Position,
+    },
+    /// An unstable cast went wrong after its effect. The event of its
+    /// consequence follows: [`Event::Wounded`] for a scorch,
+    /// [`Event::EssenceDrained`] for a drain, [`Event::Held`] for a daze.
+    Backlash {
+        /// Actor that cast the sigil and suffers the backlash.
+        caster: ActorId,
+        /// What went wrong.
+        backlash: Backlash,
+    },
+    /// An actor's essence was emptied by a draining backlash.
+    EssenceDrained {
+        /// Actor that lost its essence.
+        actor: ActorId,
+        /// Essence lost; 0 if none was left.
+        lost: i32,
+    },
+    /// The player read an engraved glyph whose sigil it did not know: the
+    /// sigil is now in its grimoire. Reading a known glyph reports nothing.
+    GlyphLearned {
+        /// Identifier of the sigil learnt.
+        sigil: String,
+        /// Cell of the glyph.
+        position: Position,
     },
 }

@@ -1,9 +1,10 @@
-//! Dungeon floors built from the run's seed: layout, start, stairs and
-//! monsters.
+//! Dungeon floors built from the run's seed: layout, start, stairs,
+//! monsters and engraved glyphs.
 //!
-//! Exposes [`generate`] (the layout alone), [`generate_with_monsters`],
-//! [`Floor`], [`MonsterSpawn`], the size of a floor ([`FLOOR_WIDTH`],
-//! [`FLOOR_HEIGHT`]), [`FIRST_DEPTH`] and [`MONSTERS_PER_FLOOR`]. A floor is
+//! Exposes [`generate`] (the layout alone), [`generate_with_monsters`]
+//! (with monsters and glyphs), [`Floor`], [`MonsterSpawn`], [`Engraving`],
+//! the size of a floor ([`FLOOR_WIDTH`], [`FLOOR_HEIGHT`]), [`FIRST_DEPTH`],
+//! [`MONSTERS_PER_FLOOR`] and [`GLYPHS_PER_FLOOR`]. A floor is
 //! a pure function of the seed, the depth and the content: every random
 //! choice is drawn from the stream `Seed::stream(depth, Purpose::Generation)`
 //! in a fixed order, and nothing reads the clock or iterates over a hash map.
@@ -11,16 +12,16 @@
 //! whatever happened on earlier floors.
 //!
 //! The layout itself comes from the `bsp` submodule (rooms and corridors).
-//! Monsters are drawn after the layout, from the same stream, so placing
-//! them never changes the layout of a seed. Items and engraved glyphs are not
-//! placed yet.
+//! Monsters are drawn after the layout, and engraved glyphs after the
+//! monsters, from the same stream, so placing them never changes the layout
+//! or the monsters of a seed. Items are not placed yet.
 
 mod bsp;
 
 use rand::RngExt as _;
 use rand_chacha::ChaCha8Rng;
 
-use crate::content::{Content, MonsterDef};
+use crate::content::{Content, MonsterDef, SigilDef};
 use crate::fov::{self, SIGHT_RADIUS};
 use crate::geometry::Position;
 use crate::map::{Map, Tile};
@@ -49,6 +50,16 @@ pub const FIRST_DEPTH: u32 = 1;
 /// which the shipped layouts never do.
 pub const MONSTERS_PER_FLOOR: usize = 6;
 
+/// Number of engraved glyphs placed on a floor by
+/// [`generate_with_monsters`].
+///
+/// Two: the first floors offer two sigils each (see `content/sigils.ron`),
+/// so a careful player leaves the first floor with both and finds the next
+/// ones as they become available deeper. More would hand out the whole
+/// grimoire in a few floors; fewer would leave a floor without discovery.
+/// Fewer are placed only when fewer sigils are available at that depth.
+pub const GLYPHS_PER_FLOOR: usize = 2;
+
 /// A generated dungeon floor: its tiles, where the player arrives, where the
 /// stairs down are and which monsters wait on it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,6 +73,36 @@ pub struct Floor {
     /// Monsters to create on the floor, in the order they were drawn; empty
     /// for a floor built by [`generate`].
     pub(crate) monsters: Vec<MonsterSpawn>,
+    /// Glyphs engraved on the floor, in the order they were drawn; empty for
+    /// a floor built by [`generate`].
+    pub(crate) glyphs: Vec<Engraving>,
+}
+
+/// A glyph engraved in the floor, which teaches its sigil to the player who
+/// reads it (see `Game::engraving_at`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Engraving {
+    /// Floor cell the glyph is carved in.
+    pub(crate) position: Position,
+    /// The sigil it teaches.
+    pub(crate) sigil: SigilDef,
+}
+
+impl Engraving {
+    /// Returns a glyph teaching `sigil`, carved at `position`.
+    pub(crate) const fn new(position: Position, sigil: SigilDef) -> Self {
+        Self { position, sigil }
+    }
+
+    /// Returns the cell the glyph is carved in.
+    pub const fn position(&self) -> Position {
+        self.position
+    }
+
+    /// Returns the sigil the glyph teaches.
+    pub const fn sigil(&self) -> &SigilDef {
+        &self.sigil
+    }
 }
 
 /// A monster to create when a floor is entered: where, which kind, and how
@@ -127,6 +168,13 @@ impl Floor {
     pub fn monsters(&self) -> &[MonsterSpawn] {
         &self.monsters
     }
+
+    /// Returns the glyphs engraved on the floor, in the order they were
+    /// drawn (see [`generate_with_monsters`]); empty for a floor built by
+    /// [`generate`].
+    pub fn glyphs(&self) -> &[Engraving] {
+        &self.glyphs
+    }
 }
 
 /// Builds floor `depth` of the run identified by `seed`.
@@ -145,13 +193,14 @@ impl Floor {
 ///
 /// Calling this twice with the same arguments returns equal floors. `depth`
 /// is the floor number, [`FIRST_DEPTH`] for the first one; any value is
-/// accepted. No monster is placed: see [`generate_with_monsters`].
+/// accepted. No monster nor glyph is placed: see [`generate_with_monsters`].
 pub fn generate(seed: Seed, depth: u32) -> Floor {
     lay_out(&mut seed.stream(depth, Purpose::Generation)).floor
 }
 
 /// Builds floor `depth` of the run identified by `seed`, as [`generate`]
-/// does, and places [`MONSTERS_PER_FLOOR`] monsters on it.
+/// does, and places [`MONSTERS_PER_FLOOR`] monsters and [`GLYPHS_PER_FLOOR`]
+/// engraved glyphs on it.
 ///
 /// The map, start and stairs are exactly those of [`generate`] with the same
 /// seed and depth. Then, from the same generation stream, each monster gets
@@ -165,8 +214,19 @@ pub fn generate(seed: Seed, depth: u32) -> Floor {
 ///
 /// Two monsters never share a cell, and none stands on the stairs. If fewer
 /// free cells than [`MONSTERS_PER_FLOOR`] exist, one monster is placed per
-/// free cell. Calling this twice with the same arguments returns equal
-/// floors.
+/// free cell.
+///
+/// Then, still from the same stream, each glyph gets in turn a cell drawn
+/// uniformly among the plain floor cells of every room (the start room
+/// included) that hold neither the start, the stairs, a monster nor
+/// another glyph, and a sigil drawn uniformly among the sigils of
+/// `content` whose glyph can appear at `depth` (`SigilDef::can_appear_at`)
+/// and not yet engraved on this floor. Every glyph thus lies on floor the
+/// player can walk to and teaches a different sigil; fewer glyphs are
+/// placed when fewer such sigils or cells exist, none when no sigil is
+/// available that deep.
+///
+/// Calling this twice with the same arguments returns equal floors.
 pub fn generate_with_monsters(seed: Seed, depth: u32, content: &Content) -> Floor {
     let mut rng = seed.stream(depth, Purpose::Generation);
     let Layout {
@@ -177,6 +237,13 @@ pub fn generate_with_monsters(seed: Seed, depth: u32, content: &Content) -> Floo
     let cells = monster_cells(&floor, &rooms, start_room);
     let table: Vec<&MonsterDef> = content.monsters_at(depth).collect();
     floor.monsters = draw_monsters(cells, &table, &mut rng);
+    let cells = glyph_cells(&floor, &rooms);
+    let sigils: Vec<&SigilDef> = content
+        .sigils()
+        .iter()
+        .filter(|sigil| sigil.can_appear_at(depth))
+        .collect();
+    floor.glyphs = draw_glyphs(cells, sigils, &mut rng);
     floor
 }
 
@@ -206,6 +273,7 @@ fn lay_out(rng: &mut ChaCha8Rng) -> Layout {
             start,
             stairs,
             monsters: Vec::new(),
+            glyphs: Vec::new(),
         },
         rooms,
         start_room,
@@ -265,6 +333,39 @@ fn draw_monsters(
         });
     }
     monsters
+}
+
+/// Returns the cells a glyph may be engraved on, room by room in layout
+/// order and in reading order within a room: plain floor cells (not the
+/// stairs) of every room that hold neither the start nor a monster of
+/// `floor`.
+fn glyph_cells(floor: &Floor, rooms: &[bsp::Rect]) -> Vec<Position> {
+    rooms
+        .iter()
+        .flat_map(|room| room.cells())
+        .filter(|&cell| {
+            floor.map.tile(cell) == Some(Tile::Floor)
+                && cell != floor.start
+                && floor.monsters.iter().all(|spawn| spawn.position != cell)
+        })
+        .collect()
+}
+
+/// Draws up to [`GLYPHS_PER_FLOOR`] glyphs from `rng`: for each, a cell
+/// taken out of `cells`, then a sigil taken out of `sigils`, so no cell and
+/// no sigil is used twice. Stops early when either list runs out.
+fn draw_glyphs(
+    mut cells: Vec<Position>,
+    mut sigils: Vec<&SigilDef>,
+    rng: &mut ChaCha8Rng,
+) -> Vec<Engraving> {
+    let mut glyphs = Vec::with_capacity(GLYPHS_PER_FLOOR);
+    while glyphs.len() < GLYPHS_PER_FLOOR && !cells.is_empty() && !sigils.is_empty() {
+        let position = cells.swap_remove(rng.random_range(0..cells.len()));
+        let sigil = sigils.swap_remove(rng.random_range(0..sigils.len()));
+        glyphs.push(Engraving::new(position, sigil.clone()));
+    }
+    glyphs
 }
 
 /// Returns the walkable cell of `map` farthest from `start` in steps.
@@ -445,6 +546,7 @@ mod tests {
                 "{context}"
             );
             assert!(bare.monsters().is_empty(), "{context}");
+            assert!(bare.glyphs().is_empty(), "{context}");
 
             let layout = lay_out(&mut seed.stream(depth, Purpose::Generation));
             let start_room = layout.rooms[layout.start_room];
@@ -485,6 +587,121 @@ mod tests {
                 cells.push(cell);
             }
         }
+    }
+
+    #[test]
+    fn glyphs_follow_the_placement_rules_on_200_seeds() {
+        let content = content();
+        for value in 0..SPAWN_SEEDS {
+            let seed = Seed::new(value);
+            let depth = FIRST_DEPTH + u32::try_from(value).unwrap() % DEEPEST_CHECKED;
+            let floor = generate_with_monsters(seed, depth, &content);
+            let context = format!("seed {value}, depth {depth}");
+
+            // Deterministic, and drawn after the monsters: those of a floor
+            // generated before glyphs existed are untouched.
+            let again = generate_with_monsters(seed, depth, &content);
+            assert_eq!(floor.glyphs(), again.glyphs(), "{context}");
+            let mut rng = seed.stream(depth, Purpose::Generation);
+            let layout = lay_out(&mut rng);
+            let cells = monster_cells(&layout.floor, &layout.rooms, layout.start_room);
+            let table: Vec<&MonsterDef> = content.monsters_at(depth).collect();
+            assert_eq!(
+                floor.monsters(),
+                draw_monsters(cells, &table, &mut rng),
+                "{context}"
+            );
+
+            let available: Vec<&str> = content
+                .sigils()
+                .iter()
+                .filter(|sigil| sigil.min_depth() <= depth)
+                .map(SigilDef::id)
+                .collect();
+            assert_eq!(
+                floor.glyphs().len(),
+                GLYPHS_PER_FLOOR.min(available.len()),
+                "{context}"
+            );
+            let distances = DijkstraMap::new(floor.map(), [floor.start()]);
+            let mut cells = Vec::new();
+            let mut sigils = Vec::new();
+            for glyph in floor.glyphs() {
+                let cell = glyph.position();
+                assert_eq!(floor.map().tile(cell), Some(Tile::Floor), "{context}");
+                assert!(
+                    distances.distance(cell).is_some_and(|steps| steps > 0),
+                    "{context}: {cell:?} not reachable from the start"
+                );
+                assert!(
+                    layout.rooms.iter().any(|&room| inside(room, cell)),
+                    "{context}: {cell:?} outside the rooms"
+                );
+                assert!(
+                    floor
+                        .monsters()
+                        .iter()
+                        .all(|spawn| spawn.position() != cell),
+                    "{context}: {cell:?} under a monster"
+                );
+                assert!(
+                    available.contains(&glyph.sigil().id()),
+                    "{context}: {} too deep",
+                    glyph.sigil().id()
+                );
+                assert!(!cells.contains(&cell), "{context}: {cell:?} twice");
+                assert!(!sigils.contains(&glyph.sigil().id()), "{context}");
+                cells.push(cell);
+                sigils.push(glyph.sigil().id());
+            }
+        }
+    }
+
+    #[test]
+    fn deeper_floors_engrave_deeper_sigils_and_seeds_vary_the_cells() {
+        let content = content();
+        let engraved = |depth| {
+            let mut ids: Vec<String> = (0..SPAWN_SEEDS)
+                .flat_map(|value| generate_with_monsters(Seed::new(value), depth, &content).glyphs)
+                .map(|glyph| glyph.sigil.id().to_owned())
+                .collect();
+            ids.sort_unstable();
+            ids.dedup();
+            ids
+        };
+
+        let first: Vec<&str> = content
+            .sigils()
+            .iter()
+            .filter(|sigil| sigil.min_depth() == FIRST_DEPTH)
+            .map(SigilDef::id)
+            .collect();
+        let mut first_sorted = first.clone();
+        first_sorted.sort_unstable();
+        assert_eq!(engraved(FIRST_DEPTH), first_sorted);
+        assert_eq!(engraved(DEEPEST_CHECKED).len(), content.sigils().len());
+
+        let a = generate_with_monsters(Seed::new(0), FIRST_DEPTH, &content);
+        let b = generate_with_monsters(Seed::new(1), FIRST_DEPTH, &content);
+        assert_ne!(a.glyphs(), b.glyphs());
+    }
+
+    #[test]
+    fn glyphs_stop_when_sigils_or_cells_run_out() {
+        let content = content();
+        let ember = content.sigil("ember").expect("shipped sigil");
+        let cells = vec![Position::new(3, 3), Position::new(4, 3)];
+        let mut rng = Seed::new(0).stream(FIRST_DEPTH, Purpose::Generation);
+
+        let one_sigil = draw_glyphs(cells.clone(), vec![ember], &mut rng);
+        assert_eq!(one_sigil.len(), 1);
+        assert_eq!(one_sigil[0].sigil(), ember);
+
+        let all: Vec<&SigilDef> = content.sigils().iter().collect();
+        let one_cell = draw_glyphs(vec![Position::new(3, 3)], all.clone(), &mut rng);
+        assert_eq!(one_cell.len(), 1);
+        assert!(draw_glyphs(cells, Vec::new(), &mut rng).is_empty());
+        assert!(draw_glyphs(Vec::new(), all, &mut rng).is_empty());
     }
 
     #[test]

@@ -16,14 +16,17 @@ use crate::content::SigilDef;
 /// One wrong, missing or extra node: the "one mistake" of decision D7.
 pub const UNSTABLE_DISTANCE: usize = 1;
 
-/// Smallest edit distance two sigil patterns may have from each other.
+/// Smallest edit distance two sigil patterns may have from each other
+/// (decision D18).
 ///
-/// Patterns closer than this would be confused: a trace one edit away from
-/// one pattern (an unstable cast of it) could be exactly the other, which is
-/// cast perfectly instead. Two patterns at this distance can still both be
-/// one edit away from the same trace; [`recognize`] then picks one by a fixed
-/// rule.
-pub const MIN_PATTERN_DISTANCE: usize = UNSTABLE_DISTANCE + 1;
+/// Twice [`UNSTABLE_DISTANCE`] plus one, so that a near miss always points
+/// to a single sigil: the edit distance obeys the triangle inequality, so a
+/// trace within [`UNSTABLE_DISTANCE`] of two patterns would put them at most
+/// twice that apart. A trace one edit away from a pattern is therefore never
+/// another pattern, nor one edit away from another. [`recognize`] still
+/// breaks such ties by a fixed rule, as a safeguard for sigil lists that do
+/// not come from a validated content file.
+pub const MIN_PATTERN_DISTANCE: usize = 2 * UNSTABLE_DISTANCE + 1;
 
 /// What a finished trace casts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,9 +74,10 @@ pub fn edit_distance(a: &[Node], b: &[Node]) -> usize {
 /// knows, in the order of the content file. A sigil whose pattern equals
 /// the trace is a [`Recognition::Success`]. Otherwise, the first sigil in
 /// that order whose pattern is [`UNSTABLE_DISTANCE`] edit away is a
-/// [`Recognition::Unstable`]: when two patterns are both one edit away (they
-/// are then [`MIN_PATTERN_DISTANCE`] apart), the one listed first wins, so
-/// the result never depends on anything but the trace and that order.
+/// [`Recognition::Unstable`]. Validated sigils are [`MIN_PATTERN_DISTANCE`]
+/// apart, so at most one of them can be that close; should two be (sigils
+/// that skipped validation), the one listed first wins, so the result never
+/// depends on anything but the trace and that order.
 /// Otherwise, including for an empty trace or no sigil, the trace is a
 /// [`Recognition::Fizzle`].
 pub fn recognize<'a>(
@@ -125,7 +129,7 @@ mod tests {
             .map(|(id, pattern)| {
                 format!(
                     "Sigil(id: \"{id}\", name: \"{id}\", pattern: {pattern}, effect: Damage, \
-                     power: 1, targeting: Caster, min_depth: 1)"
+                     power: 1, targeting: NearestEnemy, min_depth: 1)"
                 )
             })
             .collect();
@@ -212,18 +216,37 @@ mod tests {
 
     #[test]
     fn a_trace_one_edit_from_two_patterns_casts_the_one_listed_first() {
-        // 7-5-3 and 9-5-1 are two edits apart; 7-5-1 is one edit from both.
-        let first = content_with(&[("ember", "[7, 5, 3]"), ("frost", "[9, 5, 1]")]);
-        let swapped = content_with(&[("frost", "[9, 5, 1]"), ("ember", "[7, 5, 3]")]);
+        // 7-5-3 and 9-5-1 are two edits apart, too close for a content file,
+        // and 7-5-1 is one edit from both: the safeguard decides.
+        let ember = SigilDef::unchecked("ember", &[7, 5, 3]);
+        let frost = SigilDef::unchecked("frost", &[9, 5, 1]);
         let trace = pressed(&[7, 5, 1]);
 
         assert_eq!(
-            verdict(recognize(&trace, first.sigils())),
+            verdict(recognize(&trace, [&ember, &frost])),
             ("unstable", Some("ember"))
         );
         assert_eq!(
-            verdict(recognize(&trace, swapped.sigils())),
+            verdict(recognize(&trace, [&frost, &ember])),
             ("unstable", Some("frost"))
         );
+    }
+
+    #[test]
+    fn shipped_near_misses_point_to_a_single_sigil() {
+        // Every trace one edit from a shipped pattern is neither another
+        // shipped pattern nor one edit from one.
+        let content = Content::load().expect("the shipped content is valid");
+        for (index, sigil) in content.sigils().iter().enumerate() {
+            for other in &content.sigils()[index + 1..] {
+                let distance = edit_distance(sigil.pattern().nodes(), other.pattern().nodes());
+                assert!(
+                    distance > 2 * UNSTABLE_DISTANCE,
+                    "{} and {} are {distance} edit(s) apart",
+                    sigil.id(),
+                    other.id()
+                );
+            }
+        }
     }
 }

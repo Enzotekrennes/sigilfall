@@ -10,11 +10,12 @@
 //              twice, and every node the player links must be listed: a
 //              stroke between two aligned nodes passes over the node between
 //              them (7 to 3 over 5), so write [7, 5, 3], not [7, 3]. Two
-//              patterns must be at least 2 edits apart (an edit adds, removes
-//              or replaces one node), so that a near miss of one sigil is
-//              never the exact pattern of another.
+//              patterns must be at least 3 edits apart (an edit adds, removes
+//              or replaces one node), so that a near miss of one sigil, one
+//              edit away, is never another sigil nor a near miss of one.
 // - effect:    Damage, Heal, Blink (moves the caster) or Hold (the target
-//              loses turns).
+//              loses turns). Damage and Hold take NearestEnemy or Direction,
+//              Heal takes Caster, Blink takes Direction.
 // - power:     strength of the effect, from 1 to 99: hit points for Damage
 //              and Heal, cells for Blink, turns for Hold.
 // - targeting: Caster, Direction (chosen after the trace) or NearestEnemy
@@ -22,9 +23,7 @@
 // - min_depth: shallowest floor where its glyph can be found; 1 is the
 //              first floor.
 //
-// Powers are provisional until spells are balanced. The shipped patterns are
-// at least 3 edits apart, so a trace one edit from a pattern is never one
-// edit from another.
+// Powers are provisional until spells are balanced.
 [
     Sigil(
         id: "ember",

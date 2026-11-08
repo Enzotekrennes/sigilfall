@@ -2,15 +2,17 @@
 //!
 //! Exposes [`ActorId`], a generational key that never points to a removed
 //! actor, [`Actor`], which holds where an actor stands, how fast it acts,
-//! how it fights, how hurt it is and what it is, [`ActorKind`] and
-//! [`Monster`]. How energy turns into turns is decided by the `schedule`
-//! module, what a monster does by the `ai` module, and how much a blow hurts
-//! by the `combat` module.
+//! how it fights, how hurt it is, how much essence it has, how many turns
+//! it is held for and what it is, [`ActorKind`] and [`Monster`]. How energy
+//! turns into turns is decided by the `schedule` module, what a monster does
+//! by the `ai` module, how much a blow hurts by the `combat` module, and
+//! what casting costs by the `sigil` module.
 
 use crate::combat::{CombatStats, PLAYER_STATS};
 use crate::content::{Family, MonsterDef};
 use crate::geometry::Position;
 use crate::schedule::NORMAL_SPEED;
+use crate::sigil::MAX_ESSENCE;
 
 slotmap::new_key_type! {
     /// Identifies one actor in the game.
@@ -35,13 +37,21 @@ pub struct Actor {
     stats: CombatStats,
     /// Hit points left, from 0 to `stats.max_hp`; 0 means dead.
     hp: i32,
+    /// Most essence the actor can hold: `sigil::MAX_ESSENCE` for the
+    /// player, 0 for creatures, which never cast.
+    max_essence: i32,
+    /// Essence left for casting, from 0 to `max_essence`.
+    essence: i32,
+    /// Number of the actor's next turns it loses, held by a sigil or dazed
+    /// by a backlash; 0 when it acts freely.
+    pub(crate) held_turns: u32,
     /// Whether this is the player or a monster, and which one.
     pub(crate) kind: ActorKind,
 }
 
 impl Actor {
     /// Creates an unhurt actor of the given `kind` standing at `position`
-    /// with no stored energy.
+    /// with no stored energy, no essence and nothing holding it.
     ///
     /// `speed` is the energy gained per tick: `schedule::NORMAL_SPEED` acts
     /// once per tick with actions at the normal cost, twice that speed acts
@@ -73,14 +83,21 @@ impl Actor {
             energy: 0,
             stats,
             hp: stats.max_hp,
+            max_essence: 0,
+            essence: 0,
+            held_turns: 0,
             kind,
         }
     }
 
-    /// Creates the player, unhurt, standing at `position`, at normal speed
-    /// and with the starting values of `combat::PLAYER_STATS`.
+    /// Creates the player, unhurt, standing at `position`, at normal speed,
+    /// with the starting values of `combat::PLAYER_STATS` and a full reserve
+    /// of `sigil::MAX_ESSENCE` essence.
     pub fn player(position: Position) -> Self {
-        Self::new(position, NORMAL_SPEED, PLAYER_STATS, ActorKind::Player)
+        let mut player = Self::new(position, NORMAL_SPEED, PLAYER_STATS, ActorKind::Player);
+        player.max_essence = MAX_ESSENCE;
+        player.essence = MAX_ESSENCE;
+        player
     }
 
     /// Creates a monster of kind `definition` standing at `position`, with
@@ -150,6 +167,40 @@ impl Actor {
     /// monster or ending the game is up to the caller.
     pub(crate) fn take_damage(&mut self, damage: i32) {
         self.hp = (self.hp - damage).max(0);
+    }
+
+    /// Restores up to `amount` hit points, never above [`Actor::max_hp`],
+    /// and returns how many were actually restored (0 when unhurt).
+    ///
+    /// `amount` is expected positive, such as a sigil's power.
+    pub(crate) fn heal(&mut self, amount: i32) -> i32 {
+        let before = self.hp;
+        self.hp = (self.hp + amount).min(self.stats.max_hp);
+        self.hp - before
+    }
+
+    /// Returns the essence left for casting, from 0 to
+    /// [`Actor::max_essence`]; always 0 for a creature.
+    pub const fn essence(&self) -> i32 {
+        self.essence
+    }
+
+    /// Returns the most essence the actor can hold: `sigil::MAX_ESSENCE` for
+    /// the player, 0 for a creature.
+    pub const fn max_essence(&self) -> i32 {
+        self.max_essence
+    }
+
+    /// Sets the essence to `essence`, kept within 0 and
+    /// [`Actor::max_essence`].
+    pub(crate) fn set_essence(&mut self, essence: i32) {
+        self.essence = essence.clamp(0, self.max_essence);
+    }
+
+    /// Returns how many of its next turns the actor will lose, held by a
+    /// sigil or dazed by a backlash; 0 when it acts freely.
+    pub const fn held_turns(&self) -> u32 {
+        self.held_turns
     }
 
     /// Returns whether this is the player or a monster, and which one.
@@ -260,6 +311,8 @@ mod tests {
         assert_eq!(actor.kind(), &ActorKind::Player);
         assert!(actor.is_player());
         assert!(actor.as_monster().is_none());
+        assert_eq!((actor.essence(), actor.max_essence()), (0, 0));
+        assert_eq!(actor.held_turns(), 0);
     }
 
     #[test]
@@ -272,6 +325,24 @@ mod tests {
         assert_eq!(player.attack(), PLAYER_STATS.attack);
         assert_eq!(player.defense(), PLAYER_STATS.defense);
         assert!(player.is_player());
+        assert_eq!(player.essence(), MAX_ESSENCE);
+        assert_eq!(player.max_essence(), MAX_ESSENCE);
+    }
+
+    #[test]
+    fn healing_stops_at_the_maximum_and_essence_stays_in_bounds() {
+        let mut player = Actor::player(Position::new(1, 1));
+        player.take_damage(5);
+
+        assert_eq!(player.heal(3), 3);
+        assert_eq!(player.heal(10), 2, "only what was missing");
+        assert_eq!(player.hp(), player.max_hp());
+        assert_eq!(player.heal(4), 0);
+
+        player.set_essence(-3);
+        assert_eq!(player.essence(), 0);
+        player.set_essence(MAX_ESSENCE + 5);
+        assert_eq!(player.essence(), MAX_ESSENCE);
     }
 
     #[test]

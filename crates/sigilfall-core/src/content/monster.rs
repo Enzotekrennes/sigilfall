@@ -173,7 +173,7 @@ fn validate_entry(position: usize, entry: MonsterEntry) -> Result<MonsterDef, Co
     let id = EntryCheck::new(&kind, position, None).identifier(entry.id)?;
     let check = EntryCheck::new(&kind, position, Some(&id));
     Ok(MonsterDef {
-        name: check.text(entry.name, "name")?,
+        name: check.name(entry.name)?,
         family: check.required(entry.family, "family")?,
         elite: check.required(entry.elite, "elite")?,
         speed: check.in_range(entry.speed, "speed", 1, MAX_SPEED)?,

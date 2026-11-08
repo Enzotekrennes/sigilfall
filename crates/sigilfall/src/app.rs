@@ -2356,15 +2356,26 @@ mod tests {
             );
         }
 
-        /// A creature with a very long name that kills in one blow.
+        /// A name longer than the content files accept
+        /// (`content::MAX_NAME_LENGTH`).
         const LONG_NAME: &str = "extraordinarily patient executioner of the seventh hollow crypt";
 
-        /// A fight lost against the creature named [`LONG_NAME`].
-        fn lost_to_the_long_name() -> Fight {
-            let file = format!(
-                r#"[Monster(id: "long", name: "{LONG_NAME}", family: Acolyte, elite: true,
+        /// A name of exactly `content::MAX_NAME_LENGTH` characters, the
+        /// longest a creature can have.
+        const LONGEST_NAME: &str = "eldest crypt executioner";
+
+        /// A monster file with one creature named `name` that kills in one
+        /// blow.
+        fn long_named_file(name: &str) -> String {
+            format!(
+                r#"[Monster(id: "long", name: "{name}", family: Acolyte, elite: true,
                     speed: 100, hp: 999, attack: 99, defense: 0, min_depth: 1)]"#
-            );
+            )
+        }
+
+        /// A fight lost against the creature named [`LONGEST_NAME`].
+        fn lost_to_the_long_name() -> Fight {
+            let file = long_named_file(LONGEST_NAME);
             let mut fight = Fight::with_content(Seed::new(42), dark(), &file, &[("long", east())]);
             for _ in 0..5 {
                 if fight.app.state() == State::GameOver {
@@ -2377,7 +2388,7 @@ mod tests {
         }
 
         #[test]
-        fn a_long_monster_name_wraps_in_the_log_and_the_fatal_blow_stays_whole() {
+        fn the_longest_monster_name_keeps_the_fatal_blow_whole_in_the_log() {
             let fight = lost_to_the_long_name();
 
             let log: Vec<String> = rows(&fight.screen(), LOG_ROWS)
@@ -2385,7 +2396,7 @@ mod tests {
                 .map(|l| l.trim_end().to_owned())
                 .collect();
             let fatal = &fight.expected.last().unwrap().1;
-            assert!(fatal.chars().count() > 76, "the sentence needs two lines");
+            assert!(fatal.contains(LONGEST_NAME), "{fatal}");
             let joined = log
                 .iter()
                 .skip_while(|l| !l.starts_with(" ! "))
@@ -2400,14 +2411,23 @@ mod tests {
         }
 
         #[test]
-        #[ignore = "B1 of the F5 report: the cause line is clipped at 80 columns for names of 57+ characters"]
         fn a_long_monster_name_is_not_cut_off_in_the_cause_of_death() {
-            let fight = lost_to_the_long_name();
+            // A name too long to show whole is refused when loading...
+            let error = Content::parse(&long_named_file(LONG_NAME))
+                .expect_err("a name longer than the limit is refused");
+            let message = error.to_string();
+            assert!(
+                message.contains("monster `long` (entry 1), field `name`"),
+                "{message}"
+            );
+            assert_eq!(LONGEST_NAME.chars().count(), 24);
 
+            // ...and the longest accepted one is shown whole.
+            let fight = lost_to_the_long_name();
             let text = rows(&fight.screen(), 0..=23).join("\n");
 
             assert!(
-                text.contains(&format!("Killed by an {LONG_NAME} on turn")),
+                text.contains(&format!("Killed by an {LONGEST_NAME} on turn")),
                 "the cause of death is cut off on the end screen:\n{text}"
             );
         }

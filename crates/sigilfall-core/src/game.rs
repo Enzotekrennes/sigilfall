@@ -21,6 +21,17 @@
 //! the player's do, the game is over ([`Status::GameOver`]) and
 //! [`Game::submit`] no longer does anything. Going down the stairs is not
 //! handled yet.
+//!
+//! Sigils are cast with `Action::Cast`, whose rules (cost per stroke,
+//! essence, effects, backlash) live in the `cast` submodule. The player
+//! learns sigils by stepping onto the glyphs engraved on the floor: reading
+//! is free and automatic, so exploring is enough to discover them. The
+//! sigils learnt are kept in the [`Grimoire`], and only those can be cast.
+//! Essence comes back slowly with time (see [`Game::submit`]). An actor held
+//! by a sigil or a backlash loses its next turns: when its turn comes, it
+//! spends the energy of a wait and does nothing.
+
+mod cast;
 
 use rand_chacha::ChaCha8Rng;
 use slotmap::SlotMap;
@@ -29,14 +40,15 @@ use crate::action::{self, Action, ActionOutcome};
 use crate::actor::{Actor, ActorId, ActorKind};
 use crate::ai;
 use crate::combat::{self, Combatant};
-use crate::content::{Content, Family, MonsterDef};
+use crate::content::{Content, Family, MonsterDef, SigilDef};
 use crate::event::Event;
 use crate::fov::{self, SIGHT_RADIUS};
-use crate::generation::{self, FIRST_DEPTH, Floor, MonsterSpawn};
-use crate::geometry::Position;
+use crate::generation::{self, Engraving, FIRST_DEPTH, Floor, MonsterSpawn};
+use crate::geometry::{Direction, Position};
 use crate::map::Map;
 use crate::rng::{Purpose, Seed};
-use crate::schedule::{ATTACK_COST, Scheduler, action_cost, spend_energy};
+use crate::schedule::{ATTACK_COST, Scheduler, WAIT_COST, action_cost, spend_energy};
+use crate::sigil::{ESSENCE_REGEN_TICKS, Grimoire};
 
 /// Cell where the player starts in the fixed room of
 /// [`Game::in_fixed_room`].
@@ -65,10 +77,18 @@ pub struct Game {
     /// Number of player actions that took time since the game started.
     player_turns: u64,
     /// Stream of every random choice made while playing, such as the damage
-    /// of each blow: `seed.stream(FIRST_DEPTH, Purpose::Gameplay)`.
+    /// of each blow or the backlash of an unstable cast:
+    /// `seed.stream(FIRST_DEPTH, Purpose::Gameplay)`.
     gameplay_rng: ChaCha8Rng,
     /// Whether the player is still alive.
     status: Status,
+    /// The sigils the player has learnt, the only ones it can cast.
+    grimoire: Grimoire,
+    /// Glyphs engraved on the current floor, at most one per cell.
+    engravings: Vec<Engraving>,
+    /// Tick from which the player's essence recovery is counted: the last
+    /// time it gained a point, or reached its maximum.
+    essence_since: u64,
 }
 
 /// Whether a game can still be played.
@@ -113,9 +133,12 @@ impl Game {
     /// the monsters in the order they were drawn, each with the starting
     /// energy chosen by the generation (`MonsterSpawn::energy`).
     ///
-    /// The same seed and content always give the same floor and monsters.
-    /// Time is advanced until the player's first turn, so [`Game::submit`]
-    /// can be called right away; no monster has acted yet.
+    /// The floor's engraved glyphs are those of the generation. The player
+    /// starts with an empty grimoire and a full reserve of essence.
+    ///
+    /// The same seed and content always give the same floor, monsters and
+    /// glyphs. Time is advanced until the player's first turn, so
+    /// [`Game::submit`] can be called right away; no monster has acted yet.
     pub fn new(seed: Seed, content: &Content) -> Self {
         Self::on_floor(
             seed,
@@ -124,16 +147,19 @@ impl Game {
     }
 
     /// Starts a game of the run identified by `seed` on `floor`, with the
-    /// player on its start cell and one monster per entry of
-    /// `Floor::monsters`, created in that order with their starting energy.
+    /// player on its start cell, one monster per entry of `Floor::monsters`,
+    /// created in that order with their starting energy, and the glyphs of
+    /// `Floor::glyphs`.
     ///
     /// [`Game::new`] is this function on the first floor of the seed with
     /// its monsters. Given a floor from `generation::generate`, which places
-    /// none, the player is alone: tests of movement, sight or the camera use
-    /// that to walk a generated floor without a monster in the way. Time is
-    /// advanced until the player's first turn.
+    /// neither monster nor glyph, the player is alone: tests of movement,
+    /// sight or the camera use that to walk a generated floor without a
+    /// monster in the way. Time is advanced until the player's first turn.
     pub fn on_floor(seed: Seed, floor: Floor) -> Self {
-        Self::start(seed, floor.map, floor.start, &floor.monsters)
+        let mut game = Self::start(seed, floor.map, floor.start, &floor.monsters);
+        game.engravings = floor.glyphs;
+        game
     }
 
     /// Starts a game of the run identified by `seed` in the hand-made room of
@@ -143,7 +169,7 @@ impl Game {
     /// The room never changes, whatever the seed, which makes it the ground
     /// of tests that need known walls and distances. The seed is only kept
     /// (see [`Game::seed`]). Monsters can be added with
-    /// [`Game::spawn_monster`].
+    /// [`Game::spawn_monster`], glyphs with [`Game::engrave`].
     pub fn in_fixed_room(seed: Seed) -> Self {
         Self::start(seed, Map::fixed_room(), PLAYER_START, &[])
     }
@@ -177,6 +203,9 @@ impl Game {
             player_turns: 0,
             gameplay_rng: seed.stream(FIRST_DEPTH, Purpose::Gameplay),
             status: Status::Playing,
+            grimoire: Grimoire::new(),
+            engravings: Vec::new(),
+            essence_since: 0,
         };
         game.update_field_of_view();
         // The player is first in turn order and every monster starts below
@@ -214,6 +243,29 @@ impl Game {
         id
     }
 
+    /// Engraves a glyph teaching `sigil` at `position`, as the generation
+    /// does on a new floor.
+    ///
+    /// The player reads it by stepping onto the cell (see [`Game::submit`]);
+    /// a glyph under the player is only read once the player steps onto it
+    /// again. Hand-made rooms and tests use it; nothing else changes and it
+    /// is still the player's turn.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `position` is not walkable or already holds a glyph:
+    /// engraving there is a bug in the calling code.
+    pub fn engrave(&mut self, position: Position, sigil: &SigilDef) {
+        assert!(
+            self.map.is_walkable(position) && self.engraving_at(position).is_none(),
+            "cannot engrave a glyph at ({}, {}): the cell is not floor free of glyphs",
+            position.x,
+            position.y
+        );
+        self.engravings
+            .push(Engraving::new(position, sigil.clone()));
+    }
+
     /// Applies the player's `action`, then lets the other actors act until
     /// it is the player's turn again, and returns what happened in order.
     ///
@@ -225,9 +277,27 @@ impl Game {
     /// actor that acted before the player's next turn, and
     /// [`Game::player_turns`] grows by one.
     ///
+    /// A cast ([`Action::Cast`]) costs `schedule::STROKE_COST` energy per
+    /// node of its trace plus `schedule::CAST_COST`, all at once, and
+    /// `sigil::ESSENCE_COST` essence: the longer the pattern, the more the
+    /// monsters act before the player's next turn. The trace is recognised
+    /// against the sigils of the [`Game::grimoire`] only. It is refused, with
+    /// no cost and no time passing, when the player lacks essence
+    /// ([`Event::NotEnoughEssence`]) or when the sigil it casts is aimed in a
+    /// direction and none was given ([`Event::DirectionMissing`]). Otherwise
+    /// [`Event::SigilCast`] comes first, then the events of the effect and of
+    /// any backlash (see the `cast` submodule).
+    ///
+    /// A move that ends on an engraved glyph reads it: if its sigil is not
+    /// known yet, it joins the grimoire and [`Event::GlyphLearned`] follows
+    /// the [`Event::Moved`]. Reading takes no extra time.
+    ///
     /// After an action that took time, the field of view is computed again
     /// from the player's position (see [`Game::is_visible`]) before the other
-    /// actors act.
+    /// actors act. An actor held by a sigil loses its turns
+    /// ([`Event::TurnLost`]) until its hold runs out, the player included.
+    /// Before the player's next turn, its essence recovers one point per
+    /// `sigil::ESSENCE_REGEN_TICKS` ticks spent below its maximum.
     ///
     /// If the player dies, the list ends with its [`Event::Died`], no other
     /// actor acts and the game is over ([`Game::status`]). Once the game is
@@ -355,6 +425,28 @@ impl Game {
         self.map.is_remembered(position)
     }
 
+    /// Returns the sigils the player has learnt, in the order of the sigil
+    /// file: the only ones a trace can cast.
+    pub const fn grimoire(&self) -> &Grimoire {
+        &self.grimoire
+    }
+
+    /// Returns the glyphs engraved on the current floor, whether the player
+    /// has seen them or not; at most one per cell.
+    ///
+    /// A glyph whose sigil the grimoire knows has been read (or teaches
+    /// nothing new); the others have not.
+    pub fn engravings(&self) -> &[Engraving] {
+        &self.engravings
+    }
+
+    /// Returns the glyph engraved at `position`, if any.
+    pub fn engraving_at(&self, position: Position) -> Option<&Engraving> {
+        self.engravings
+            .iter()
+            .find(|engraving| engraving.position() == position)
+    }
+
     /// Computes what the player sees from its current position and records
     /// it on the map, which also remembers those cells.
     fn update_field_of_view(&mut self) {
@@ -372,10 +464,19 @@ impl Game {
 
     /// Lets non-player actors take their turns, in schedule order, until the
     /// player may act or has died. Their events are appended to `events`.
+    ///
+    /// A held actor whose turn comes loses it instead (see
+    /// [`Game::lose_turn`]), the player included. When the player may act,
+    /// its essence recovers first (see [`Game::recover_essence`]).
     fn run_until_player_turn(&mut self, events: &mut Vec<Event>) {
         while !self.is_over() {
             let id = self.scheduler.next_actor(&mut self.actors);
+            if self.actors[id].held_turns > 0 {
+                self.lose_turn(id, events);
+                continue;
+            }
             if id == self.player {
+                self.recover_essence();
                 return;
             }
             let action = self.non_player_action(id);
@@ -384,6 +485,35 @@ impl Game {
             if !self.perform(id, action, events) {
                 self.perform(id, Action::Wait, events);
             }
+        }
+    }
+
+    /// Makes the held actor `id` lose the turn that just came: one less turn
+    /// held, the energy of a wait spent, and [`Event::TurnLost`] appended.
+    fn lose_turn(&mut self, id: ActorId, events: &mut Vec<Event>) {
+        let actor = &mut self.actors[id];
+        actor.held_turns -= 1;
+        spend_energy(actor, WAIT_COST);
+        events.push(Event::TurnLost { actor: id });
+    }
+
+    /// Gives the player one point of essence per
+    /// [`ESSENCE_REGEN_TICKS`] ticks elapsed since `essence_since`, up to its
+    /// maximum.
+    ///
+    /// Ticks left over towards the next point are kept; while the essence is
+    /// full, the count restarts every turn, so time spent at the maximum is
+    /// never banked.
+    fn recover_essence(&mut self) {
+        let now = self.scheduler.ticks();
+        let player = &mut self.actors[self.player];
+        let missing = player.max_essence() - player.essence();
+        let periods = (now - self.essence_since) / ESSENCE_REGEN_TICKS;
+        let gained = i32::try_from(periods).unwrap_or(i32::MAX).min(missing);
+        player.set_essence(player.essence() + gained);
+        self.essence_since += periods * ESSENCE_REGEN_TICKS;
+        if player.essence() == player.max_essence() {
+            self.essence_since = now;
         }
     }
 
@@ -421,25 +551,40 @@ impl Game {
         action
     }
 
-    /// Applies `action` for actor `id` and appends the resulting events to
-    /// `events`.
+    /// Applies `action` for actor `id`, appends the resulting events to
+    /// `events` and returns whether it took time.
+    ///
+    /// A wait always succeeds. A move is handled by [`Game::step`] and a cast
+    /// by `Game::cast` (see the `cast` submodule); both may be refused, in
+    /// which case nothing is spent and `false` is returned.
+    fn perform(&mut self, id: ActorId, action: Action, events: &mut Vec<Event>) -> bool {
+        match action {
+            Action::Move(direction) => self.step(id, direction, events),
+            Action::Wait => {
+                spend_energy(&mut self.actors[id], action_cost(action));
+                events.push(Event::Waited { actor: id });
+                true
+            }
+            Action::Cast { trace, direction } => self.cast(id, trace, direction, events),
+        }
+    }
+
+    /// Moves actor `id` one cell in `direction`, appends the resulting
+    /// events to `events` and returns whether it took time.
     ///
     /// A move into a foe (see [`Game::foe_at`]) strikes it instead (see
     /// [`Game::strike`]) and `true` is returned. Otherwise, on success the
-    /// actor moves (if the action is a move), spends the action's energy cost
-    /// and `true` is returned. A move towards a cell that is not walkable or
+    /// actor moves, spends the move's energy cost and `true` is returned; the
+    /// player then reads the glyph it stepped on, if any (see
+    /// [`Game::read_glyph`]). A move towards a cell that is not walkable or
     /// holds another actor that is not a foe is refused: the actor keeps its
     /// position and energy, [`Event::MoveBlocked`] is appended and `false` is
     /// returned.
-    fn perform(&mut self, id: ActorId, action: Action, events: &mut Vec<Event>) -> bool {
+    fn step(&mut self, id: ActorId, direction: Direction, events: &mut Vec<Event>) -> bool {
+        let action = Action::Move(direction);
         let from = self.actors[id].position;
-        let target = match action {
-            Action::Move(direction) => from.step(direction),
-            Action::Wait => from,
-        };
-        if let Action::Move(_) = action
-            && let Some(foe) = self.foe_at(id, target)
-        {
+        let target = from.step(direction);
+        if let Some(foe) = self.foe_at(id, target) {
             self.strike(id, foe, events);
             return true;
         }
@@ -462,16 +607,37 @@ impl Game {
                 let actor = &mut self.actors[id];
                 actor.position = position;
                 spend_energy(actor, action_cost(action));
-                events.push(match action {
-                    Action::Move(_) => Event::Moved {
-                        actor: id,
-                        from,
-                        to: position,
-                    },
-                    Action::Wait => Event::Waited { actor: id },
+                events.push(Event::Moved {
+                    actor: id,
+                    from,
+                    to: position,
                 });
+                if id == self.player {
+                    self.read_glyph(events);
+                }
                 true
             }
+        }
+    }
+
+    /// Reads the glyph engraved under the player, if any: a sigil the
+    /// grimoire does not know yet joins it and [`Event::GlyphLearned`] is
+    /// appended to `events`; a known one changes nothing and reports
+    /// nothing.
+    fn read_glyph(&mut self, events: &mut Vec<Event>) {
+        let position = self.actors[self.player].position;
+        let Some(engraving) = self
+            .engravings
+            .iter()
+            .find(|engraving| engraving.position() == position)
+        else {
+            return;
+        };
+        if self.grimoire.learn(engraving.sigil()) {
+            events.push(Event::GlyphLearned {
+                sigil: engraving.sigil().id().to_owned(),
+                position,
+            });
         }
     }
 

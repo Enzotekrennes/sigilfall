@@ -25,6 +25,16 @@ pub use error::{ContentError, FieldProblem};
 pub use monster::{Family, MAX_ATTACK, MAX_DEFENSE, MAX_HP, MAX_SPEED, MonsterDef};
 pub use sigil::{Effect, MAX_POWER, SigilDef, Targeting};
 
+/// Most characters in the name of a monster or a sigil.
+///
+/// Names are written whole in sentences: a log line is 76 columns wide and
+/// "The NAME kills you (99)." with a name of 24 characters takes 44, so even
+/// with a three-digit damage it stays on one line; the end screen's
+/// "Killed by an NAME on turn N." stays far within 80 columns. The side
+/// panel, 19 columns of text, still shortens names longer than it can hold,
+/// but 24 keeps the cut to a few letters. The shipped names are at most 15.
+pub const MAX_NAME_LENGTH: usize = 24;
+
 /// Path of the monster file relative to the `sigilfall-core` crate, as named
 /// in error messages.
 pub const MONSTERS_FILE: &str = "content/monsters.ron";
@@ -43,8 +53,11 @@ const SIGILS_RON: &str = include_str!("../../content/sigils.ron");
 ///
 /// A `Content` value always satisfies the rules of the content files: unique
 /// identifiers, values within bounds, at least one monster for the first
-/// floor, and at least one sigil, each with a pattern the player can draw
-/// and far enough from the others (`sigil::MIN_PATTERN_DISTANCE`).
+/// floor, names of at most [`MAX_NAME_LENGTH`] characters, and at least one
+/// sigil, one of them found on the first floor, each with a pattern the
+/// player can draw
+/// and far enough from the others (`sigil::MIN_PATTERN_DISTANCE`), and a
+/// targeting suited to its effect (`Effect::targetings`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Content {
     /// Monster definitions, in file order.
@@ -97,11 +110,14 @@ impl Content {
     ///   field, or a value of the wrong type;
     /// - [`ContentError::InvalidField`] naming the entry and the field when a
     ///   field is missing, out of bounds, an identifier is malformed or
-    ///   repeated, or a pattern cannot be drawn as written or is too close to
-    ///   the pattern of an earlier sigil;
+    ///   repeated, a pattern cannot be drawn as written or is too close to
+    ///   the pattern of an earlier sigil, or a targeting cannot aim the
+    ///   sigil's effect;
     /// - [`ContentError::NoMonster`] or [`ContentError::NoMonsterAtFirstDepth`]
     ///   when the first floor would have no creature;
-    /// - [`ContentError::NoSigil`] when the sigil file defines none.
+    /// - [`ContentError::NoSigil`] when the sigil file defines none, or
+    ///   [`ContentError::NoSigilAtFirstDepth`] when none can be found on the
+    ///   first floor.
     pub fn parse_files(monsters: &str, sigils: &str) -> Result<Self, ContentError> {
         let monsters = monster::validate(entry_file::read(monsters)?)?;
         let sigils = sigil::validate(entry_file::read(sigils)?)?;
@@ -431,6 +447,42 @@ mod tests {
 
         let (_, message) = refused(&file(&[with("nameless", "name", "\"  \"")]));
         assert_names(&message, "monster `nameless` (entry 1)", "name");
+    }
+
+    #[test]
+    fn a_monster_name_longer_than_the_limit_is_refused() {
+        let quoted = |name: &str| format!("\"{name}\"");
+        let longest = "x".repeat(MAX_NAME_LENGTH);
+        let content = Content::parse(&file(&[with("wordy", "name", &quoted(&longest))]))
+            .expect("a name at the limit");
+        assert_eq!(content.monsters()[0].name(), longest);
+
+        // Counted in characters, not bytes: accented letters count once.
+        let accented = "\u{e9}".repeat(MAX_NAME_LENGTH);
+        assert!(Content::parse(&file(&[with("accented", "name", &quoted(&accented))])).is_ok());
+
+        let too_long = format!("{longest}y");
+        let (error, message) = refused(&file(&[with("wordy", "name", &quoted(&too_long))]));
+        assert_names(&message, "monster `wordy` (entry 1)", "name");
+        assert!(
+            message.contains("25 characters, expected at most 24"),
+            "{message}"
+        );
+        assert!(matches!(
+            error,
+            ContentError::InvalidField {
+                field: "name",
+                problem: FieldProblem::TooLong {
+                    length: 25,
+                    max: MAX_NAME_LENGTH
+                },
+                ..
+            }
+        ));
+        let shipped = Content::load().expect("the shipped content is valid");
+        for monster in shipped.monsters() {
+            assert!(monster.name().chars().count() <= MAX_NAME_LENGTH);
+        }
     }
 
     /// Asserts that `error` is a syntax error on `line`, and returns its

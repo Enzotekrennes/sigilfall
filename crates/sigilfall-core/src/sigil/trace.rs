@@ -14,6 +14,7 @@
 //! comparing a trace to them.
 
 use std::fmt;
+use std::hash::{Hash, Hasher};
 
 use thiserror::Error;
 
@@ -136,6 +137,9 @@ pub enum PatternError {
     },
 }
 
+/// Number of nodes of the grid, hence the most a trace can link.
+const GRID_NODES: usize = (SIDE * SIDE) as usize;
+
 /// The nodes linked so far, in order, following the drawing rules of
 /// decision D7.
 ///
@@ -144,16 +148,27 @@ pub enum PatternError {
 /// [`Node::between`]): if that node is not linked yet it is linked on the
 /// way, as when tracing with a finger; if it is already linked the stroke
 /// simply crosses it, since a node cannot be linked twice.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+///
+/// A trace is a small `Copy` value (at most nine nodes, stored inline), so
+/// the action that casts it stays as cheap to pass around as a step. Two
+/// traces are equal when they link the same nodes in the same order.
+#[derive(Clone, Copy)]
 pub struct Trace {
-    /// Linked nodes, in the order they were linked.
-    nodes: Vec<Node>,
+    /// Linked nodes, in the order they were linked; only the first `len`
+    /// entries are meaningful, the others are filler.
+    nodes: [Node; GRID_NODES],
+    /// Number of linked nodes, from 0 to [`GRID_NODES`].
+    len: usize,
 }
 
 impl Trace {
     /// Returns an empty trace, before the first node is linked.
     pub const fn new() -> Self {
-        Self { nodes: Vec::new() }
+        Self {
+            // Any node does as filler: it is never read past `len`.
+            nodes: [Node(1); GRID_NODES],
+            len: 0,
+        }
     }
 
     /// Builds the trace a sigil pattern describes, from the digits written in
@@ -182,9 +197,9 @@ impl Trace {
             // pattern does not list.
             if trace.len() > before + 1 {
                 return Err(PatternError::SkipsMiddle {
-                    from: trace.nodes[before - 1],
+                    from: trace.nodes()[before - 1],
                     to: node,
-                    middle: trace.nodes[before],
+                    middle: trace.nodes()[before],
                 });
             }
         }
@@ -214,35 +229,79 @@ impl Trace {
         if let Some(middle) = self.last().and_then(|last| last.between(node))
             && !self.contains(middle)
         {
-            self.nodes.push(middle);
+            self.append(middle);
         }
-        self.nodes.push(node);
+        self.append(node);
         Ok(())
+    }
+
+    /// Adds `node`, known not to be linked yet, at the end of the trace.
+    ///
+    /// A trace holds distinct nodes of a nine-node grid, so it never needs
+    /// more than [`GRID_NODES`] slots.
+    fn append(&mut self, node: Node) {
+        self.nodes[self.len] = node;
+        self.len += 1;
     }
 
     /// Returns the linked nodes, in the order they were linked.
     pub fn nodes(&self) -> &[Node] {
-        &self.nodes
+        &self.nodes[..self.len]
     }
 
     /// Returns the number of linked nodes, from 0 to 9.
-    pub fn len(&self) -> usize {
-        self.nodes.len()
+    ///
+    /// Every linked node is one stroke of the pen, middle nodes linked on
+    /// the way included: this is the number of strokes a cast is charged
+    /// for (`schedule::STROKE_COST`).
+    pub const fn len(&self) -> usize {
+        self.len
     }
 
     /// Returns whether no node is linked yet.
-    pub fn is_empty(&self) -> bool {
-        self.nodes.is_empty()
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
     }
 
     /// Returns the node linked last, where the next stroke starts, if any.
     pub fn last(&self) -> Option<Node> {
-        self.nodes.last().copied()
+        self.nodes().last().copied()
     }
 
     /// Returns whether `node` is already linked.
     pub fn contains(&self, node: Node) -> bool {
-        self.nodes.contains(&node)
+        self.nodes().contains(&node)
+    }
+}
+
+impl Default for Trace {
+    /// Returns an empty trace, like [`Trace::new`].
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PartialEq for Trace {
+    /// Two traces are equal when they link the same nodes in the same order.
+    fn eq(&self, other: &Self) -> bool {
+        self.nodes() == other.nodes()
+    }
+}
+
+impl Eq for Trace {}
+
+impl Hash for Trace {
+    /// Hashes the linked nodes only, consistently with equality.
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.nodes().hash(state);
+    }
+}
+
+impl fmt::Debug for Trace {
+    /// Writes the linked nodes, such as `Trace([7, 5, 3])`.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let digits: Vec<u8> = self.nodes().iter().map(|node| node.digit()).collect();
+        write!(formatter, "Trace({digits:?})")
     }
 }
 
@@ -350,6 +409,19 @@ mod tests {
             TraceError::Repeated { node: node(8) }.to_string(),
             "node 8 is already part of the trace"
         );
+    }
+
+    #[test]
+    fn traces_are_copied_and_compared_by_their_nodes_only() {
+        let trace = pressed(&[7, 5, 3]);
+        let copy = trace;
+
+        assert_eq!(copy, trace);
+        assert_eq!(pressed(&[7, 3]), trace);
+        assert_ne!(pressed(&[3, 5, 7]), trace);
+        assert_ne!(pressed(&[7, 5]), trace);
+        assert_eq!(Trace::default(), Trace::new());
+        assert_eq!(format!("{trace:?}"), "Trace([7, 5, 3])");
     }
 
     #[test]

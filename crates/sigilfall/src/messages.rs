@@ -80,7 +80,9 @@ pub fn welcome() -> Message {
 /// - nothing for moves and waits, which the map already shows, nor for a
 ///   move refused by a wall: no time passes and the player sees they did not
 ///   move, while a line per bump would push the blows out of the five
-///   visible lines.
+///   visible lines;
+/// - nothing yet for sigils (casts, their effects and backlashes, glyphs
+///   learnt, lack of essence), whose lines come with the tracing screen.
 pub fn describe(events: &[Event], game: &Game, content: &Content) -> Vec<Message> {
     let mut killed = HashSet::new();
     let mut messages = Vec::new();
@@ -106,7 +108,19 @@ pub fn describe(events: &[Event], game: &Game, content: &Content) -> Vec<Message
             Event::Died { .. }
             | Event::Moved { .. }
             | Event::Waited { .. }
-            | Event::MoveBlocked { .. } => None,
+            | Event::MoveBlocked { .. }
+            | Event::SigilCast { .. }
+            | Event::NotEnoughEssence { .. }
+            | Event::DirectionMissing { .. }
+            | Event::SpellMissed { .. }
+            | Event::Wounded { .. }
+            | Event::Healed { .. }
+            | Event::Held { .. }
+            | Event::TurnLost { .. }
+            | Event::Blinked { .. }
+            | Event::Backlash { .. }
+            | Event::EssenceDrained { .. }
+            | Event::GlyphLearned { .. } => None,
         };
         messages.extend(message);
     }

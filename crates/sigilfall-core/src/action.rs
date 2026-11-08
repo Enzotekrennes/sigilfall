@@ -6,6 +6,7 @@
 
 use crate::geometry::{Direction, Position};
 use crate::map::Map;
+use crate::sigil::Trace;
 
 /// An action an actor attempts on its turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -14,6 +15,17 @@ pub enum Action {
     Move(Direction),
     /// Stay in place and let time pass.
     Wait,
+    /// Cast the sigil drawn as `trace`, submitted whole once the player
+    /// validates it: the strokes and the validation are paid at once (see
+    /// `schedule::action_cost`), and the monsters act for that long
+    /// afterwards. Only the player casts.
+    Cast {
+        /// The finished trace, as the player drew it.
+        trace: Trace,
+        /// Where the spell is aimed, for a sigil aimed in a direction
+        /// (`content::Targeting::Direction`); ignored by the others.
+        direction: Option<Direction>,
+    },
 }
 
 /// The result of resolving an [`Action`] against the map.
@@ -34,12 +46,13 @@ pub enum ActionOutcome {
 ///
 /// A move succeeds when [`Map::can_step`] allows it: the destination cell is
 /// walkable, diagonals included even between two walls touching by a corner.
-/// Walls and cells outside the map block it. Waiting always succeeds and
-/// keeps the actor in place. The function is pure: neither `map` nor any actor
-/// is modified.
+/// Walls and cells outside the map block it. Waiting and casting always
+/// succeed here and keep the actor in place; what a cast does, and whether
+/// the caster can afford it, is decided by the game. The function is pure:
+/// neither `map` nor any actor is modified.
 pub fn resolve(action: Action, from: Position, map: &Map) -> ActionOutcome {
     match action {
-        Action::Wait => ActionOutcome::Performed { position: from },
+        Action::Wait | Action::Cast { .. } => ActionOutcome::Performed { position: from },
         Action::Move(direction) => {
             if map.can_step(from, direction) {
                 ActionOutcome::Performed {
@@ -165,14 +178,21 @@ mod tests {
     }
 
     #[test]
-    fn waiting_keeps_the_actor_in_place() {
+    fn waiting_and_casting_keep_the_actor_in_place() {
         let map = Map::fixed_room();
+        let cast = Action::Cast {
+            trace: Trace::from_pattern(&[7, 5, 3]).expect("a drawable pattern"),
+            direction: Some(Direction::East),
+        };
 
-        assert_eq!(
-            resolve(Action::Wait, ROOM_CENTRE, &map),
-            ActionOutcome::Performed {
-                position: ROOM_CENTRE
-            }
-        );
+        for action in [Action::Wait, cast] {
+            assert_eq!(
+                resolve(action, ROOM_CENTRE, &map),
+                ActionOutcome::Performed {
+                    position: ROOM_CENTRE
+                },
+                "{action:?}"
+            );
+        }
     }
 }
