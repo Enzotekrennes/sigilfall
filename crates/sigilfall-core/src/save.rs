@@ -52,8 +52,9 @@ use crate::game::Game;
 ///
 /// Version 2 (T25) moved the player's turn count into the run's statistics
 /// (`stats`), written last. Version 3 (T28) added the date of a daily run
-/// (`daily`), after the seed.
-pub const FORMAT_VERSION: u32 = 3;
+/// (`daily`), after the seed. Version 4 (T33) added the seal of the bottom
+/// floor to the map's tiles (`*`) and the won game to the status (`Won`).
+pub const FORMAT_VERSION: u32 = 4;
 
 /// Depth of nesting from which the pretty printer writes a value on one
 /// line.

@@ -1,9 +1,16 @@
-//! Going down the stairs: what `Action::Descend` does to the game.
+//! Going down the stairs, or breaking the seal of the bottom floor: what
+//! `Action::Descend` does to the game.
 //!
 //! Adds to [`Game`] the private step of the descent. Only the player
 //! descends, and only from the cell of the stairs; anywhere else the action
 //! is refused like a move into a wall ([`Event::NoStairsHere`]), with no
 //! energy and no time spent.
+//!
+//! The bottom floor has no stairs but a seal on the cell they would have
+//! (decision D23, `generation::is_bottom_floor`). The same action taken on
+//! the seal breaks it: the run is won ([`Status::Won`]) and the game is
+//! over, as after the player's death. Away from the seal it is refused
+//! exactly as away from the stairs.
 //!
 //! A descent replaces the whole floor: the map, the monsters, the glyphs and
 //! the items lying on the floor are those of the next depth of the seed
@@ -14,7 +21,7 @@
 //! restarts as the stream of the new depth (decision D5), so a floor plays
 //! out the same for a given seed whatever happened on the floors above.
 
-use super::Game;
+use super::{Game, Status};
 use crate::action::Action;
 use crate::actor::ActorId;
 use crate::event::Event;
@@ -24,20 +31,29 @@ use crate::rng::Purpose;
 use crate::schedule::{action_cost, spend_energy};
 
 impl Game {
-    /// Makes the player `actor` go down the stairs it stands on, appends
-    /// the events to `events` and returns whether it took time.
+    /// Makes the player `actor` go down the stairs it stands on, or break
+    /// the seal it stands on, appends the events to `events` and returns
+    /// whether it took time.
     ///
-    /// Off the stairs, [`Event::NoStairsHere`] is appended and nothing else
-    /// happens. On them, the player spends `schedule::DESCEND_COST`, the
-    /// depth grows by one, the next floor replaces the current one (see
+    /// Off the stairs and the seal, [`Event::NoStairsHere`] is appended and
+    /// nothing else happens. On the seal, see [`Game::break_seal`]. On the
+    /// stairs, the player spends `schedule::DESCEND_COST`, the depth grows
+    /// by one, the next floor replaces the current one (see
     /// [`Game::enter_floor`]), the gameplay stream becomes that of the new
     /// depth and [`Event::Descended`] is appended.
     pub(super) fn descend(&mut self, actor: ActorId, events: &mut Vec<Event>) -> bool {
         debug_assert_eq!(actor, self.world.player, "only the player descends");
         let position = self.world.actors[actor].position;
-        if self.world.map.tile(position) != Some(Tile::StairsDown) {
-            events.push(Event::NoStairsHere { position });
-            return false;
+        match self.world.map.tile(position) {
+            Some(Tile::StairsDown) => {}
+            Some(Tile::Seal) => {
+                self.break_seal(actor, events);
+                return true;
+            }
+            Some(Tile::Floor | Tile::Wall) | None => {
+                events.push(Event::NoStairsHere { position });
+                return false;
+            }
         }
         spend_energy(&mut self.world.actors[actor], action_cost(Action::Descend));
         self.depth = self.depth.saturating_add(1);
@@ -49,6 +65,20 @@ impl Game {
         self.gameplay_rng = self.seed.stream(self.depth, Purpose::Gameplay);
         events.push(Event::Descended { depth: self.depth });
         true
+    }
+
+    /// Makes the player `actor`, standing on the seal, break it: it spends
+    /// `schedule::DESCEND_COST` like a descent, the game is won
+    /// ([`Status::Won`]) and [`Event::SealBroken`] is appended.
+    ///
+    /// The floor, the depth and the gameplay stream stay as they are. Since
+    /// the game is over, no other actor acts afterwards and later actions
+    /// are ignored (`Game::submit`).
+    fn break_seal(&mut self, actor: ActorId, events: &mut Vec<Event>) {
+        let position = self.world.actors[actor].position;
+        spend_energy(&mut self.world.actors[actor], action_cost(Action::Descend));
+        self.status = Status::Won;
+        events.push(Event::SealBroken { position });
     }
 
     /// Replaces the current floor by `floor`: the monsters and floor items
@@ -74,12 +104,13 @@ mod tests {
     use rand_chacha::ChaCha8Rng;
 
     use super::*;
-    use crate::content::Content;
+    use crate::content::{Content, MAX_DEPTH};
     use crate::game::Status;
-    use crate::generation::{FIRST_DEPTH, monsters_per_floor};
+    use crate::generation::{FIRST_DEPTH, is_bottom_floor, monsters_per_floor};
     use crate::geometry::{Direction, Position};
     use crate::item::ItemId;
     use crate::rng::Seed;
+    use crate::save;
     use crate::schedule::{DESCEND_COST, NORMAL_SPEED};
 
     /// Seed of the test games.
@@ -417,5 +448,220 @@ mod tests {
             [Event::NoStairsHere { position }]
         );
         assert_eq!(game.depth(), FIRST_DEPTH);
+    }
+
+    /// Takes the stairs of every floor of `game` until it stands on floor
+    /// `depth`, putting the player on the stairs before each descent.
+    fn go_down_to(game: &mut Game, depth: u32) {
+        while game.depth() < depth {
+            stand_on_stairs(game);
+            let below = game.depth() + 1;
+            assert_eq!(
+                game.submit(Action::Descend),
+                [Event::Descended { depth: below }]
+            );
+        }
+    }
+
+    /// Cell of the seal of the current floor, if it has one.
+    fn seal(game: &Game) -> Option<Position> {
+        game.map()
+            .positions()
+            .find(|&cell| game.map().tile(cell) == Some(Tile::Seal))
+    }
+
+    /// Puts the player of `game` on `cell`, as if it had walked there.
+    fn stand_on(game: &mut Game, cell: Position) {
+        assert!(game.world.actor_at(cell).is_none(), "{cell:?} is free");
+        let player = game.world.player;
+        game.world.actors[player].position = cell;
+    }
+
+    /// A game of [`SEED`] with the shipped content, its player standing on
+    /// the seal of the bottom floor.
+    fn on_the_seal(content: &Content) -> Game {
+        let mut game = Game::new(SEED, content);
+        go_down_to(&mut game, MAX_DEPTH);
+        let cell = seal(&game).expect("the bottom floor has a seal");
+        stand_on(&mut game, cell);
+        game
+    }
+
+    /// Writes `game` as a save.
+    fn saved(game: &Game) -> String {
+        save::to_string(game).expect("a game is always written")
+    }
+
+    #[test]
+    fn the_bottom_floor_has_a_seal_where_its_stairs_would_be_and_no_stairs() {
+        let content = content();
+        let mut game = Game::new(SEED, &content);
+        for depth in FIRST_DEPTH..MAX_DEPTH {
+            go_down_to(&mut game, depth);
+            assert!(!is_bottom_floor(depth));
+            assert_eq!(seal(&game), None, "floor {depth} has no seal");
+        }
+
+        go_down_to(&mut game, MAX_DEPTH);
+
+        assert!(is_bottom_floor(MAX_DEPTH));
+        let floor = generation::generate_with_monsters(SEED, MAX_DEPTH, &content);
+        assert_eq!(seal(&game), Some(floor.stairs()));
+        assert!(
+            game.map()
+                .positions()
+                .all(|cell| game.map().tile(cell) != Some(Tile::StairsDown)),
+            "the bottom floor has no stairs"
+        );
+        assert_eq!(floor_state(&game), arrival_state(&floor));
+    }
+
+    #[test]
+    fn breaking_the_seal_wins_the_run_and_ends_the_game() {
+        let content = content();
+        let mut game = on_the_seal(&content);
+        let player = game.player();
+        let position = game.player_actor().position();
+        let (energy, ticks, turns) = (
+            game.player_actor().energy(),
+            game.ticks(),
+            game.player_turns(),
+        );
+        let monsters = |game: &Game| -> Vec<(ActorId, Position, i32)> {
+            game.actors()
+                .filter(|(id, _)| *id != player)
+                .map(|(id, actor)| (id, actor.position(), actor.energy()))
+                .collect()
+        };
+        let before = monsters(&game);
+        assert!(!before.is_empty(), "monsters wait on the bottom floor");
+
+        let events = game.submit(Action::Descend);
+
+        assert_eq!(events, [Event::SealBroken { position }]);
+        assert_eq!(game.status(), &Status::Won);
+        assert!(game.is_over());
+        assert_eq!(game.depth(), MAX_DEPTH, "nothing lies below");
+        assert_eq!(game.player_actor().position(), position);
+        assert!(game.player_actor().is_alive());
+        assert_eq!(game.player_actor().energy(), energy - DESCEND_COST);
+        assert_eq!(game.player_turns(), turns + 1, "breaking it is an action");
+        assert_eq!(game.ticks(), ticks, "no time passed after it");
+        assert_eq!(monsters(&game), before, "no monster acted after it");
+        assert_eq!(game.stats().deepest(), MAX_DEPTH);
+    }
+
+    #[test]
+    fn no_action_is_taken_once_the_seal_is_broken() {
+        let content = content();
+        let mut game = on_the_seal(&content);
+        game.submit(Action::Descend);
+        let text = saved(&game);
+        let actions = [
+            Action::Descend,
+            Action::Wait,
+            Action::Explore,
+            Action::PickUp,
+            Action::Move(Direction::East),
+            Action::Move(Direction::West),
+        ];
+
+        for action in actions {
+            assert_eq!(game.submit(action), [], "{action:?}");
+        }
+
+        assert_eq!(game.status(), &Status::Won);
+        assert_eq!(saved(&game), text, "nothing changed");
+    }
+
+    #[test]
+    fn breaking_the_seal_away_from_it_is_refused_without_cost() {
+        let content = content();
+        let mut game = Game::new(SEED, &content);
+        go_down_to(&mut game, MAX_DEPTH);
+        let position = game.player_actor().position();
+        assert_ne!(seal(&game), Some(position));
+        let before = saved(&game);
+
+        let events = game.submit(Action::Descend);
+
+        assert_eq!(events, [Event::NoStairsHere { position }]);
+        assert_eq!(game.status(), &Status::Playing);
+        assert_eq!(saved(&game), before, "no time, no energy, nothing changed");
+    }
+
+    #[test]
+    fn a_game_without_content_also_ends_on_a_seal() {
+        let mut game = Game::on_floor(SEED, generation::generate(SEED, FIRST_DEPTH));
+        go_down_to(&mut game, MAX_DEPTH);
+        let cell = seal(&game).expect("the bare bottom floor has a seal");
+        assert_eq!(cell, generation::generate(SEED, MAX_DEPTH).stairs());
+        stand_on(&mut game, cell);
+
+        assert_eq!(
+            game.submit(Action::Descend),
+            [Event::SealBroken { position: cell }]
+        );
+        assert_eq!(game.status(), &Status::Won);
+    }
+
+    #[test]
+    fn a_game_on_the_bottom_floor_is_saved_and_plays_on_identically() {
+        let content = content();
+        let mut game = Game::new(SEED, &content);
+        go_down_to(&mut game, MAX_DEPTH);
+        let text = saved(&game);
+        assert!(text.contains('*'), "the seal is written in the map");
+
+        let mut loaded = save::from_str(&text, &content).expect("the save reads back");
+
+        assert_eq!(seal(&loaded), seal(&game));
+        assert_eq!(loaded.depth(), MAX_DEPTH);
+        assert_eq!(saved(&loaded), text);
+        for direction in Direction::ALL.into_iter().cycle().take(40) {
+            assert_eq!(
+                loaded.submit(Action::Move(direction)),
+                game.submit(Action::Move(direction))
+            );
+        }
+        let cell = seal(&game).expect("the bottom floor has a seal");
+        if game.world.actor_at(cell).is_none() {
+            stand_on(&mut game, cell);
+            stand_on(&mut loaded, cell);
+        }
+        assert_eq!(loaded.submit(Action::Descend), game.submit(Action::Descend));
+        assert_eq!(saved(&loaded), saved(&game));
+    }
+
+    #[test]
+    fn a_won_game_is_saved_and_read_back_won() {
+        let content = content();
+        let mut game = on_the_seal(&content);
+        game.submit(Action::Descend);
+        let text = saved(&game);
+        assert!(text.contains("status: Won"), "{text}");
+
+        let mut loaded = save::from_str(&text, &content).expect("a won game reads back");
+
+        assert_eq!(loaded.status(), &Status::Won);
+        assert!(loaded.submit(Action::Wait).is_empty());
+        assert_eq!(saved(&loaded), text);
+    }
+
+    #[test]
+    fn a_save_of_a_won_game_with_a_dead_player_is_refused() {
+        let content = content();
+        let mut game = on_the_seal(&content);
+        game.submit(Action::Descend);
+        let player = game.world.player;
+        game.world.actors[player].take_damage(i32::MAX);
+        let text = saved(&game);
+
+        let error = save::from_str(&text, &content).expect_err("a dead winner is refused");
+
+        assert!(
+            error.to_string().contains("the game was won but"),
+            "{error}"
+        );
     }
 }

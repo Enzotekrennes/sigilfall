@@ -80,9 +80,23 @@ fn random_seeds() -> Vec<u64> {
         .collect()
 }
 
-/// Whether `position` is open ground (floor or stairs).
+/// Whether `position` is open ground (floor, stairs, or the seal of the
+/// bottom floor).
 fn open(map: &Map, position: Position) -> bool {
-    matches!(map.tile(position), Some(Tile::Floor | Tile::StairsDown))
+    matches!(
+        map.tile(position),
+        Some(Tile::Floor | Tile::StairsDown | Tile::Seal)
+    )
+}
+
+/// The tile of the way down of a floor at `depth`: the stairs, or from the
+/// tenth floor, the bottom of the dungeon, the seal (decision D23).
+fn way_down(depth: u32) -> Tile {
+    if depth >= 10 {
+        Tile::Seal
+    } else {
+        Tile::StairsDown
+    }
 }
 
 /// Width and height of `map` as `i32`.
@@ -193,12 +207,16 @@ fn check_cave(seed: u64, depth: u32) -> Result<Measure, String> {
         ));
     }
 
-    // Stairs: exactly one, reachable, not on the start, in the farthest
-    // third by distance and by rank, and at the greatest distance.
+    // Stairs (the seal on the bottom floor, which has no stairs): exactly
+    // one, reachable, not on the start, in the farthest third by distance
+    // and by rank, and at the greatest distance.
     let staircases: Vec<Position> = positions(map)
         .into_iter()
-        .filter(|&p| map.tile(p) == Some(Tile::StairsDown))
+        .filter(|&p| matches!(map.tile(p), Some(Tile::StairsDown | Tile::Seal)))
         .collect();
+    if map.tile(floor.stairs()) != Some(way_down(depth)) {
+        return fail("the way down is not the stairs above floor 10, the seal on it");
+    }
     if staircases != [floor.stairs()] {
         return fail(&format!("staircases found: {staircases:?}"));
     }

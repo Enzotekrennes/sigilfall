@@ -1009,6 +1009,9 @@ pub fn describe(events: &[Event], game: &Game, content: &Content) -> Vec<Message
             | Event::MoveBlocked { .. }
             | Event::TurnLost { .. }
             | Event::Backlash { .. } => None,
+            // Not worded yet: the victory's line and screen come with the
+            // victory screen (task T34).
+            Event::SealBroken { .. } => None,
         };
         messages.extend(message);
     }

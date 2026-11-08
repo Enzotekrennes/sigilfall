@@ -41,22 +41,22 @@ library, and the terminal application in a binary that depends on it.
 | `content::item`, `content::item_file` | Item definitions, their rules, and the shape of an item entry. |
 | `content::spawn`, `content::spawn_file` | Spawn tables: how often each monster and item is drawn, floor by floor. |
 | `content::floor`, `content::floor_file` | `FloorKind` (rooms or caves) and the floor rules: the weight of each kind, floor by floor, with the checks a rule must pass. |
-| `event` | `Event`: what happened during a turn (moved, attacked, died, sigil cast, glyph learned, picked up, descended…). |
+| `event` | `Event`: what happened during a turn (moved, attacked, died, sigil cast, glyph learned, picked up, descended, seal broken…). |
 | `explore` | `explore_step`: the step of automatic exploration towards the nearest unseen cell next to known ground, by a Dijkstra map planned on what the player remembers. |
 | `fov` | Symmetric shadowcasting in integer fractions, within an elliptical `SightRange`: 16 cells along a row, 8 along a column (`SIGHT_RANGE`). |
-| `game` | `Game`, the game in progress, and its single entry point `Game::submit`. |
+| `game` | `Game`, the game in progress, and its single entry point `Game::submit`; `Status`, playing, lost or won. |
 | `game::world` | What the current floor holds: map, actors, items, engraved glyphs, the player's inventory. |
 | `game::cast` | What `Action::Cast` does: cost, essence, target, effect, backlash. |
 | `game::inventory` | What picking up, using and dropping an item do. |
-| `game::descent` | What `Action::Descend` does: the next floor of the seed, with the player's belongings. |
+| `game::descent` | What `Action::Descend` does: the next floor of the seed, with the player's belongings; on the seal of the bottom floor, the victory that ends the run. |
 | `game::explore` | What `Action::Explore` does: a move chosen by `explore`, never a blow, refused when nothing is left to explore. |
 | `game::saved` | Turns a game into the records of a save and back, checking every value read. |
-| `generation` | A floor built from the seed and the depth: its kind, layout, start, stairs, monsters, glyphs and items. |
+| `generation` | A floor built from the seed and the depth: its kind, layout, start, stairs (the seal on the bottom floor, `is_bottom_floor`), monsters, glyphs and items. |
 | `generation::bsp` | Rooms and corridors laid out by binary space partitioning. |
 | `generation::caves` | One natural cave grown by a cellular automaton, cut down to its largest connected area, and grown again (8 times at most) while that area is under 900 cells. |
 | `geometry` | `Position` and the eight `Direction`s. |
 | `item` | `Item` and `ItemId`: things on the floor or in the player's pack, and the pack's capacity. |
-| `map` | `Map` and `Tile`: the grid of a floor, the cells in view and those remembered. |
+| `map` | `Map` and `Tile` (wall, floor, stairs down, seal): the grid of a floor, the cells in view and those remembered. |
 | `path` | Reachability and distances on a map. |
 | `path::flood` | Flood fill: the cells reachable from a cell. |
 | `path::dijkstra` | Dijkstra maps: the step distance from every cell to a set of goals. |
@@ -134,7 +134,8 @@ kind never shifts the draws of a layout, and a floor of rooms stays the one
 it was before caves existed. `Generation` then builds the floor: the layout
 (rooms and corridors by BSP, or one cave grown by a cellular automaton),
 the start (a random room, or one end of the cave), stairs on the cell
-farthest from the start by a Dijkstra map, monsters out of sight of the
+farthest from the start by a Dijkstra map (on the bottom floor, 10, the
+seal takes their cell and there are no stairs), monsters out of sight of the
 start, two glyphs and items, placed by the same steps for both kinds.
 `Gameplay` draws the damage rolls and backlashes on that floor. A floor is
 a pure function of the seed, its depth and the content, whatever was played
@@ -163,7 +164,8 @@ offers "Continue" on the title screen; `save::from_str` rebuilds the game,
 including the gameplay stream and the order in which freed slot-map keys
 are reused, so the resumed game plays exactly as it would have. An
 unreadable save is renamed `save.ron.bad`. The save is deleted the moment
-the player dies.
+the player dies. A game whose seal was broken is over too (`Status::Won`):
+`Game::submit` takes no action any more, as after a death.
 
 ## Decisions
 
@@ -192,5 +194,6 @@ the alternative set aside.
 | D18 | Recognition by Levenshtein distance on nodes; patterns at least 3 edits apart, so a near miss matches one sigil only. | A 2-edit gap with "first in the file wins". |
 | D19 | One `Action::Cast` per trace: 50 energy plus 25 per node, 2 essence per cast (6 at most, 1 back every 12 ticks), glyphs read by stepping on them. | Node-by-node tracing in the core, essence cost per sigil, a dedicated "read" action. |
 | D20 | `Action::Descend` on the stairs only; a gameplay stream per floor; weighted spawn tables in `spawns.ron`; more monsters deeper (6 + depth − 1, at most 12). | Spawn weights inside each definition, difficulty by stats only. |
-| D21 | Readable RON saves with a format version (v3 since T28: the date of a daily run), state only (definitions by id), the exact gameplay stream and slot-map reuse order. | `slotmap`'s own serde form, or a binary format. |
+| D21 | Readable RON saves with a format version (v4 since T33: the seal tile and the won status; v3 added the date of a daily run), state only (definitions by id), the exact gameplay stream and slot-map reuse order. | `slotmap`'s own serde form, or a binary format. |
 | D22 | Floor kinds in data (`floors.ron`, weights by band of floors), drawn on a stream of their own (`FloorKind`); caves grown by a cellular automaton (45 % rock, 5 passes, rule 4-5), the largest area kept, regrown below 900 cells; floors 1-2 always rooms, 10 and deeper always caves. | Floor weights added to `spawns.ron`, and the kind drawn on the generation stream, which would have changed every existing floor and the demo. |
+| D23 | The bottom floor (10) has a seal instead of stairs, on the cell farthest from the start; `Action::Descend` on it breaks it and wins the run (`Event::SealBroken`, `Status::Won`), refused elsewhere at no cost like a descent off the stairs. | A descent without end, scored by depth. |

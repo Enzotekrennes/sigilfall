@@ -308,6 +308,10 @@ const fn cell_look(tile: Tile, sight: Sight, theme: &Theme) -> Option<(char, Sty
         (Sight::Remembered, Tile::Wall) => Some((glyphs.wall, theme.wall_remembered)),
         (Sight::Visible, Tile::StairsDown) => Some((glyphs.stairs, theme.stairs)),
         (Sight::Remembered, Tile::StairsDown) => Some((glyphs.stairs, theme.stairs_remembered)),
+        // Drawn as the stairs it replaces until the seal gets a look of its
+        // own (task T34), so the bottom floor stays playable meanwhile.
+        (Sight::Visible, Tile::Seal) => Some((glyphs.stairs, theme.stairs)),
+        (Sight::Remembered, Tile::Seal) => Some((glyphs.stairs, theme.stairs_remembered)),
     }
 }
 

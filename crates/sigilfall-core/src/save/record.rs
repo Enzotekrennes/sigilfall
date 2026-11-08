@@ -34,6 +34,8 @@ const WALL: char = '#';
 const FLOOR: char = '.';
 /// Character of the stairs down in [`MapRecord::tiles`].
 const STAIRS_DOWN: char = '>';
+/// Character of the seal of the bottom floor in [`MapRecord::tiles`].
+const SEAL: char = '*';
 
 /// Character of a cell never seen in [`MapRecord::sight`].
 const UNSEEN: char = ' ';
@@ -59,7 +61,7 @@ pub(crate) struct GameRecord {
     /// started with `Game::new`) or bare (`Game::on_floor`,
     /// `Game::in_fixed_room`).
     pub(crate) floors_from_content: bool,
-    /// Whether the player is still alive, and if not who killed it.
+    /// Whether the game goes on, was won, or who killed the player.
     pub(crate) status: Status,
     /// Ticks elapsed since the game started.
     pub(crate) ticks: u64,
@@ -108,7 +110,8 @@ pub(crate) struct DailyRecord {
 /// A floor as a save writes it: one string per row, top row first, for the
 /// tiles and for the player's sight.
 ///
-/// Tiles are `#` (wall), `.` (floor) and `>` (stairs down). Sight is ` `
+/// Tiles are `#` (wall), `.` (floor), `>` (stairs down) and `*` (the seal
+/// of the bottom floor). Sight is ` `
 /// (never seen), `m` (remembered, out of sight) and `v` (visible now). Both
 /// grids have the same size, at least one cell and at most
 /// [`MAX_MAP_SIDE`] on each side.
@@ -136,6 +139,7 @@ impl MapRecord {
         let tiles = rows(&|position| match map.tile(position) {
             Some(Tile::Floor) => FLOOR,
             Some(Tile::StairsDown) => STAIRS_DOWN,
+            Some(Tile::Seal) => SEAL,
             Some(Tile::Wall) | None => WALL,
         });
         let sight = rows(&|position| {
@@ -223,9 +227,10 @@ fn tile_of(character: char, y: usize) -> Result<Tile, SaveError> {
         WALL => Ok(Tile::Wall),
         FLOOR => Ok(Tile::Floor),
         STAIRS_DOWN => Ok(Tile::StairsDown),
+        SEAL => Ok(Tile::Seal),
         other => Err(SaveError::Inconsistent(format!(
-            "row {y} of the map tiles holds `{other}`, expected `{WALL}`, `{FLOOR}` or \
-             `{STAIRS_DOWN}`"
+            "row {y} of the map tiles holds `{other}`, expected `{WALL}`, `{FLOOR}`, \
+             `{STAIRS_DOWN}` or `{SEAL}`"
         ))),
     }
 }
@@ -311,8 +316,8 @@ mod tests {
     /// A 4 × 3 map with every tile and every state of sight.
     fn sample() -> MapRecord {
         MapRecord {
-            tiles: vec!["####".into(), "#.>#".into(), "####".into()],
-            sight: vec!["vvm ".into(), "vvm ".into(), "    ".into()],
+            tiles: vec!["####".into(), "#.>#".into(), "#*##".into()],
+            sight: vec!["vvm ".into(), "vvm ".into(), " m  ".into()],
         }
     }
 
@@ -322,6 +327,7 @@ mod tests {
 
         assert_eq!((map.width(), map.height()), (4, 3));
         assert_eq!(map.tile(Position::new(2, 1)), Some(Tile::StairsDown));
+        assert_eq!(map.tile(Position::new(1, 2)), Some(Tile::Seal));
         assert_eq!(map.tile(Position::new(1, 1)), Some(Tile::Floor));
         assert!(map.is_visible(Position::new(1, 1)));
         assert!(map.is_remembered(Position::new(2, 0)));

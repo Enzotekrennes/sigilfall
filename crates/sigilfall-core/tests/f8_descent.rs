@@ -7,7 +7,8 @@
 //! and the player off the stairs who tries to descend sees nothing happen.
 //! Beyond them they check what the player keeps (hit points, essence, pack,
 //! grimoire, steadied casts), that floor N does not depend on how the floors
-//! above were played, the deepest floors (10 and beyond) and the
+//! above were played, the deepest floors (10, the bottom, whose seal ends
+//! the run since task T33, and the floors generated beyond it) and the
 //! deterministic replay across several floors. The spawn tables and the
 //! difficulty are in `f8_spawns.rs`; the screens are checked by the binary's
 //! tests.
@@ -73,9 +74,10 @@ const ITEMS: &str = include_str!("../content/items.ron");
 /// Most actions spent walking to the stairs of one floor.
 const WALK_BUDGET: usize = 1500;
 
-/// Floors of the harmless tour: past the deepest floor the content is
-/// written for (10) by two.
-const TOUR_DEPTH: u32 = 12;
+/// Floors of the harmless tour: down to the bottom floor (10), the deepest
+/// floor the content is written for, which has a seal instead of stairs
+/// (decision D23).
+const TOUR_DEPTH: u32 = 10;
 
 /// Seeds named by the acceptance brief.
 fn named_seeds() -> Vec<Seed> {
@@ -118,12 +120,14 @@ fn cells(map: &Map) -> Vec<Position> {
         .collect()
 }
 
-/// The cell of the stairs of the current floor of `game`.
+/// The cell of the way down of the current floor of `game`: its stairs, or
+/// on the bottom floor the seal that lies there instead, whose breaking
+/// ends the run.
 fn stairs_of(game: &Game) -> Position {
     cells(game.map())
         .into_iter()
-        .find(|&cell| game.map().tile(cell) == Some(Tile::StairsDown))
-        .expect("every generated floor has stairs")
+        .find(|&cell| matches!(game.map().tile(cell), Some(Tile::StairsDown | Tile::Seal)))
+        .expect("every generated floor has stairs or a seal")
 }
 
 /// The first step of a shortest walk from `from` to `to` over walkable
@@ -932,7 +936,7 @@ fn the_monsters_per_floor_grow_by_one_up_to_twelve_and_stay_there() {
 }
 
 #[test]
-fn the_tenth_floor_and_the_floors_beyond_it_use_the_last_table() {
+fn the_tenth_floor_uses_the_last_table() {
     let content = tiers();
     let mut game = Game::new(Seed::from(42), &content);
     for depth in 2..=TOUR_DEPTH {
@@ -949,19 +953,28 @@ fn the_tenth_floor_and_the_floors_beyond_it_use_the_last_table() {
 }
 
 #[test]
-fn there_is_no_bottom_floor_the_stairs_keep_leading_down() {
+fn the_tenth_floor_is_the_bottom_its_seal_ends_the_run() {
     let content = tiers();
     let mut game = Game::new(Seed::from(0), &content);
-    for _ in 0..TOUR_DEPTH + 3 {
-        let events = descend(&mut game).expect("the stairs are reached");
-        assert_eq!(
-            events,
-            [Event::Descended {
-                depth: game.depth()
-            }]
-        );
+    for _ in 1..TOUR_DEPTH {
+        descend(&mut game).expect("the stairs are reached");
     }
-    assert_eq!(game.depth(), TOUR_DEPTH + 4);
+    assert_eq!(game.depth(), TOUR_DEPTH);
+    let map = game.map();
+    assert!(
+        cells(map)
+            .into_iter()
+            .all(|cell| map.tile(cell) != Some(Tile::StairsDown)),
+        "the bottom floor has no stairs"
+    );
+    let seal = cells(map)
+        .into_iter()
+        .find(|&cell| map.tile(cell) == Some(Tile::Seal))
+        .expect("the bottom floor has a seal");
+    assert!(
+        first_step(map, game.player_actor().position(), seal).is_some(),
+        "the seal is reachable"
+    );
     assert_eq!(monster_count(&game), 12);
     assert_eq!(kinds(&game), ["mote_four"]);
 }
@@ -982,16 +995,17 @@ fn very_deep_floors_generate_without_panic_and_obey_the_last_table() {
         }
         assert_eq!(
             floor.map().tile(floor.stairs()),
-            Some(Tile::StairsDown),
-            "depth {depth}"
+            Some(Tile::Seal),
+            "depth {depth}: the bottom floor, and any generated beyond it, has the seal"
         );
     }
 }
 
 // --- Deterministic replay across several floors --------------------------------
 
-/// Plays a fixed policy (walk to the stairs, descend, strike what blocks)
-/// for at most `actions` actions and returns every event list, the depth and
+/// Plays a fixed policy (walk to the stairs, descend, strike what blocks;
+/// on the bottom floor, break the seal, which ends the run) for at most
+/// `actions` actions and returns every event list, the depth and
 /// the final state of the player.
 fn scripted_run(
     seed: Seed,

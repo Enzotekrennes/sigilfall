@@ -40,23 +40,27 @@ pub enum Tile {
     /// Stairs leading down to the next floor. Actors can stand on them like
     /// on floor; going down is a separate action of the player.
     StairsDown,
+    /// The seal of the bottom floor, which has it instead of stairs
+    /// (decision D23). Actors can stand on it like on floor; breaking it is
+    /// the player's going-down action taken on its cell, and wins the run.
+    Seal,
 }
 
 impl Tile {
     /// Returns whether an actor can stand on this tile.
     pub const fn is_walkable(self) -> bool {
         match self {
-            Self::Floor | Self::StairsDown => true,
+            Self::Floor | Self::StairsDown | Self::Seal => true,
             Self::Wall => false,
         }
     }
 
-    /// Returns whether this tile stops sight: walls do, floor and stairs do
-    /// not.
+    /// Returns whether this tile stops sight: walls do, floor, stairs and
+    /// the seal do not.
     pub const fn blocks_sight(self) -> bool {
         match self {
             Self::Wall => true,
-            Self::Floor | Self::StairsDown => false,
+            Self::Floor | Self::StairsDown | Self::Seal => false,
         }
     }
 }
@@ -157,7 +161,7 @@ impl Map {
 
     /// Returns whether `position` stops sight.
     ///
-    /// Walls do, floor and stairs do not ([`Tile::blocks_sight`]). Cells
+    /// Walls do; floor, stairs and the seal do not ([`Tile::blocks_sight`]). Cells
     /// outside the map always block sight, so nothing is ever seen past the
     /// edge of the map.
     pub fn blocks_sight(&self, position: Position) -> bool {
@@ -310,6 +314,16 @@ mod tests {
         map.set_tile(Position::new(1, 0), Tile::StairsDown);
 
         assert!(map.is_walkable(Position::new(1, 0)));
+        assert!(map.can_step(Position::new(0, 0), Direction::East));
+    }
+
+    #[test]
+    fn the_seal_is_walkable_and_transparent_like_stairs() {
+        let mut map = Map::new(3, 1, Tile::Wall);
+        map.set_tile(Position::new(1, 0), Tile::Seal);
+
+        assert!(map.is_walkable(Position::new(1, 0)));
+        assert!(!map.blocks_sight(Position::new(1, 0)));
         assert!(map.can_step(Position::new(0, 0), Direction::East));
     }
 

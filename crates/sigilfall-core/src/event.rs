@@ -267,10 +267,20 @@ pub enum Event {
         /// Number of the floor the player arrived on, one more than before.
         depth: u32,
     },
-    /// The player tried to go down where there are no stairs. Nothing
-    /// happened: no energy and no time were spent.
+    /// The player tried to go down where there are no stairs, nor the seal
+    /// of the bottom floor. Nothing happened: no energy and no time were
+    /// spent. On the bottom floor, which has the seal instead of stairs,
+    /// this is the refusal of breaking the seal away from its cell.
     NoStairsHere {
         /// The player's cell.
+        position: Position,
+    },
+    /// The player broke the seal of the bottom floor, standing on it: the
+    /// run is won and the game is over (`Status::Won`). It is the last
+    /// event of the run: no monster acts after it, and `Game::submit` does
+    /// nothing any more.
+    SealBroken {
+        /// Cell of the seal, where the player stands.
         position: Position,
     },
     /// The player asked for a step of automatic exploration and no cell it

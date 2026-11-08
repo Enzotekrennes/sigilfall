@@ -519,8 +519,8 @@ fn actor_of(
 }
 
 /// Checks that `player` is the only player among `actors`, alive exactly
-/// while `status` says the game goes on, and that the killer a finished
-/// game names is a monster of `content`.
+/// while `status` says the game goes on or was won, and that the killer a
+/// lost game names is a monster of `content`.
 ///
 /// # Errors
 ///
@@ -545,6 +545,9 @@ fn check_player(
         Status::Playing if !alive => Err(inconsistent(
             "the game goes on but the player has no hit points left".to_owned(),
         )),
+        Status::Won if !alive => Err(inconsistent(
+            "the game was won but the player has no hit points left".to_owned(),
+        )),
         Status::GameOver { .. } if alive => Err(inconsistent(
             "the game is over but the player still has hit points".to_owned(),
         )),
@@ -554,7 +557,7 @@ fn check_player(
             kind: Reference::Monster,
             id: definition.clone(),
         }),
-        Status::Playing | Status::GameOver { .. } => Ok(()),
+        Status::Playing | Status::Won | Status::GameOver { .. } => Ok(()),
     }
 }
 

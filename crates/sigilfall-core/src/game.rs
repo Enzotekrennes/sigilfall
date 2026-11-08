@@ -27,7 +27,9 @@
 //!
 //! Standing on the stairs, the player goes down with `Action::Descend` to
 //! the next floor of the seed, keeping its hit points, essence, inventory and
-//! grimoire; the rules live in the `descent` submodule. Every floor has its
+//! grimoire; the rules live in the `descent` submodule. The bottom floor has
+//! a seal instead of stairs: the same action taken on it wins the run
+//! ([`Status::Won`]), and [`Game::submit`] no longer does anything either. Every floor has its
 //! own gameplay stream (decision D5), so a floor plays out the same for a
 //! given seed and the same actions there, whatever happened above.
 //!
@@ -136,9 +138,9 @@ pub struct Game {
     essence_since: u64,
 }
 
-/// Whether a game can still be played.
+/// Whether a game can still be played, and how it ended if not.
 ///
-/// A save keeps it as `Playing` or as
+/// A save keeps it as `Playing`, `Won` or as
 /// `GameOver(killed_by: Monster(definition: "ossuary_rat"))`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Status {
@@ -154,6 +156,10 @@ pub enum Status {
         /// last hit point), but saves and the summary accept it.
         killed_by: Combatant,
     },
+    /// The player broke the seal of the bottom floor and won the run
+    /// ([`Event::SealBroken`]); the game is finished and [`Game::submit`]
+    /// does nothing any more. The player is alive.
+    Won,
 }
 
 /// An item lying on a cell the player sees right now, as the binary needs it
@@ -427,8 +433,11 @@ impl Game {
     /// moves the player to the next floor (see the `descent` submodule):
     /// [`Event::Descended`] comes first, then the events of the monsters of
     /// the new floor, which can never act before the player's first turn
-    /// there. Anywhere but on the stairs it is refused with no cost and no
-    /// time passing ([`Event::NoStairsHere`]).
+    /// there. On the seal of the bottom floor, the same action and cost
+    /// break the seal: [`Event::SealBroken`] is the only event, no other
+    /// actor acts and the game is won ([`Status::Won`]). Anywhere but on
+    /// the stairs or the seal it is refused with no cost and no time passing
+    /// ([`Event::NoStairsHere`]).
     ///
     /// A step of automatic exploration ([`Action::Explore`]) is a move
     /// towards the nearest cell the player has never seen, chosen on what
@@ -457,7 +466,8 @@ impl Game {
     ///
     /// If the player dies, the list ends with its [`Event::Died`], no other
     /// actor acts and the game is over ([`Game::status`]). Once the game is
-    /// over, this function changes nothing and returns no event.
+    /// over, lost or won, this function changes nothing and returns no
+    /// event.
     ///
     /// The events returned are counted in [`Game::stats`] before they are
     /// returned.
@@ -475,15 +485,16 @@ impl Game {
         events
     }
 
-    /// Returns whether the game can still be played and, if not, who killed
-    /// the player.
+    /// Returns whether the game can still be played and, if not, how it
+    /// ended: who killed the player, or the seal broken.
     pub const fn status(&self) -> &Status {
         &self.status
     }
 
-    /// Returns whether the player has died, which ends the game.
+    /// Returns whether the game has ended, by the player's death or by its
+    /// victory ([`Status::Won`]): no action is taken any more.
     pub const fn is_over(&self) -> bool {
-        matches!(self.status, Status::GameOver { .. })
+        matches!(self.status, Status::GameOver { .. } | Status::Won)
     }
 
     /// Returns the seed of this run, as given to [`Game::new`] or

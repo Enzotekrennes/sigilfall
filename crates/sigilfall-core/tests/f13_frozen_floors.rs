@@ -13,7 +13,13 @@
 //! cells across and 8 up and down (task T31, decision D15 revised), monsters
 //! must start out of that wider range, so the monster positions of the full
 //! floors moved (their kinds and energies, the layouts, glyphs and items did
-//! not). The full hashes were taken again then; the bare ones are unchanged. `generate` is the rooms-only layout and
+//! not). The full hashes were taken again then; the bare ones are unchanged.
+//!
+//! Since the bottom floor (10) has a seal where its stairs were (task T33,
+//! decision D23), the dump writes the seal as `>`, like the stairs it
+//! replaces: the frozen floors 10 thus prove that the layout, the start and
+//! the cell of the way down did not move, and the floors 1 to 9 are checked
+//! exactly as before. `generate` is the rooms-only layout and
 //! `generate_with_monsters` the full floor of the shipped content: floors 1
 //! and 2, always rooms, must be the same as before; deeper floors drawn
 //! as rooms must be too.
@@ -42,7 +48,7 @@ fn dump(floor: &Floor) -> String {
         for x in 0..i32::try_from(map.width()).unwrap() {
             text.push(match map.tile(Position::new(x, y)) {
                 Some(Tile::Floor) => '.',
-                Some(Tile::StairsDown) => '>',
+                Some(Tile::StairsDown | Tile::Seal) => '>',
                 _ => '#',
             });
         }

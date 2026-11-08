@@ -473,13 +473,14 @@ fn scenario_1_a_descent_takes_one_turn_and_the_turn_counter_runs_on() {
 #[test]
 fn scenario_2_the_creatures_shown_after_each_descent_come_from_the_table_of_the_depth() {
     let mut app = app(Seed::new(42));
-    for depth in 2..=12_u32 {
+    // Down to the tenth floor, the bottom: it has a seal instead of stairs
+    // (decision D23), so no floor lies below it.
+    for depth in 2..=10_u32 {
         walk_to_stairs(&mut app);
         keys(&mut app, ">");
         let expected = match depth {
             2..=3 => "mote_two",
             4..=6 => "mote_three",
-            // Floors past the tenth use the table of the tenth.
             _ => "mote_four",
         };
         assert_eq!(kinds(&app), [expected], "depth {depth}");
@@ -803,10 +804,11 @@ fn the_key_help_names_the_descent_and_still_fits_in_80_columns() {
 }
 
 #[test]
-fn the_status_line_shows_every_depth_up_to_the_twelfth_without_losing_the_seed() {
+fn the_status_line_shows_every_depth_up_to_the_tenth_without_losing_the_seed() {
     let seed = Seed::new(42);
     let mut app = app(seed);
-    for depth in 2..=12_u32 {
+    // The tenth floor is the bottom (decision D23): no stairs lead deeper.
+    for depth in 2..=10_u32 {
         walk_to_stairs(&mut app);
         keys(&mut app, ">");
         let line = status(&app);
