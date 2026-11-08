@@ -7,13 +7,14 @@
 //! application can hold them in its `State`: [`TitleMenu`] (which entry of
 //! the menu is chosen, out of [`TitleItem`]s), [`SeedEntry`] (the seed
 //! being typed and why it was refused, a [`SeedProblem`]) and
-//! [`Confirmation`] (the new game waiting for the player's answer); the
+//! [`Confirmation`] (the [`NewRun`] waiting for the player's answer); the
 //! [`TitleStep`] to draw; and [`render`]. The screen follows the "Écran
 //! titre" mock-up of `docs/design.md`: a traced sigil as emblem, the name
 //! in `text_title`, the tagline, then the menu, whose chosen line starts
 //! with the `›` marker and sits on `bg_selection` (reversed in 16 colours
 //! and in monochrome), so the choice reads without colour. "Continue" is
-//! listed only while a saved game can be resumed, with its depth and turn.
+//! listed only while a saved game can be resumed, with its depth and turn;
+//! "Daily" is always listed, with today's UTC date.
 //!
 //! Nothing here starts a game or touches a file: the application acts on
 //! the entry chosen. Every word comes from `messages`.
@@ -22,7 +23,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Widget as _;
-use sigilfall_core::rng::Seed;
+use sigilfall_core::rng::{DailyDate, Seed};
 
 use super::log::wrap;
 use super::{draw_centred_rows, key_help, up_down};
@@ -38,6 +39,8 @@ pub enum TitleItem {
     NewGame,
     /// Type a seed, then start a new game on it.
     Seed,
+    /// Start the daily dungeon of today's UTC date.
+    Daily,
     /// Open the options screen.
     Options,
     /// Leave the game.
@@ -51,6 +54,7 @@ impl TitleItem {
             Self::Continue => messages::CONTINUE_ITEM,
             Self::NewGame => messages::NEW_GAME_ITEM,
             Self::Seed => messages::SEED_ITEM,
+            Self::Daily => messages::DAILY_ITEM,
             Self::Options => messages::OPTIONS_ITEM,
             Self::Quit => messages::QUIT_ITEM,
         }
@@ -58,19 +62,26 @@ impl TitleItem {
 }
 
 /// The menu while a saved game can be resumed.
-const ITEMS_WITH_SAVE: [TitleItem; 5] = [
+///
+/// "Daily" comes after "Seed" rather than before it as in the mock-up of
+/// `docs/design.md`: the three ways to start a game stay together, and
+/// "Seed" keeps the place that the demo of the README (`demo.tape`) reaches
+/// with one Down.
+const ITEMS_WITH_SAVE: [TitleItem; 6] = [
     TitleItem::Continue,
     TitleItem::NewGame,
     TitleItem::Seed,
+    TitleItem::Daily,
     TitleItem::Options,
     TitleItem::Quit,
 ];
 
 /// The menu while there is no saved game: "Continue" is left out rather
 /// than greyed out, so every line listed does something.
-const ITEMS_WITHOUT_SAVE: [TitleItem; 4] = [
+const ITEMS_WITHOUT_SAVE: [TitleItem; 5] = [
     TitleItem::NewGame,
     TitleItem::Seed,
+    TitleItem::Daily,
     TitleItem::Options,
     TitleItem::Quit,
 ];
@@ -241,31 +252,42 @@ impl SeedEntry {
     }
 }
 
+/// The new game the player asked for, from the title menu or the command
+/// line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NewRun {
+    /// A game on a random seed ("New game").
+    Random,
+    /// A game on this seed, typed or given with `--seed`.
+    Seed(Seed),
+    /// The daily dungeon of this UTC date ("Daily" or `--daily`), read from
+    /// the clock when the player asked for it.
+    Daily(DailyDate),
+}
+
 /// The confirmation's own state: the new game the player asked for, and
 /// whether "Abandon" or "Keep" is chosen. It opens on "Keep", so an Enter
 /// pressed by habit loses nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Confirmation {
-    /// Seed of the new game: the one typed, or `None` for a random seed
-    /// ("New game").
-    seed: Option<Seed>,
+    /// The new game waiting for the answer.
+    run: NewRun,
     /// Whether "Abandon it and start anew" is chosen rather than "Keep".
     abandon: bool,
 }
 
 impl Confirmation {
-    /// Returns the confirmation of a new game on `seed` (`None` for a
-    /// random one), "Keep" chosen.
-    pub const fn new(seed: Option<Seed>) -> Self {
+    /// Returns the confirmation of the new game `run`, "Keep" chosen.
+    pub const fn new(run: NewRun) -> Self {
         Self {
-            seed,
+            run,
             abandon: false,
         }
     }
 
-    /// Returns the seed of the new game, or `None` for a random one.
-    pub const fn seed(self) -> Option<Seed> {
-        self.seed
+    /// Returns the new game waiting for the answer.
+    pub const fn run(self) -> NewRun {
+        self.run
     }
 
     /// Returns whether "Abandon it and start anew" is chosen.
@@ -289,13 +311,13 @@ impl Confirmation {
     }
 
     /// Returns the menu entry that asked for this new game, to go back to
-    /// when the player keeps the saved game: "Seed" for a typed seed, "New
-    /// game" otherwise.
+    /// when the player keeps the saved game: "Seed" for a typed seed,
+    /// "Daily" for the daily dungeon, "New game" for a random seed.
     pub const fn asked_from(self) -> TitleItem {
-        if self.seed.is_some() {
-            TitleItem::Seed
-        } else {
-            TitleItem::NewGame
+        match self.run {
+            NewRun::Random => TitleItem::NewGame,
+            NewRun::Seed(_) => TitleItem::Seed,
+            NewRun::Daily(_) => TitleItem::Daily,
         }
     }
 }
@@ -327,8 +349,8 @@ const EMBLEM: [&str; 7] = [
 ];
 
 /// Columns of a menu line taken by an entry's label, before the detail
-/// beside it ("Continue" and its depth and turn): the longest label,
-/// "Continue" or "New game", and four blank columns.
+/// beside it ("Continue" and its depth and turn, "Daily" and its date): the
+/// longest label, "Continue" or "New game", and four blank columns.
 const LABEL_WIDTH: usize = 12;
 
 /// Narrowest a menu is drawn, so its left edge stays in one column (22 on
@@ -341,15 +363,16 @@ const MENU_MIN_WIDTH: usize = 36;
 const HEADER_ROWS: usize = EMBLEM.len() + 4;
 
 /// Rows kept under the header for the menu, the seed entry or the
-/// confirmation, the tallest of which takes six: the screen is centred as
+/// confirmation, the tallest of which take six (the menu with "Continue",
+/// the seed entry, the confirmation): the screen is centred as
 /// if this many were drawn, so the emblem and the name never move from one
 /// step to the next.
 const BODY_ROWS: usize = 6;
 
 /// Most rows the notices take, under the menu and a blank row. The emblem,
-/// the name and a menu of five entries take 16 of the 23 rows above the
+/// the name and a menu of six entries take 17 of the 23 rows above the
 /// key help on an 80 × 24 screen; five rows of 76 columns hold a notice
-/// with a long path and its system error, and leave one row of margin.
+/// with a long path and its system error, and fill the rest.
 const NOTICE_ROWS: usize = 5;
 
 /// Columns a notice is wrapped to: the 80 columns of the smallest screen
@@ -391,7 +414,8 @@ impl Row {
 ///
 /// `saved` describes the saved game (see `messages::saved_run`), beside
 /// "Continue" and in the confirmation's warning; `None` when no game is
-/// saved, which leaves "Continue" out of the menu.
+/// saved, which leaves "Continue" out of the menu. `today` is the UTC date
+/// written beside "Daily".
 ///
 /// The background is expected to be painted already; an area too small
 /// for the screen clips it without panicking.
@@ -400,6 +424,7 @@ pub fn render(
     area: Rect,
     step: TitleStep<'_>,
     saved: Option<&str>,
+    today: DailyDate,
     notices: &[String],
     theme: &Theme,
 ) {
@@ -412,7 +437,7 @@ pub fn render(
     ]);
     let help = match step {
         TitleStep::Menu(menu) => {
-            rows.extend(menu_rows(*menu, saved, theme));
+            rows.extend(menu_rows(*menu, saved, today, theme));
             menu_help(theme)
         }
         TitleStep::Seed(entry) => {
@@ -517,14 +542,15 @@ fn menu_lines(entries: &[(&'static str, String)], chosen: usize, theme: &Theme) 
 }
 
 /// The lines of the title menu in the state `menu`; `saved` is written
-/// beside "Continue".
-fn menu_rows(menu: TitleMenu, saved: Option<&str>, theme: &Theme) -> Vec<Row> {
+/// beside "Continue", `today` beside "Daily".
+fn menu_rows(menu: TitleMenu, saved: Option<&str>, today: DailyDate, theme: &Theme) -> Vec<Row> {
     let has_save = saved.is_some();
     let entries: Vec<(&'static str, String)> = items(has_save)
         .iter()
         .map(|&item| {
             let detail = match (item, saved) {
                 (TitleItem::Continue, Some(saved)) => saved.to_owned(),
+                (TitleItem::Daily, _) => today.to_string(),
                 _ => String::new(),
             };
             (item.label(), detail)
@@ -753,16 +779,33 @@ mod tests {
 
     #[test]
     fn the_confirmation_opens_on_keep_and_remembers_what_asked() {
-        let random = Confirmation::new(None);
-        let typed = Confirmation::new(Some(Seed::new(42)));
+        let random = Confirmation::new(NewRun::Random);
+        let typed = Confirmation::new(NewRun::Seed(Seed::new(42)));
+        let date = DailyDate::new(2026, 11, 8).expect("a real date");
+        let daily = Confirmation::new(NewRun::Daily(date));
 
         assert!(!random.abandons());
+        assert!(!daily.abandons());
         assert!(random.switch().abandons());
         assert!(!random.switch().switch().abandons());
         assert!(random.choosing(true).abandons());
         assert_eq!(random.asked_from(), TitleItem::NewGame);
         assert_eq!(typed.asked_from(), TitleItem::Seed);
-        assert_eq!(typed.switch().seed(), Some(Seed::new(42)));
+        assert_eq!(daily.asked_from(), TitleItem::Daily);
+        assert_eq!(typed.switch().run(), NewRun::Seed(Seed::new(42)));
+        assert_eq!(daily.switch().run(), NewRun::Daily(date));
+    }
+
+    #[test]
+    fn daily_is_listed_after_seed_with_or_without_a_save() {
+        for has_save in [true, false] {
+            let listed = items(has_save);
+            let seed = listed.iter().position(|&item| item == TitleItem::Seed);
+            let daily = listed.iter().position(|&item| item == TitleItem::Daily);
+
+            assert_eq!(daily, seed.map(|seed| seed + 1), "{listed:?}");
+        }
+        assert_eq!(TitleItem::Daily.label(), "Daily");
     }
 
     #[test]

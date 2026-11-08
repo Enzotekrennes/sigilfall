@@ -8,8 +8,8 @@
 //! of another format version, truncated or corrupted text, references to
 //! definitions the content lacks and inconsistent values, and save a
 //! finished game. The run's statistics (`Game::stats`, T25) are part of
-//! every round trip and have their own. Written against the public API
-//! only.
+//! every round trip and have their own, and so does the date of a daily run
+//! (T28). Written against the public API only.
 
 use rand::RngExt as _;
 use rand_chacha::ChaCha8Rng;
@@ -20,7 +20,7 @@ use sigilfall_core::game::Game;
 use sigilfall_core::geometry::{Direction, Position};
 use sigilfall_core::map::Tile;
 use sigilfall_core::path::find_path;
-use sigilfall_core::rng::{Purpose, Seed};
+use sigilfall_core::rng::{DailyDate, Purpose, Seed};
 use sigilfall_core::save::{self, FORMAT_VERSION, Reference, SaveError};
 use sigilfall_core::sigil::Trace;
 
@@ -578,6 +578,99 @@ fn an_inconsistent_save_is_refused() {
 
     for (from, to, expected) in cases {
         let error = edited_error(&text, from, to, &content);
+
+        assert!(
+            matches!(&error, SaveError::Inconsistent(problem) if problem.contains(expected)),
+            "`{to}` gives `{expected}`, got: {error}"
+        );
+    }
+}
+
+/// The date of the daily runs of these tests.
+fn daily_date() -> DailyDate {
+    DailyDate::new(2026, 11, 8).expect("a real date")
+}
+
+#[test]
+fn a_daily_run_is_saved_with_its_date_and_plays_on_identically() {
+    let content = content();
+    let mut rng = Seed::new(28).stream(0, Purpose::Gameplay);
+    let mut game = Game::daily(daily_date(), &content);
+    let below = play_until(&mut game, &content, &mut rng, true, |game, _| {
+        game.depth() == 2
+    });
+    assert!(below, "the daily run reaches the second floor");
+
+    let text = saved(&game);
+    assert!(
+        text.contains(
+            "    daily: Some((
+        year: 2026,
+        month: 11,
+        day: 8,
+    )),
+"
+        ),
+        "the date is written:\n{text}"
+    );
+    let loaded = save::from_str(&text, &content).expect("the save reads back");
+    assert_eq!(loaded.daily_date(), Some(daily_date()));
+    assert_eq!(loaded.seed(), Seed::daily(daily_date()));
+
+    assert_same_future(&mut game, &content, &mut rng, "daily run");
+    assert_eq!(game.daily_date(), Some(daily_date()), "still the daily run");
+}
+
+#[test]
+fn a_run_of_a_seed_is_saved_as_no_daily_run() {
+    let content = content();
+    let game = Game::new(Seed::daily(daily_date()), &content);
+
+    let text = saved(&game);
+    let loaded = save::from_str(&text, &content).expect("the save reads back");
+
+    assert!(text.contains("daily: None,"), "{text}");
+    assert_eq!(
+        loaded.daily_date(),
+        None,
+        "the daily seed typed by hand is not the daily run"
+    );
+}
+
+#[test]
+fn a_faulty_daily_date_is_refused() {
+    let content = content();
+    let daily = saved(&Game::daily(daily_date(), &content));
+    let typed = saved(&Game::new(Seed::new(42), &content));
+    let cases = [
+        (
+            &daily,
+            "day: 8,",
+            "day: 31,",
+            "the daily date 2026-11-31 does not exist",
+        ),
+        (
+            &daily,
+            "month: 11,",
+            "month: 13,",
+            "the daily date 2026-13-8 does not exist",
+        ),
+        (
+            &daily,
+            "day: 8,",
+            "day: 9,",
+            "the daily run of 2026-11-09 has the seed",
+        ),
+        (
+            &typed,
+            "daily: None,",
+            "daily: Some((year: 2026, month: 11, day: 8)),",
+            "but the save gives 0000-0000-0000-002A",
+        ),
+    ];
+
+    for (text, from, to, expected) in cases {
+        let error = edited_error(text, from, to, &content);
 
         assert!(
             matches!(&error, SaveError::Inconsistent(problem) if problem.contains(expected)),

@@ -57,7 +57,7 @@ library, and the terminal application in a binary that depends on it.
 | `path::flood` | Flood fill: the cells reachable from a cell. |
 | `path::dijkstra` | Dijkstra maps: the step distance from every cell to a set of goals. |
 | `path::astar` | A*: a shortest walk between two cells. |
-| `rng` | `Seed`, and the random streams derived from (seed, depth, purpose). |
+| `rng` | `Seed`, and the random streams derived from (seed, depth, purpose); `DailyDate` and `Seed::daily`, the seed of the daily dungeon of a UTC date. |
 | `save` | A game written as versioned RON text, and read back. |
 | `save::record` | The records a save is made of. |
 | `save::slots` | Slot maps as a save records them: the keys in use and the order in which freed slots are reused. |
@@ -127,6 +127,10 @@ builds the floor (BSP layout, stairs on the cell farthest from the start by
 a Dijkstra map, monsters out of sight of the start, two glyphs, items),
 `Gameplay` draws the damage rolls and backlashes on that floor. A floor is
 a pure function of the seed and its depth, whatever was played above.
+The daily dungeon is a run of `Seed::daily(date)`: the UTC date, packed
+as year, month and day, mixed with a fixed tag through SplitMix64, so two
+dates never share a seed. The binary reads the date from its clock; the
+core never does.
 
 ### Content
 
@@ -175,4 +179,4 @@ the alternative set aside.
 | D18 | Recognition by Levenshtein distance on nodes; patterns at least 3 edits apart, so a near miss matches one sigil only. | A 2-edit gap with "first in the file wins". |
 | D19 | One `Action::Cast` per trace: 50 energy plus 25 per node, 2 essence per cast (6 at most, 1 back every 12 ticks), glyphs read by stepping on them. | Node-by-node tracing in the core, essence cost per sigil, a dedicated "read" action. |
 | D20 | `Action::Descend` on the stairs only; a gameplay stream per floor; weighted spawn tables in `spawns.ron`; more monsters deeper (6 + depth − 1, at most 12). | Spawn weights inside each definition, difficulty by stats only. |
-| D21 | Readable RON saves with a format version, state only (definitions by id), the exact gameplay stream and slot-map reuse order. | `slotmap`'s own serde form, or a binary format. |
+| D21 | Readable RON saves with a format version (v3 since T28: the date of a daily run), state only (definitions by id), the exact gameplay stream and slot-map reuse order. | `slotmap`'s own serde form, or a binary format. |

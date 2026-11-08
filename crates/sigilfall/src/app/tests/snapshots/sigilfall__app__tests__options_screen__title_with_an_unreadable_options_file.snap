@@ -3,7 +3,6 @@ source: crates/sigilfall/src/app/tests/options_screen.rs
 expression: text
 ---
 "                                                                                "
-"                                                                                "
 "                                 ●─────●─────●                                  "
 "                                           ╱                                    "
 "                                         ╱                                      "
@@ -17,6 +16,7 @@ expression: text
 "                                                                                "
 "                      › New game                                                "
 "                        Seed                                                    "
+"                        Daily       2026-11-08                                  "
 "                        Options                                                 "
 "                        Quit                                                    "
 "                                                                                "

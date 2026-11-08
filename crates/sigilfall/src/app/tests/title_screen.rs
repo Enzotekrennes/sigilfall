@@ -18,17 +18,22 @@ use crate::ui::title::{Confirmation, SeedEntry, SeedProblem, TitleItem, TitleMen
 
 /// The command line `sigilfall`, with `--seed` and `--ascii` as given.
 const fn command_line(seed: Option<Seed>, ascii: bool) -> Cli {
-    Cli { seed, ascii }
+    Cli {
+        seed,
+        daily: false,
+        ascii,
+    }
 }
 
 /// Launches the application as `main` does on `folder`, from `cli`, on a
 /// terminal detected as 24-bit.
 fn launch_with(folder: &ScratchFolder, cli: &Cli) -> App {
-    App::launch(
+    App::launch_with_clock(
         ColorSupport::TrueColor,
         cli,
         &shipped_content(),
         folder.save_file(),
+        Box::new(ManualClock::new()),
     )
     .expect("the launch succeeds")
 }
@@ -75,7 +80,7 @@ fn type_text(app: &mut App, text: &str) {
 }
 
 #[test]
-fn without_a_save_the_title_offers_new_game_seed_options_and_quit() {
+fn without_a_save_the_title_offers_new_game_seed_daily_options_and_quit() {
     let folder = ScratchFolder::new("title-fresh");
 
     let app = launch(&folder, None).unwrap();
@@ -88,6 +93,7 @@ fn without_a_save_the_title_offers_new_game_seed_options_and_quit() {
         "Trace true. The dungeon listens.",
         "› New game",
         "  Seed",
+        "  Daily       2026-11-08",
         "  Options",
         "  Quit",
         " ↑↓ choose   Enter confirm   q quit",
@@ -137,6 +143,7 @@ fn the_menu_wraps_around_and_every_entry_is_reachable() {
     for item in [
         TitleItem::NewGame,
         TitleItem::Seed,
+        TitleItem::Daily,
         TitleItem::Options,
         TitleItem::Quit,
     ] {
@@ -213,7 +220,7 @@ fn new_game_with_a_save_asks_first_and_keeps_the_save_unless_told_otherwise() {
     let (folder, saved) = folder_with_a_save("title-confirm");
     let before = fs::read(folder.save_file().path()).unwrap();
     let mut app = launch(&folder, None).unwrap();
-    let asking = State::Confirm(Confirmation::new(None));
+    let asking = State::Confirm(Confirmation::new(NewRun::Random));
 
     keys(&mut app, &[KeyCode::Down, KeyCode::Enter]);
     assert_eq!(app.state(), asking);
@@ -389,7 +396,7 @@ fn a_typed_seed_with_a_save_asks_first() {
     keys(&mut app, &[KeyCode::Enter]);
     assert_eq!(
         app.state(),
-        State::Confirm(Confirmation::new(Some(Seed::new(42))))
+        State::Confirm(Confirmation::new(NewRun::Seed(Seed::new(42))))
     );
     keys(&mut app, &[KeyCode::Esc]);
     assert_eq!(
@@ -513,11 +520,12 @@ fn a_terminal_too_small_shows_the_resize_message_and_only_quits() {
 fn title_in(options: Options, detected: ColorSupport, label: &str) -> (App, Buffer) {
     let folder = ScratchFolder::new(label);
     folder.options_file().write(&options).unwrap();
-    let app = App::launch(
+    let app = App::launch_with_clock(
         detected,
         &command_line(None, false),
         &shipped_content(),
         folder.save_file(),
+        Box::new(ManualClock::new()),
     )
     .unwrap();
     let buffer = render(&app, 80, 24).backend().buffer().clone();
@@ -632,11 +640,12 @@ fn the_light_theme_paints_the_parchment_on_the_title() {
 #[test]
 fn every_title_step_keeps_the_terminal_colours_in_monochrome() {
     let (folder, _) = folder_with_a_save("title-monochrome");
-    let mut app = App::launch(
+    let mut app = App::launch_with_clock(
         ColorSupport::None,
         &command_line(None, false),
         &shipped_content(),
         folder.save_file(),
+        Box::new(ManualClock::new()),
     )
     .unwrap();
     let steps: [&[KeyCode]; 4] = [

@@ -7,7 +7,8 @@
 //! A save holds the state of a game and nothing of the content: monsters,
 //! items and sigils are named by their identifiers (`MonsterDef::id`,
 //! `ItemDef::id`, `SigilDef::id`), and loading takes the [`Content`] to find
-//! them in. Everything else is kept as it is: the seed and the depth, the
+//! them in. Everything else is kept as it is: the seed, the date of a daily
+//! run, the depth, the
 //! map with the cells seen and remembered, every actor with its energy and
 //! its memory of the player, the turn order, the items on the floor and in
 //! the inventory, the engraved glyphs, the grimoire, the counters of time,
@@ -31,7 +32,7 @@ mod slots;
 
 pub use error::{Reference, SaveError};
 pub(crate) use record::{
-    ActorKindRecord, ActorRecord, EngravingRecord, GameRecord, ItemRecord, MapRecord,
+    ActorKindRecord, ActorRecord, DailyRecord, EngravingRecord, GameRecord, ItemRecord, MapRecord,
 };
 pub(crate) use slots::{SlotKey, capture, rebuild};
 
@@ -50,8 +51,9 @@ use crate::game::Game;
 /// guessing.
 ///
 /// Version 2 (T25) moved the player's turn count into the run's statistics
-/// (`stats`), written last.
-pub const FORMAT_VERSION: u32 = 2;
+/// (`stats`), written last. Version 3 (T28) added the date of a daily run
+/// (`daily`), after the seed.
+pub const FORMAT_VERSION: u32 = 3;
 
 /// Depth of nesting from which the pretty printer writes a value on one
 /// line.

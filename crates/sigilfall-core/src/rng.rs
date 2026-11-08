@@ -1,6 +1,7 @@
 //! The run's seed and the random number streams derived from it.
 //!
-//! Exposes [`Seed`], [`Purpose`] and [`ParseSeedError`]. Each (seed, depth,
+//! Exposes [`Seed`], [`Purpose`], [`ParseSeedError`] and [`DailyDate`], the
+//! UTC date of a daily dungeon. Each (seed, depth,
 //! purpose) triple gets its own [`ChaCha8Rng`] stream, so a floor's layout
 //! never depends on what the player did on earlier floors, and fights never
 //! shift the dungeon. The derivation only uses fixed integer arithmetic and
@@ -8,8 +9,13 @@
 //! platform and every version of the game, which shared seeds, the daily
 //! seed and the tests rely on.
 //!
-//! This module never draws from the operating system: picking a seed when
-//! the player gives none is the binary's job.
+//! The daily seed ([`Seed::daily`]) is a pure function of a UTC date: every
+//! player who starts the dungeon of the same date gets the same seed, with
+//! no server involved.
+//!
+//! This module never draws from the operating system and never reads the
+//! clock: picking a seed when the player gives none, and knowing today's
+//! date, are the binary's job.
 
 use std::fmt;
 use std::str::FromStr;
@@ -31,6 +37,14 @@ const GROUP_DIGITS: usize = 4;
 /// Number of groups in a seed's written form: 4 groups of 4 hexadecimal
 /// digits hold the 64 bits of a seed.
 const GROUPS: usize = 4;
+
+/// Tag mixed into every daily seed: the bytes of the ASCII text
+/// `SIGILDAY`, read as a big-endian number.
+///
+/// It sets the daily seeds apart from the plain output of the mixing
+/// function on small numbers. Like [`Purpose::tag`], it is part of the seed
+/// format: changing it gives every date another dungeon.
+const DAILY_TAG: u64 = 0x5349_4749_4C44_4159;
 
 /// The seed of a run: every random choice of the game follows from it.
 ///
@@ -81,6 +95,22 @@ impl Seed {
             *word = mix(state).to_le_bytes();
         }
         key
+    }
+
+    /// Returns the seed of the daily dungeon of `date`, the same for every
+    /// player and on every platform.
+    ///
+    /// The date is packed into one number without overlap, the year in the
+    /// bits 16 and up, the month in the bits 8 to 15 and the day in the
+    /// bits 0 to 7 (2026-11-08 gives `0x07EA_0B08`). That number is combined
+    /// with a fixed tag (the ASCII bytes of `SIGILDAY`) by an exclusive or,
+    /// then passed through the SplitMix64 mixing function. Both steps are
+    /// bijections, so two different dates always give two different seeds,
+    /// and the mixing spreads neighbouring dates over the whole range of
+    /// seeds. Only fixed integer arithmetic is used: the value never
+    /// depends on the platform.
+    pub const fn daily(date: DailyDate) -> Self {
+        Self(mix(date.packed() ^ DAILY_TAG))
     }
 }
 
@@ -189,6 +219,96 @@ impl fmt::Display for ParseSeedError {
 }
 
 impl std::error::Error for ParseSeedError {}
+
+/// A calendar date in Coordinated Universal Time (UTC), which names a daily
+/// dungeon (see [`Seed::daily`]).
+///
+/// Always a real date of the proleptic Gregorian calendar between the years
+/// [`DailyDate::MIN_YEAR`] and [`DailyDate::MAX_YEAR`]: 29 February only in
+/// leap years. Written as `2026-11-08` (see the [`fmt::Display`]
+/// implementation). Dates compare in calendar order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DailyDate {
+    /// The year, from [`DailyDate::MIN_YEAR`] to [`DailyDate::MAX_YEAR`].
+    year: u16,
+    /// The month, from 1 (January) to 12 (December).
+    month: u8,
+    /// The day of the month, from 1 to the length of the month.
+    day: u8,
+}
+
+impl DailyDate {
+    /// First year a date may have.
+    pub const MIN_YEAR: u16 = 1;
+
+    /// Last year a date may have: four digits, so the written form always
+    /// takes 10 characters.
+    pub const MAX_YEAR: u16 = 9999;
+
+    /// Returns the date `year`-`month`-`day`, or `None` if it does not
+    /// exist: a year outside [`DailyDate::MIN_YEAR`] to
+    /// [`DailyDate::MAX_YEAR`], a month outside 1 to 12, or a day outside
+    /// the month (such as 31 April, or 29 February of a common year).
+    pub const fn new(year: u16, month: u8, day: u8) -> Option<Self> {
+        if year < Self::MIN_YEAR || year > Self::MAX_YEAR || month < 1 || month > 12 {
+            return None;
+        }
+        if day < 1 || day > days_in_month(year, month) {
+            return None;
+        }
+        Some(Self { year, month, day })
+    }
+
+    /// Returns the year.
+    pub const fn year(self) -> u16 {
+        self.year
+    }
+
+    /// Returns the month, from 1 (January) to 12 (December).
+    pub const fn month(self) -> u8 {
+        self.month
+    }
+
+    /// Returns the day of the month, from 1.
+    pub const fn day(self) -> u8 {
+        self.day
+    }
+
+    /// Packs the date into one number, year, month and day in separate
+    /// bits (see [`Seed::daily`]): two dates give the same number only if
+    /// they are equal.
+    const fn packed(self) -> u64 {
+        // `u64::from` cannot be called in a const function; these widenings
+        // never lose a bit.
+        ((self.year as u64) << 16) | ((self.month as u64) << 8) | self.day as u64
+    }
+}
+
+impl fmt::Display for DailyDate {
+    /// Writes the date in the ISO 8601 form, year first, such as
+    /// `2026-11-08`.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{:04}-{:02}-{:02}",
+            self.year, self.month, self.day
+        )
+    }
+}
+
+/// Returns the number of days of `month` (1 to 12) in `year`: February has
+/// 29 days in the leap years of the Gregorian calendar (divisible by 4, but
+/// not by 100 unless by 400), 28 otherwise.
+const fn days_in_month(year: u16, month: u8) -> u8 {
+    match month {
+        2 if year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400)) => {
+            29
+        }
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -378,6 +498,133 @@ mod tests {
         ] {
             assert_eq!(text.parse::<Seed>(), Err(ParseSeedError), "{text:?}");
         }
+    }
+
+    /// Every date from `first` on, `count` days in a row, in calendar
+    /// order.
+    fn consecutive_dates(first: DailyDate, count: usize) -> Vec<DailyDate> {
+        std::iter::successors(Some(first), |date| next_day(*date))
+            .take(count)
+            .collect()
+    }
+
+    /// The day after `date`, or `None` after 9999-12-31.
+    fn next_day(date: DailyDate) -> Option<DailyDate> {
+        let (year, month, day) = (date.year(), date.month(), date.day());
+        DailyDate::new(year, month, day + 1)
+            .or_else(|| DailyDate::new(year, month + 1, 1))
+            .or_else(|| DailyDate::new(year + 1, 1, 1))
+    }
+
+    /// The date `year`-`month`-`day`, which the test knows to exist.
+    fn date(year: u16, month: u8, day: u8) -> DailyDate {
+        DailyDate::new(year, month, day).expect("a real date")
+    }
+
+    #[test]
+    fn the_same_date_gives_the_same_daily_seed() {
+        for (year, month, day) in [(2026, 11, 8), (2000, 2, 29), (1970, 1, 1)] {
+            assert_eq!(
+                Seed::daily(date(year, month, day)),
+                Seed::daily(date(year, month, day)),
+            );
+        }
+    }
+
+    #[test]
+    fn ten_years_of_dates_give_ten_years_of_different_daily_seeds() {
+        let dates = consecutive_dates(date(2026, 1, 1), 3652);
+        assert_eq!(dates.last(), Some(&date(2035, 12, 31)), "10 years");
+
+        let mut seeds: Vec<u64> = dates.iter().map(|&d| Seed::daily(d).value()).collect();
+        seeds.sort_unstable();
+        seeds.dedup();
+
+        assert_eq!(seeds.len(), dates.len(), "two dates share a daily seed");
+    }
+
+    #[test]
+    fn neighbouring_dates_give_unrelated_daily_seeds() {
+        // The mixing spreads one day of difference over the whole seed:
+        // about half the 64 bits differ, never only a few.
+        for pair in consecutive_dates(date(2026, 1, 1), 400).windows(2) {
+            let flipped =
+                (Seed::daily(pair[0]).value() ^ Seed::daily(pair[1]).value()).count_ones();
+            assert!((12..=52).contains(&flipped), "{pair:?}: {flipped} bits");
+        }
+    }
+
+    #[test]
+    fn daily_seeds_are_frozen() {
+        // These values pin the date packing, the tag and the mixing. If this
+        // test fails, every player now gets another daily dungeon than the
+        // one shared for that date: change the derivation only on purpose.
+        assert_eq!(
+            Seed::daily(date(2026, 11, 8)),
+            Seed::new(0x4A8B_CAEC_21D9_3697)
+        );
+        assert_eq!(
+            Seed::daily(date(2000, 2, 29)),
+            Seed::new(0x29B9_A9C5_780A_F19E)
+        );
+        assert_eq!(
+            Seed::daily(date(2035, 12, 31)),
+            Seed::new(0xBBE6_0F7F_D840_72B3)
+        );
+    }
+
+    #[test]
+    fn a_date_is_packed_year_month_day_without_overlap() {
+        assert_eq!(date(2026, 11, 8).packed(), 0x07EA_0B08);
+        assert_eq!(date(9999, 12, 31).packed(), 0x270F_0C1F);
+        assert_eq!(
+            Seed::daily(date(2026, 11, 8)).value(),
+            mix(0x07EA_0B08 ^ DAILY_TAG)
+        );
+        assert_eq!(DAILY_TAG.to_be_bytes(), *b"SIGILDAY");
+    }
+
+    #[test]
+    fn only_real_dates_exist() {
+        assert!(DailyDate::new(2024, 2, 29).is_some(), "leap year");
+        assert!(DailyDate::new(2000, 2, 29).is_some(), "divisible by 400");
+        assert!(DailyDate::new(2026, 2, 29).is_none(), "common year");
+        assert!(DailyDate::new(2100, 2, 29).is_none(), "divisible by 100");
+        assert!(DailyDate::new(2026, 4, 30).is_some());
+        assert!(DailyDate::new(2026, 4, 31).is_none());
+        assert!(DailyDate::new(2026, 12, 31).is_some());
+        for (year, month, day) in [
+            (2026, 0, 1),
+            (2026, 13, 1),
+            (2026, 1, 0),
+            (2026, 1, 32),
+            (0, 1, 1),
+            (10_000, 1, 1),
+        ] {
+            assert!(
+                DailyDate::new(year, month, day).is_none(),
+                "{year}-{month}-{day}"
+            );
+        }
+        assert_eq!(
+            consecutive_dates(date(2024, 1, 1), 367).last(),
+            Some(&date(2025, 1, 1)),
+            "a leap year has 366 days"
+        );
+        assert_eq!(next_day(date(9999, 12, 31)), None);
+    }
+
+    #[test]
+    fn dates_are_written_year_first_with_padded_fields() {
+        assert_eq!(date(2026, 11, 8).to_string(), "2026-11-08");
+        assert_eq!(date(1, 1, 1).to_string(), "0001-01-01");
+        assert_eq!(date(9999, 12, 31).to_string(), "9999-12-31");
+    }
+
+    #[test]
+    fn dates_compare_in_calendar_order() {
+        let dates = consecutive_dates(date(2023, 12, 25), 800);
+        assert!(dates.windows(2).all(|pair| pair[0] < pair[1]));
     }
 
     #[test]

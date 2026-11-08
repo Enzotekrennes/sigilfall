@@ -1,5 +1,5 @@
 //! The main game screen: status line with the depth, the turn and the run's
-//! seed, map
+//! seed (or the date of a daily run), map
 //! with the monsters in view and the player, side panel, message log, key
 //! help.
 //!
@@ -30,7 +30,6 @@ use sigilfall_core::game::{Game, VisibleItem, VisibleMonster};
 use sigilfall_core::generation::Engraving;
 use sigilfall_core::geometry::Position;
 use sigilfall_core::map::Tile;
-use sigilfall_core::rng::Seed;
 
 use super::camera::Camera;
 use super::{Overlay, hud, inventory, log, sigil};
@@ -127,7 +126,7 @@ pub fn render(
         width: layout.status.width.saturating_sub(STATUS_MARGIN),
         ..layout.status
     };
-    frame.render_widget(seed_label(game.seed(), theme), seed_area);
+    frame.render_widget(run_label(game, theme), seed_area);
     render_map(frame.buffer_mut(), layout.map, game, theme);
     hud::render(frame.buffer_mut(), layout.side_panel, game, content, theme);
     log::render(
@@ -174,19 +173,24 @@ fn status_line(game: &Game, theme: &Theme) -> Line<'static> {
     ])
 }
 
-/// Builds the seed shown at the right end of the status line, such as
-/// "Seed 7F3A-91C2-0B5E-D4A8": label in the muted style, seed in the title
-/// style, as `docs/design.md` asks, right-aligned in the area it is drawn in.
+/// Builds what names the run at the right end of the status line: the
+/// seed, such as "Seed 7F3A-91C2-0B5E-D4A8", or for a daily run its date,
+/// such as "Daily 2026-11-08". Label in the muted style, value in the title
+/// style, as `docs/design.md` asks, right-aligned in the area it is drawn
+/// in.
 ///
 /// The seed is written in its shareable form (see `Seed`'s `Display`), which
-/// `--seed` accepts back to replay the run.
-fn seed_label(seed: Seed, theme: &Theme) -> Line<'static> {
+/// `--seed` accepts back to replay the run. A daily run shows its date
+/// instead, which is what players compare; its seed stays on the death
+/// summary.
+fn run_label(game: &Game, theme: &Theme) -> Line<'static> {
+    let (label, value) = match game.daily_date() {
+        Some(date) => (messages::STATUS_DAILY_LABEL, date.to_string()),
+        None => (messages::STATUS_SEED_LABEL, game.seed().to_string()),
+    };
     Line::from(vec![
-        Span::styled(
-            format!("{} ", messages::STATUS_SEED_LABEL),
-            theme.text_muted,
-        ),
-        Span::styled(seed.to_string(), theme.text_title),
+        Span::styled(format!("{label} "), theme.text_muted),
+        Span::styled(value, theme.text_title),
     ])
     .right_aligned()
 }
@@ -438,6 +442,7 @@ mod tests {
     use sigilfall_core::generation::{FIRST_DEPTH, generate};
     use sigilfall_core::geometry::Direction;
     use sigilfall_core::map::FIXED_ROOM_PILLAR;
+    use sigilfall_core::rng::Seed;
 
     use super::*;
     use crate::theme::{ColorMode, GlyphSet};

@@ -1,8 +1,9 @@
 //! Command-line tests of the real `sigilfall` executable.
 //!
 //! Only invocations that end before the game takes over the terminal are
-//! run here (invalid arguments, `--help`, `--version`, a redirected output),
-//! so the tests need no terminal and leave none in a changed state.
+//! run here (invalid or conflicting arguments, `--help`, `--version`, a
+//! redirected output), so the tests need no terminal and leave none in a
+//! changed state.
 
 use std::io::Read as _;
 use std::process::{Command, Output, Stdio};
@@ -40,12 +41,26 @@ fn an_invalid_seed_fails_with_the_expected_format() {
 }
 
 #[test]
-fn help_lists_the_seed_and_ascii_options() {
+fn daily_with_a_seed_fails_before_the_game_starts() {
+    let output = sigilfall(&["--daily", "--seed", "42"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert_eq!(output.status.code(), Some(2), "{stderr}");
+    assert!(output.stdout.is_empty(), "nothing drawn on the terminal");
+    assert!(
+        stderr.contains("the argument '--daily' cannot be used with '--seed <SEED>'"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn help_lists_the_seed_daily_and_ascii_options() {
     let output = sigilfall(&["--help"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(output.status.success(), "{stdout}");
     assert!(stdout.contains("--seed <SEED>"), "{stdout}");
+    assert!(stdout.contains("--daily"), "{stdout}");
     assert!(stdout.contains("--ascii"), "{stdout}");
 }
 

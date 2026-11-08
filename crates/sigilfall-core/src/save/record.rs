@@ -1,8 +1,8 @@
 //! The records a save is made of, as written in RON.
 //!
 //! Exposes to the crate [`GameRecord`], the whole save, and the records of
-//! its parts: [`MapRecord`], [`ActorRecord`] and [`ActorKindRecord`],
-//! [`ItemRecord`] and [`EngravingRecord`]. A record holds plain values only:
+//! its parts: [`DailyRecord`], [`MapRecord`], [`ActorRecord`] and
+//! [`ActorKindRecord`], [`ItemRecord`] and [`EngravingRecord`]. A record holds plain values only:
 //! definitions are named by identifier and actors and items by their saved
 //! keys (`SlotKey`), so a record can be read without the content. Turning a
 //! game into records and back, with every check, is done by the `game`
@@ -51,6 +51,8 @@ pub(crate) struct GameRecord {
     pub(crate) format_version: u32,
     /// Value of the run's seed (`Seed::value`).
     pub(crate) seed: u64,
+    /// The date of a daily run (`Game::daily_date`), or `None`.
+    pub(crate) daily: Option<DailyRecord>,
     /// Number of the current floor.
     pub(crate) depth: u32,
     /// Whether the floors below are generated with the content (a game
@@ -87,6 +89,20 @@ pub(crate) struct GameRecord {
     /// What the player did so far, its turns included; written last, after
     /// the state the game plays from.
     pub(crate) stats: Stats,
+}
+
+/// The date of a daily run as a save writes it, such as
+/// `(year: 2026, month: 11, day: 8)`; read back through `DailyDate::new`,
+/// which refuses a date that does not exist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct DailyRecord {
+    /// The year.
+    pub(crate) year: u16,
+    /// The month, 1 to 12.
+    pub(crate) month: u8,
+    /// The day of the month, from 1.
+    pub(crate) day: u8,
 }
 
 /// A floor as a save writes it: one string per row, top row first, for the

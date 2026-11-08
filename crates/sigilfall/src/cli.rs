@@ -4,7 +4,8 @@
 //! generates `--help` and `--version`. An invalid value, such as
 //! `--seed abc` or `--seed -1`, is reported by clap with the accepted forms of the value
 //! and ends the process with a non-zero exit code, before the terminal is
-//! touched.
+//! touched. So is `--daily` given with `--seed`: the daily dungeon has its
+//! own seed, so the two cannot both choose the run.
 
 use clap::Parser;
 use sigilfall_core::rng::Seed;
@@ -24,6 +25,13 @@ pub struct Cli {
     // being reported as an unknown option.
     #[arg(long, value_name = "SEED", allow_negative_numbers = true)]
     pub seed: Option<Seed>,
+
+    /// Play the daily dungeon: the same for every player on the same UTC
+    /// date, and a new one each day at midnight UTC. The game starts at
+    /// once, without the title screen. Cannot be given with --seed, and
+    /// refused while a game is saved, as --seed is.
+    #[arg(long, conflicts_with = "seed")]
+    pub daily: bool,
 
     /// Draw with plain ASCII characters instead of Unicode glyphs, for fonts
     /// that lack them or terminals that draw them on two cells. Applies to
@@ -63,7 +71,48 @@ mod tests {
         let cli = parse(&[]).unwrap();
 
         assert_eq!(cli.seed, None);
+        assert!(!cli.daily);
         assert!(!cli.ascii);
+    }
+
+    #[test]
+    fn daily_is_read_alone_or_with_ascii() {
+        let cli = parse(&["--daily"]).unwrap();
+        assert!(cli.daily);
+        assert_eq!(cli.seed, None);
+
+        let expected = Cli {
+            seed: None,
+            daily: true,
+            ascii: true,
+        };
+        assert_eq!(parse(&["--daily", "--ascii"]).unwrap(), expected);
+        assert_eq!(parse(&["--ascii", "--daily"]).unwrap(), expected);
+    }
+
+    #[test]
+    fn daily_and_seed_are_refused_together_whatever_their_order() {
+        for arguments in [
+            &["--daily", "--seed", "42"][..],
+            &["--seed", "42", "--daily"],
+            &["--seed=7F3A-91C2-0B5E-D4A8", "--ascii", "--daily"],
+        ] {
+            let error = parse(arguments).unwrap_err();
+            let message = error.to_string();
+
+            assert_eq!(error.kind(), ErrorKind::ArgumentConflict, "{message}");
+            assert_ne!(error.exit_code(), 0, "{message}");
+            assert!(message.contains("--daily"), "{message}");
+            assert!(message.contains("--seed"), "{message}");
+            assert!(message.contains("cannot be used with"), "{message}");
+        }
+    }
+
+    #[test]
+    fn daily_takes_no_value() {
+        let error = parse(&["--daily=2026-11-08"]).unwrap_err();
+
+        assert_ne!(error.exit_code(), 0, "{error}");
     }
 
     #[test]
@@ -137,12 +186,14 @@ mod tests {
 
         assert!(cli.ascii);
         assert_eq!(cli.seed, None);
+        assert!(!cli.daily);
     }
 
     #[test]
     fn options_combine_in_any_order() {
         let expected = Cli {
             seed: Some(Seed::new(7)),
+            daily: false,
             ascii: true,
         };
 

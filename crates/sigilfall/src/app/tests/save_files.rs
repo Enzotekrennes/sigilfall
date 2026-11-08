@@ -40,17 +40,22 @@ pub(super) fn dark() -> Theme {
 
 /// The command line `sigilfall`, with `--seed` if `seed` is given.
 const fn command_line(seed: Option<Seed>) -> Cli {
-    Cli { seed, ascii: false }
+    Cli {
+        seed,
+        daily: false,
+        ascii: false,
+    }
 }
 
 /// Launches the application as `main` does, on the save file of `folder`,
 /// on a 24-bit terminal: the default options give the dark theme.
 pub(super) fn launch(folder: &ScratchFolder, seed: Option<Seed>) -> anyhow::Result<App> {
-    App::launch(
+    App::launch_with_clock(
         ColorSupport::TrueColor,
         &command_line(seed),
         &shipped_content(),
         folder.save_file(),
+        Box::new(ManualClock::new()),
     )
 }
 
@@ -440,11 +445,12 @@ fn a_saved_finished_game_is_deleted_and_a_new_game_starts() {
     wait_for_death(&mut dead);
     fs::write(folder.save_file().path(), state_of(dead.game())).unwrap();
 
-    let app = App::launch(
+    let app = App::launch_with_clock(
         ColorSupport::TrueColor,
         &command_line(Some(OTHER_SEED)),
         &content,
         folder.save_file(),
+        Box::new(ManualClock::new()),
     )
     .unwrap();
 

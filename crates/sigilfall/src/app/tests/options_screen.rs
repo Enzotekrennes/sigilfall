@@ -18,21 +18,26 @@ use crate::ui::title::{TitleItem, TitleMenu};
 /// Launches the application as `main` does on `folder`, with `--ascii` if
 /// `ascii`, on a terminal `detected` as such.
 fn launch(folder: &ScratchFolder, detected: ColorSupport, ascii: bool) -> App {
-    App::launch(
+    App::launch_with_clock(
         detected,
-        &Cli { seed: None, ascii },
+        &Cli {
+            seed: None,
+            daily: false,
+            ascii,
+        },
         &shipped_content(),
         folder.save_file(),
+        Box::new(ManualClock::new()),
     )
     .expect("the launch succeeds")
 }
 
 /// Launches the application on `folder` on a 24-bit terminal and opens the
-/// options screen from the title menu (no save: "Options" is the third
-/// entry).
+/// options screen from the title menu ("Options" is the entry above the
+/// last, "Quit").
 fn open_options(folder: &ScratchFolder) -> App {
     let mut app = launch(folder, ColorSupport::TrueColor, false);
-    press_all(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Enter]);
+    press_all(&mut app, &[KeyCode::End, KeyCode::Up, KeyCode::Enter]);
     assert_eq!(app.state(), State::Options(OptionsMenu::open()));
     app
 }
@@ -190,7 +195,7 @@ fn values_cycle_both_ways_and_enter_on_back_returns_to_the_title() {
 fn ascii_on_the_command_line_wins_for_the_session_without_changing_the_option() {
     let folder = ScratchFolder::new("options-cli-ascii");
     let mut app = launch(&folder, ColorSupport::TrueColor, true);
-    press_all(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Enter]);
+    press_all(&mut app, &[KeyCode::End, KeyCode::Up, KeyCode::Enter]);
 
     let text = screen_text(&app);
     assert!(text.is_ascii(), "{text}");
@@ -222,14 +227,16 @@ fn the_options_also_apply_to_a_game_started_with_seed() {
     };
     folder.options_file().write(&ascii).unwrap();
 
-    let app = App::launch(
+    let app = App::launch_with_clock(
         ColorSupport::TrueColor,
         &Cli {
             seed: Some(SEED),
+            daily: false,
             ascii: false,
         },
         &shipped_content(),
         folder.save_file(),
+        Box::new(ManualClock::new()),
     )
     .unwrap();
 
@@ -297,8 +304,8 @@ fn changing_an_option_replaces_a_corrupt_file_and_clears_the_notice() {
     press_all(
         &mut app,
         &[
-            KeyCode::Down,
-            KeyCode::Down,
+            KeyCode::End,
+            KeyCode::Up,
             KeyCode::Enter,
             KeyCode::Right,
             KeyCode::Esc,
@@ -356,7 +363,7 @@ fn the_options_screen_reads_without_colour_in_every_mode() {
         let mut app = launch(&folder, detected, false);
         press_all(
             &mut app,
-            &[KeyCode::Down, KeyCode::Down, KeyCode::Enter, KeyCode::Down],
+            &[KeyCode::End, KeyCode::Up, KeyCode::Enter, KeyCode::Down],
         );
         let buffer = render(&app, 80, 24).backend().buffer().clone();
         let theme = app.theme().clone();

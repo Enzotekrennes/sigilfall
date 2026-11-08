@@ -696,13 +696,21 @@ fn every_unreadable_save_is_set_aside_with_a_message_and_a_new_game_starts() {
         ("truncated", good.as_bytes()[..good.len() / 2].to_vec()),
         (
             "version 1",
-            good.replacen("format_version: 2", "format_version: 1", 1)
-                .into_bytes(),
+            good.replacen(
+                &format!("format_version: {}", save::FORMAT_VERSION),
+                "format_version: 1",
+                1,
+            )
+            .into_bytes(),
         ),
         (
             "version 99",
-            good.replacen("format_version: 2", "format_version: 99", 1)
-                .into_bytes(),
+            good.replacen(
+                &format!("format_version: {}", save::FORMAT_VERSION),
+                "format_version: 99",
+                1,
+            )
+            .into_bytes(),
         ),
         (
             "unknown monster",
@@ -717,8 +725,11 @@ fn every_unreadable_save_is_set_aside_with_a_message_and_a_new_game_starts() {
             "crlf and a bom",
             format!(
                 "\u{feff}{}",
-                good.replace('\n', "\r\n")
-                    .replacen("format_version: 2", "format_version: 7", 1)
+                good.replace('\n', "\r\n").replacen(
+                    &format!("format_version: {}", save::FORMAT_VERSION),
+                    "format_version: 7",
+                    1
+                )
             )
             .into_bytes(),
         ),

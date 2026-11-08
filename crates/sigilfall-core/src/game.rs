@@ -2,7 +2,8 @@
 //!
 //! Exposes [`Game`], [`Status`], [`VisibleMonster`], [`VisibleItem`] and
 //! [`PLAYER_START`].
-//! The game owns the run's seed, the depth of the current floor, the world
+//! The game owns the run's seed (and the date of a daily run, see
+//! [`Game::daily`]), the depth of the current floor, the world
 //! (map, actors, items, glyphs and the player's inventory, in the `world`
 //! submodule), the scheduler and the gameplay random stream. A new game
 //! starts on the first generated floor of its seed, with its monsters,
@@ -71,7 +72,7 @@ use crate::generation::{self, Engraving, FIRST_DEPTH, Floor, ItemSpawn, MonsterS
 use crate::geometry::{Direction, Position};
 use crate::item::{Item, ItemId};
 use crate::map::Map;
-use crate::rng::{Purpose, Seed};
+use crate::rng::{DailyDate, Purpose, Seed};
 use crate::schedule::{ATTACK_COST, Scheduler, WAIT_COST, action_cost, spend_energy};
 use crate::sigil::{ESSENCE_REGEN_TICKS, Grimoire};
 use crate::stats::Stats;
@@ -94,6 +95,10 @@ pub const PLAYER_START: Position = Position::new(5, 5);
 pub struct Game {
     /// The seed every random choice of this run follows from.
     seed: Seed,
+    /// The date whose daily dungeon this run is, or `None` for a run of a
+    /// seed chosen or drawn at random. When set, `seed` is always
+    /// `Seed::daily` of it.
+    daily: Option<DailyDate>,
     /// Number of the current floor: [`FIRST_DEPTH`] at the start, one more
     /// for each staircase taken.
     depth: u32,
@@ -208,6 +213,19 @@ impl Game {
         game
     }
 
+    /// Starts the daily dungeon of `date`: [`Game::new`] on the seed
+    /// `Seed::daily(date)`, remembered as the daily run of that date
+    /// ([`Game::daily_date`]) so the screens and the save can tell it from
+    /// a run of a chosen seed.
+    ///
+    /// Every player who starts the daily dungeon of the same date gets the
+    /// same floors, monsters, glyphs and items.
+    pub fn daily(date: DailyDate, content: &Content) -> Self {
+        let mut game = Self::new(Seed::daily(date), content);
+        game.daily = Some(date);
+        game
+    }
+
     /// Starts a game of the run identified by `seed` on `floor`, with the
     /// player on its start cell, one monster per entry of `Floor::monsters`,
     /// created in that order with their starting energy, the glyphs of
@@ -258,6 +276,7 @@ impl Game {
 
         let mut game = Self {
             seed,
+            daily: None,
             depth: FIRST_DEPTH,
             content: None,
             world: World::new(map, actors, player),
@@ -457,6 +476,13 @@ impl Game {
     /// [`Game::in_fixed_room`].
     pub const fn seed(&self) -> Seed {
         self.seed
+    }
+
+    /// Returns the date whose daily dungeon this run is (a game started
+    /// with [`Game::daily`]), or `None` for a run of a chosen or random
+    /// seed. A saved daily run keeps its date.
+    pub const fn daily_date(&self) -> Option<DailyDate> {
+        self.daily
     }
 
     /// Returns the number of the floor the player is on: [`FIRST_DEPTH`] in
@@ -1484,7 +1510,32 @@ mod tests {
             game.submit(Action::Wait);
 
             assert_eq!(game.seed(), Seed::new(value));
+            assert_eq!(game.daily_date(), None, "not a daily run");
         }
+    }
+
+    #[test]
+    fn a_daily_game_is_the_game_of_its_daily_seed_and_keeps_its_date() {
+        let content = content();
+        let date = DailyDate::new(2026, 11, 8).expect("a real date");
+        let mut daily = Game::daily(date, &content);
+        let mut same_seed = Game::new(Seed::daily(date), &content);
+
+        assert_eq!(daily.seed(), Seed::daily(date));
+        assert_eq!(daily.daily_date(), Some(date));
+        assert_eq!(same_seed.daily_date(), None, "a typed seed is not daily");
+        assert_eq!(daily.map(), same_seed.map(), "same first floor");
+        for _ in 0..20 {
+            assert_eq!(daily.submit(Action::Wait), same_seed.submit(Action::Wait));
+        }
+        assert_eq!(daily.daily_date(), Some(date), "the date stays");
+
+        let next_day = DailyDate::new(2026, 11, 9).expect("a real date");
+        assert_ne!(
+            Game::daily(next_day, &content).map(),
+            daily.map(),
+            "another date, another dungeon"
+        );
     }
 
     #[test]

@@ -6,7 +6,8 @@
 //! the game, so a faulty save is refused with a [`SaveError`] instead of
 //! panicking or hanging later in play: definitions are looked up in the
 //! content, keys must name actors and items of the save, and each value must
-//! be one the rules could have produced (actors, items and glyphs on
+//! be one the rules could have produced (a daily run's seed being the one
+//! of its date, actors, items and glyphs on
 //! walkable cells of the map, one of each per cell, hit points and essence
 //! within their maximums, counters within bounds, the turn order holding
 //! every actor once, statistics naming monsters of the content…).
@@ -28,10 +29,10 @@ use crate::generation::{Engraving, FIRST_DEPTH};
 use crate::geometry::Position;
 use crate::item::{INVENTORY_CAPACITY, Item, ItemId};
 use crate::map::Map;
-use crate::rng::Seed;
+use crate::rng::{DailyDate, Seed};
 use crate::save::{
-    ActorKindRecord, ActorRecord, EngravingRecord, FORMAT_VERSION, GameRecord, ItemRecord,
-    MapRecord, Reference, SaveError, SlotKey, capture, rebuild,
+    ActorKindRecord, ActorRecord, DailyRecord, EngravingRecord, FORMAT_VERSION, GameRecord,
+    ItemRecord, MapRecord, Reference, SaveError, SlotKey, capture, rebuild,
 };
 use crate::schedule::{ACTION_THRESHOLD, Scheduler};
 use crate::sigil::{Grimoire, MAX_ESSENCE, MAX_STEADY_CASTS};
@@ -62,6 +63,11 @@ impl Game {
         GameRecord {
             format_version: FORMAT_VERSION,
             seed: self.seed.value(),
+            daily: self.daily.map(|date| DailyRecord {
+                year: date.year(),
+                month: date.month(),
+                day: date.day(),
+            }),
             depth: self.depth,
             floors_from_content: self.content.is_some(),
             status: self.status.clone(),
@@ -105,6 +111,10 @@ impl Game {
     /// the game could not run with (see the module documentation).
     pub(crate) fn from_record(record: GameRecord, content: &Content) -> Result<Self, SaveError> {
         check_counters(&record)?;
+        let daily = record
+            .daily
+            .map(|daily| daily_date_of(daily, record.seed))
+            .transpose()?;
         check_stats(&record.stats, record.depth, content)?;
         let map = record.map.to_map()?;
         let grimoire = grimoire_of(&record.grimoire, content)?;
@@ -155,6 +165,7 @@ impl Game {
 
         Ok(Self {
             seed: Seed::new(record.seed),
+            daily,
             depth: record.depth,
             content: record.floors_from_content.then(|| content.clone()),
             world: World::restored(
@@ -174,6 +185,31 @@ impl Game {
             essence_since: record.essence_since,
         })
     }
+}
+
+/// Reads the date of a daily run back from `daily`, checking that `seed`
+/// is the daily seed of that date.
+///
+/// # Errors
+///
+/// Returns [`SaveError::Inconsistent`] if the date does not exist (see
+/// `DailyDate::new`), or if `seed` is not `Seed::daily` of it: the save
+/// would otherwise call a run of another dungeon the daily run of that date.
+fn daily_date_of(daily: DailyRecord, seed: u64) -> Result<DailyDate, SaveError> {
+    let DailyRecord { year, month, day } = daily;
+    let date = DailyDate::new(year, month, day).ok_or_else(|| {
+        inconsistent(format!(
+            "the daily date {year}-{month}-{day} does not exist"
+        ))
+    })?;
+    let expected = Seed::daily(date);
+    if expected.value() != seed {
+        return Err(inconsistent(format!(
+            "the daily run of {date} has the seed {expected}, but the save gives {}",
+            Seed::new(seed)
+        )));
+    }
+    Ok(date)
 }
 
 /// Returns the saved form of each key of `ids`, in order.

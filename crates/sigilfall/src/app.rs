@@ -9,14 +9,15 @@
 //! to show the game.
 //!
 //! The application started by `main` ([`App::launch`]) opens on the title
-//! screen (`ui::title`), unless `--seed` asks for a game at once. The title
-//! menu lists "Continue" while a game is saved, "New game", "Seed", where
-//! the player types the seed of the new game, "Options" and "Quit". A new
-//! game that would replace a saved one asks first ([`State::Confirm`]), and
-//! deletes the save once the player agrees. The options screen
-//! ([`State::Options`], `ui::options`) changes the glyphs, the colours and
-//! the theme: each change is applied to the screen at once and written to
-//! the options file (`persist::OptionsFile`); `--ascii` keeps ASCII glyphs
+//! screen (`ui::title`), unless `--seed` or `--daily` asks for a game at
+//! once. The title menu lists "Continue" while a game is saved, "New game",
+//! "Seed", where the player types the seed of the new game, "Daily", the
+//! daily dungeon of today's UTC date (`Game::daily`), "Options" and "Quit".
+//! A new game that would replace a saved one asks first
+//! ([`State::Confirm`]), and deletes the save once the player agrees. The
+//! options screen ([`State::Options`], `ui::options`) changes the glyphs,
+//! the colours and the theme: each change is applied to the screen at
+//! once and written to the options file (`persist::OptionsFile`); `--ascii` keeps ASCII glyphs
 //! for the session whatever the option says.
 //!
 //! The application keeps the message log of the game in progress: the
@@ -26,7 +27,8 @@
 //! For [`END_SCREEN_GRACE`] after the death, every key but Ctrl+C is
 //! thrown away, so a key the player was already pressing (the Enter of a
 //! deadly cast, a held movement key) never closes a summary nobody has
-//! seen. The time is read from a [`Clock`], which tests replace.
+//! seen. The time, and today's UTC date, are read from a [`Clock`], which
+//! tests replace.
 //!
 //! The quit keys are `q`, on the game, end and title screens, and Ctrl+C
 //! everywhere; quitting a game saves it. Escape never quits: it closes the
@@ -75,6 +77,7 @@ use sigilfall_core::event::Event as GameEvent;
 use sigilfall_core::game::Game;
 use sigilfall_core::geometry::Direction;
 use sigilfall_core::item::ItemId;
+#[cfg(test)]
 use sigilfall_core::rng::Seed;
 use sigilfall_core::sigil::{CastQuality, ESSENCE_COST, Recognition, Trace, recognize};
 
@@ -95,7 +98,7 @@ use crate::theme::Options;
 use crate::theme::{ColorSupport, Settings, Theme};
 use crate::ui::inventory::InventoryScreen;
 use crate::ui::options::{self as options_screen, OptionRow, OptionsMenu};
-use crate::ui::title::{Confirmation, SeedEntry, TitleItem, TitleMenu, TitleStep};
+use crate::ui::title::{Confirmation, NewRun, SeedEntry, TitleItem, TitleMenu, TitleStep};
 use crate::ui::{self, MenuScreen, Overlay};
 
 /// How long the end screen ignores every key but Ctrl+C once the player
@@ -199,8 +202,8 @@ pub struct App {
     /// Why the options could not be written, shown on the options screen
     /// until they are written again.
     options_not_saved: Option<String>,
-    /// Where the time of the end screen's grace period is read: the
-    /// system's clock, or a test's.
+    /// Where the time of the end screen's grace period and today's date
+    /// for the daily dungeon are read: the system's clock, or a test's.
     clock: Box<dyn Clock>,
     /// When the application reached [`State::GameOver`], read from
     /// `clock`; `None` while no game is over.
@@ -236,8 +239,10 @@ impl App {
     /// refused, so a seed typed out of habit never wipes a run (decision of
     /// T24, kept by T26: the refusal comes before the terminal changes,
     /// works the same from a script, and says how to continue or abandon
-    /// the game on the title screen). A save set aside or finished is
-    /// handled as above, the options notice going to the log.
+    /// the game on the title screen). `--daily` follows the same rules with
+    /// the daily dungeon of today's UTC date, read from the system's clock.
+    /// A save set aside or finished is handled as above, the options notice
+    /// going to the log.
     ///
     /// # Errors
     ///
@@ -251,6 +256,23 @@ impl App {
         content: &Content,
         save: SaveFile,
     ) -> anyhow::Result<Self> {
+        Self::launch_with_clock(detected, cli, content, save, Box::new(SystemClock))
+    }
+
+    /// [`App::launch`], reading the time and today's UTC date from `clock`
+    /// instead of the system's clock, so tests choose the date of the daily
+    /// dungeon and the one the title screen shows.
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`App::launch`].
+    pub fn launch_with_clock(
+        detected: ColorSupport,
+        cli: &Cli,
+        content: &Content,
+        save: SaveFile,
+        clock: Box<dyn Clock>,
+    ) -> anyhow::Result<Self> {
         let options_file = OptionsFile::beside(&save);
         let loaded_options = options_file.load();
         let settings = Settings {
@@ -258,24 +280,31 @@ impl App {
             detected,
             forced_ascii: cli.ascii,
         };
-        let mut app = Self::empty(
-            settings.theme(),
-            settings,
-            content.clone(),
-            Box::new(SystemClock),
-        );
+        let mut app = Self::empty(settings.theme(), settings, content.clone(), clock);
+        let requested = if cli.daily {
+            Some(NewRun::Daily(app.clock.today()))
+        } else {
+            cli.seed.map(NewRun::Seed)
+        };
         if let LoadedOptions::Unreadable { reason } = loaded_options {
             app.options_unreadable = Some(messages::options_unreadable(&reason));
         }
         match save.load(content)? {
             Loaded::Game(game) if game.is_over() => save.delete()?,
             Loaded::Game(game) => {
-                if let Some(seed) = cli.seed {
+                if let Some(run) = requested {
+                    let (option, wanted) = match run {
+                        NewRun::Daily(date) => ("--daily", format!("the daily dungeon of {date}")),
+                        NewRun::Seed(seed) => ("--seed", format!("the seed {seed}")),
+                        // The command line never asks for a random seed;
+                        // kept so the match stays whole.
+                        NewRun::Random => ("an option", "a new game".to_owned()),
+                    };
                     anyhow::bail!(
                         "a game in progress is saved in {}: start the game without \
-                         --seed to continue it, or to abandon it with New game or \
-                         Seed on the title screen; you can also delete that file \
-                         to abandon it and play the seed {seed}",
+                         {option} to continue it, or to abandon it with New game, \
+                         Seed or Daily on the title screen; you can also delete \
+                         that file to abandon it and play {wanted}",
                         save.path().display()
                     );
                 }
@@ -291,12 +320,12 @@ impl App {
         }
         app.save = Some(save);
         app.options_file = Some(options_file);
-        match cli.seed {
-            Some(seed) => {
+        match requested {
+            Some(run) => {
                 if let Some(problem) = app.options_unreadable.clone() {
                     app.opening.insert(0, Message::new(Tone::Danger, problem));
                 }
-                app.start_new_game(seed);
+                app.start_new_game(run);
             }
             None => app.state = State::Title(TitleMenu::open()),
         }
@@ -410,12 +439,18 @@ impl App {
             .is_some_and(|ended_at| self.clock.now().duration_since(ended_at) < END_SCREEN_GRACE)
     }
 
-    /// Starts a new game of `seed`, its log opening with the messages
-    /// waiting in `opening`, then the welcome message.
-    fn start_new_game(&mut self, seed: Seed) {
+    /// Starts the new game `run`, its log opening with the messages
+    /// waiting in `opening`, then the welcome message: a game on a seed
+    /// drawn now (`cli::random_seed`), on the seed given, or the daily
+    /// dungeon of the date given (`Game::daily`).
+    fn start_new_game(&mut self, run: NewRun) {
         let mut opening = std::mem::take(&mut self.opening);
         opening.push(messages::welcome());
-        let game = Game::new(seed, &self.content);
+        let game = match run {
+            NewRun::Random => Game::new(cli::random_seed(), &self.content),
+            NewRun::Seed(seed) => Game::new(seed, &self.content),
+            NewRun::Daily(date) => Game::daily(date, &self.content),
+        };
         self.begin(game, opening);
     }
 
@@ -527,9 +562,10 @@ impl App {
     }
 
     /// Does what the title menu's entry `item` says: "Continue" resumes the
-    /// saved game; "New game" starts a game on a random seed, asking first
-    /// when a game is saved; "Seed" opens the seed entry; "Options" opens
-    /// the options screen; "Quit" quits.
+    /// saved game; "New game" starts a game on a random seed and "Daily"
+    /// the daily dungeon of today's UTC date (read from the clock now),
+    /// both asking first when a game is saved; "Seed" opens the seed entry;
+    /// "Options" opens the options screen; "Quit" quits.
     fn choose(&mut self, item: TitleItem) {
         match item {
             TitleItem::Continue => {
@@ -537,20 +573,21 @@ impl App {
                     self.begin(game, vec![messages::welcome_back()]);
                 }
             }
-            TitleItem::NewGame => self.ask_new_game(None),
+            TitleItem::NewGame => self.ask_new_game(NewRun::Random),
             TitleItem::Seed => self.state = State::SeedEntry(SeedEntry::open()),
+            TitleItem::Daily => self.ask_new_game(NewRun::Daily(self.clock.today())),
             TitleItem::Options => self.state = State::Options(OptionsMenu::open()),
             TitleItem::Quit => self.state = State::Quit,
         }
     }
 
-    /// Starts a new game on `seed` (`None` for a random one), or asks first
-    /// ([`State::Confirm`]) when a saved game would be abandoned.
-    fn ask_new_game(&mut self, seed: Option<Seed>) {
+    /// Starts the new game `run`, or asks first ([`State::Confirm`]) when
+    /// a saved game would be abandoned.
+    fn ask_new_game(&mut self, run: NewRun) {
         if self.saved.is_some() {
-            self.state = State::Confirm(Confirmation::new(seed));
+            self.state = State::Confirm(Confirmation::new(run));
         } else {
-            self.start_new_game(seed.unwrap_or_else(cli::random_seed));
+            self.start_new_game(run);
         }
     }
 
@@ -574,7 +611,7 @@ impl App {
                 return;
             }
             Some(SeedCommand::Submit) => match entry.submit() {
-                Ok(seed) => return self.ask_new_game(Some(seed)),
+                Ok(seed) => return self.ask_new_game(NewRun::Seed(seed)),
                 Err(refused) => refused,
             },
         };
@@ -626,7 +663,7 @@ impl App {
             return;
         }
         self.saved = None;
-        self.start_new_game(confirmation.seed().unwrap_or_else(cli::random_seed));
+        self.start_new_game(confirmation.run());
     }
 
     /// Shows the title menu with `item` chosen.
@@ -1061,7 +1098,8 @@ impl App {
     }
 
     /// Draws the title screen at `step`, with the saved game beside
-    /// "Continue" and the notices about the files.
+    /// "Continue", today's UTC date (read from the clock) beside "Daily",
+    /// and the notices about the files.
     fn render_title(&self, frame: &mut Frame, step: TitleStep<'_>) {
         let separator = self.theme.glyphs.separator;
         let saved = self
@@ -1076,6 +1114,7 @@ impl App {
         let screen = MenuScreen::Title {
             step,
             saved: saved.as_deref(),
+            today: self.clock.today(),
             notices: &notices,
         };
         ui::render_menu(frame, screen, &self.theme);
@@ -1131,6 +1170,7 @@ mod tests {
     use crate::theme::{ColorMode, GlyphSet};
     use crate::ui::camera::Camera;
 
+    mod daily_run;
     mod death_summary;
     mod demo_tape;
     mod inventory_screen;

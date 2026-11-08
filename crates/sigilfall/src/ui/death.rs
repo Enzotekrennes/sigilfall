@@ -1,14 +1,16 @@
 //! The death summary, shown once the player has died: how the run ended,
-//! what the player did, and the seed to replay it.
+//! what the player did, the seed to replay it, and a line to share.
 //!
 //! Exposes [`render`] and [`MAX_KILL_ROWS`]. The screen follows the
 //! "Récapitulatif de mort" mock-up of `docs/design.md`, from top to bottom:
 //! the title, an epitaph chosen from the seed, the cause of death with the
 //! depth and the turn, the counts of the run (deepest floor, turns,
 //! creatures slain by kind, glyphs learnt, sigils cast by quality, items
-//! used), the seed in a frame, the command that replays it, and the key
-//! help. Every count comes from `Game::stats`, which the game keeps from its
-//! events; this module only lays them out.
+//! used), the seed in a frame, the command that replays it, the line to
+//! share (`messages::share_line`: the daily date or the seed, then the
+//! depth, turns, kills and casts), and the key help. Every count comes from
+//! `Game::stats`, which the game keeps from its events; this module only
+//! lays them out.
 //!
 //! The summary is centred as a block, with the counts aligned on their
 //! dots, and fits an 80 × 24 screen; larger screens centre it with more
@@ -118,6 +120,13 @@ fn summary(game: &Game, content: &Content, theme: &Theme) -> Vec<Line<'static>> 
     lines.push(Line::styled(
         messages::replay_hint(game.seed()),
         theme.text_muted,
+    ));
+    // Right under the replay command, without a blank row, so the summary
+    // keeps a row of margin above and below on 80 × 24 with the longest
+    // list of kills; in the text style, as the line meant to be copied.
+    lines.push(Line::styled(
+        messages::share_line(game.daily_date(), game.seed(), game.stats()),
+        theme.text,
     ));
     lines
 }

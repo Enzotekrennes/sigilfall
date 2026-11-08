@@ -11,7 +11,8 @@ workflow (run it by hand or push a version tag), then committed by hand. -->
 
 Every stroke of a trace costs time, and the monsters act while you draw:
 a long sigil is a strong spell, but a slow one. Each run is generated from a
-seed you can share, so a friend can play the same dungeon.
+seed you can share, so a friend can play the same dungeon, and every day
+brings a daily dungeon, the same for every player on that UTC date.
 
 ## Install
 
@@ -48,13 +49,17 @@ sigilfall
 ```
 
 The title screen offers **Continue** (when a game is saved), **New game**,
-**Seed** (type the seed of the new game), **Options** and **Quit**.
+**Seed** (type the seed of the new game), **Daily** (the daily dungeon of
+today's UTC date, shown beside it), **Options** and **Quit**. A daily run
+shows its date on the status line instead of the seed, and keeps it when
+saved and resumed, even on a later day.
 
 ### Command line
 
 | Option | Effect |
 |---|---|
 | `--seed <SEED>` | Start a game of this seed at once, without the title screen. The seed is a number such as `42`, or the form the game shows, such as `7F3A-91C2-0B5E-D4A8`. Refused while a game is saved, so that game is never lost: continue it, or abandon it from the title screen, first. |
+| `--daily` | Start the daily dungeon at once, without the title screen: the same dungeon for every player on the same UTC date, a new one each day at midnight UTC. Cannot be combined with `--seed`. Refused while a game is saved, as `--seed` is. |
 | `--ascii` | Draw with plain ASCII characters instead of Unicode glyphs, for this session only, whatever the Glyphs option says. |
 | `--help`, `--version` | Print the help or the version. |
 
@@ -101,7 +106,10 @@ confirmation, `q` quits from the title. While typing a seed: Backspace
 erases, Enter starts, Escape goes back. On the options screen: Up and Down
 (or `k` and `j`) choose, Left and Right (or `h` and `l`), Enter or Space
 change the value, Escape goes back. After death, the summary shows the seed
-of the run; Enter goes back to the title, `q` quits. For one second after
+of the run and a line to copy and share, such as
+`Sigilfall daily 2026-11-08 - depth 4, turn 812, 23 slain, 9 sigils` (or
+`Sigilfall seed 7F3A-91C2-0B5E-D4A8 - …` for a run of a seed); Enter goes
+back to the title, `q` quits. For one second after
 the death only Ctrl+C works, so a key already on its way does not close the
 summary unseen.
 

@@ -34,6 +34,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget as _, Wrap};
 use sigilfall_core::content::Content;
 use sigilfall_core::game::Game;
+use sigilfall_core::rng::DailyDate;
 
 use self::inventory::InventoryScreen;
 use self::options::OptionsMenu;
@@ -54,6 +55,8 @@ pub enum MenuScreen<'state> {
         step: TitleStep<'state>,
         /// The saved game, as `messages::saved_run` describes it.
         saved: Option<&'state str>,
+        /// Today's UTC date, written beside "Daily".
+        today: DailyDate,
         /// Problems met at launch, such as an unreadable options file.
         notices: &'state [String],
     },
@@ -144,8 +147,9 @@ pub fn render_menu(frame: &mut Frame, screen: MenuScreen<'_>, theme: &Theme) {
         MenuScreen::Title {
             step,
             saved,
+            today,
             notices,
-        } => title::render(buffer, area, step, saved, notices, theme),
+        } => title::render(buffer, area, step, saved, today, notices, theme),
         MenuScreen::Options {
             menu,
             settings,

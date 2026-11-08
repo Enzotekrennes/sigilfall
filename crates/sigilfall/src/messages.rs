@@ -8,7 +8,7 @@
 //! [`Message`]s, the opening messages ([`welcome`], [`welcome_back`],
 //! [`save_set_aside`]), the save notice [`save_not_deleted`], the words of
 //! the death summary (its [`epitaph`], [`cause_of_death`], the labels of its
-//! counts and [`cast_breakdown`]), monster, sigil and item names
+//! counts, [`cast_breakdown`] and the [`share_line`]), monster, sigil and item names
 //! ([`monster_name`], [`sigil_name`], [`item_name`]), what a sigil or an
 //! item does in a few words ([`effect_summary`], [`item_summary`]), the time
 //! a cast takes ([`cast_time`]), why the game refused an item
@@ -36,10 +36,10 @@ use sigilfall_core::content::{
 use sigilfall_core::event::Event;
 use sigilfall_core::game::Game;
 use sigilfall_core::item::{INVENTORY_CAPACITY, ItemId, ItemRefusal};
-use sigilfall_core::rng::Seed;
+use sigilfall_core::rng::{DailyDate, Seed};
 use sigilfall_core::schedule::{MOVE_COST, STROKE_COST, cast_cost};
 use sigilfall_core::sigil::{CastQuality, Node};
-use sigilfall_core::stats::CastCounts;
+use sigilfall_core::stats::{CastCounts, Stats};
 
 use crate::message_log::{Message, Tone};
 use crate::theme::ColorSupport;
@@ -329,6 +329,10 @@ pub const TURN_LABEL: &str = "Turn";
 /// Label of the seed at the right end of the status line, before it.
 pub const STATUS_SEED_LABEL: &str = "Seed";
 
+/// Label of the date at the right end of the status line of a daily run,
+/// before it, in place of the seed: "Daily 2026-11-08".
+pub const STATUS_DAILY_LABEL: &str = "Daily";
+
 /// The message shown instead of any screen on a terminal smaller than
 /// `min_width` × `min_height`: what is needed and the `width` × `height`
 /// of now, `times` being the theme's dimension sign.
@@ -357,6 +361,10 @@ pub const NEW_GAME_ITEM: &str = "New game";
 
 /// Menu entry that starts a new game on a seed the player types.
 pub const SEED_ITEM: &str = "Seed";
+
+/// Menu entry that starts the daily dungeon of today's UTC date, shown
+/// beside it.
+pub const DAILY_ITEM: &str = "Daily";
 
 /// Menu entry that opens the options screen.
 pub const OPTIONS_ITEM: &str = "Options";
@@ -1055,6 +1063,34 @@ pub fn replay_hint(seed: Seed) -> String {
     format!("Replay this seed: {} --seed {seed}", env!("CARGO_BIN_NAME"))
 }
 
+/// Returns the line of the death summary a player copies to share the run:
+/// which dungeon it was, then how far it went, such as
+/// "Sigilfall daily 2026-11-08 - depth 4, turn 812, 23 slain, 9 sigils"
+/// for the daily run of `daily`, or
+/// "Sigilfall seed 7F3A-91C2-0B5E-D4A8 - depth 4, turn 812, 23 slain, 9 sigils"
+/// for a run of `seed` when `daily` is `None`.
+///
+/// The counts come from `stats`: the deepest floor reached, the turns
+/// played, the creatures slain and the sigils cast, whatever their
+/// quality. The line is plain ASCII whatever the glyph option, so it
+/// pastes intact anywhere and two players' lines compare as text; its
+/// longest realistic form (depth 10, five-digit turns, three-digit kills,
+/// two-digit casts, a seed) still fits 80 columns.
+pub fn share_line(daily: Option<DailyDate>, seed: Seed, stats: &Stats) -> String {
+    let run = match daily {
+        Some(date) => format!("daily {date}"),
+        None => format!("seed {seed}"),
+    };
+    let casts = stats.casts().total();
+    format!(
+        "Sigilfall {run} - depth {}, turn {}, {} slain, {casts} {}",
+        stats.deepest(),
+        stats.turns(),
+        stats.total_kills(),
+        if casts == 1 { "sigil" } else { "sigils" }
+    )
+}
+
 /// Returns the last line of a list of the side panel or the grimoire when
 /// `hidden` entries do not fit: "and 3 more".
 pub fn more_in_view(hidden: usize) -> String {
@@ -1337,8 +1373,9 @@ fn indefinite_article(name: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use sigilfall_core::action::Action;
+    use sigilfall_core::game::PLAYER_START;
     use sigilfall_core::geometry::{Direction, Position};
-    use sigilfall_core::sigil::Backlash;
+    use sigilfall_core::sigil::{Backlash, Trace};
 
     use super::*;
 
@@ -1554,6 +1591,62 @@ mod tests {
             replay_hint(Seed::new(0x7F3A_91C2_0B5E_D4A8)),
             "Replay this seed: sigilfall --seed 7F3A-91C2-0B5E-D4A8"
         );
+    }
+
+    #[test]
+    fn the_share_line_names_the_daily_date_or_the_seed_then_the_counts() {
+        let date = DailyDate::new(2026, 11, 8).expect("a real date");
+        let fresh = Stats::default();
+
+        assert_eq!(
+            share_line(Some(date), Seed::daily(date), &fresh),
+            "Sigilfall daily 2026-11-08 - depth 1, turn 0, 0 slain, 0 sigils"
+        );
+        assert_eq!(
+            share_line(None, Seed::new(0x7F3A_91C2_0B5E_D4A8), &fresh),
+            "Sigilfall seed 7F3A-91C2-0B5E-D4A8 - depth 1, turn 0, 0 slain, 0 sigils"
+        );
+    }
+
+    #[test]
+    fn the_share_line_reads_every_count_from_the_stats() {
+        let content = content();
+        let mut game = Game::in_fixed_room(SEED);
+        let rat = content.monster("ossuary_rat").expect("a shipped monster");
+        let east = PLAYER_START.step(Direction::East);
+        game.spawn_monster(east, rat);
+        while game.stats().total_kills() == 0 {
+            game.submit(Action::Move(Direction::East));
+        }
+        game.submit(Action::Cast {
+            trace: Trace::from_pattern(&[1, 2, 3, 6, 9, 8, 7, 4]).expect("a trace"),
+            direction: None,
+        });
+        let stats = game.stats();
+        assert_eq!(stats.casts().total(), 1, "one cast, fizzled");
+
+        assert_eq!(
+            share_line(None, SEED, stats),
+            format!(
+                "Sigilfall seed {SEED} - depth 1, turn {}, 1 slain, 1 sigil",
+                stats.turns()
+            )
+        );
+        assert!(stats.turns() > 1);
+    }
+
+    #[test]
+    fn the_longest_share_line_fits_80_columns_in_plain_ascii() {
+        // Depth 10, the deepest floor, a seed (longer than a date), and
+        // counts far beyond the runs of the balance tests (deaths at depth
+        // 2 to 7, a few hundred turns).
+        // A fresh run writes one digit for each count: the longest line
+        // has 1 + 4 + 2 + 1 more.
+        let fresh = share_line(None, Seed::new(u64::MAX), &Stats::default());
+        let longest = fresh.len() + 1 + 4 + 2 + 1;
+
+        assert!(fresh.is_ascii(), "{fresh}");
+        assert!(longest <= 80, "{longest} columns: {fresh}");
     }
 
     #[test]
