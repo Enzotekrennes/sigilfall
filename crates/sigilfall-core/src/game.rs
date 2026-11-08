@@ -42,13 +42,19 @@
 //! Items lie on the floor until the player picks them up, then fill its
 //! inventory until it uses or drops them; their rules live in the
 //! `inventory` submodule. Only the player handles items.
+//!
+//! A game is written to and read back from a save by the `save` module; the
+//! `saved` submodule turns it into the save's records and back, checking
+//! every value read.
 
 mod cast;
 mod descent;
 mod inventory;
+mod saved;
 mod world;
 
 use rand_chacha::ChaCha8Rng;
+use serde::{Deserialize, Serialize};
 use slotmap::SlotMap;
 
 use crate::action::{self, Action, ActionOutcome};
@@ -116,7 +122,10 @@ pub struct Game {
 }
 
 /// Whether a game can still be played.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+///
+/// A save keeps it as `Playing` or as
+/// `GameOver(killed_by: Monster(definition: "ossuary_rat"))`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Status {
     /// The player is alive: [`Game::submit`] takes its next action.
     Playing,

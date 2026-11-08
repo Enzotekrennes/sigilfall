@@ -13,6 +13,7 @@
 
 use rand::RngExt as _;
 use rand_chacha::ChaCha8Rng;
+use serde::{Deserialize, Serialize};
 
 use crate::content::MonsterDef;
 
@@ -109,7 +110,10 @@ pub fn roll_damage(attack: i32, defense: i32, rng: &mut ChaCha8Rng) -> i32 {
 
 /// Who took part in a fight, kept in events so the message log and the
 /// end-of-run summary can name an actor after it has been removed.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+///
+/// A save keeps it in the status of a finished game, as `Player` or
+/// `Monster(definition: "ossuary_rat")`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Combatant {
     /// The character controlled by the person playing.
     Player,

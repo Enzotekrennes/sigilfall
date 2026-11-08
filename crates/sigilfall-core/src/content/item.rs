@@ -123,6 +123,21 @@ impl ItemDef {
     pub const fn can_appear_at(&self, depth: u32) -> bool {
         depth >= self.min_depth
     }
+
+    /// Returns a definition that names no item of any content file: empty
+    /// identifier and name, healing 1 hit point, found from the first floor.
+    ///
+    /// Only the `save` module uses it, to fill the slots of a slot map for a
+    /// moment while it reads or rebuilds the layout of the item keys; an
+    /// item of this kind never stays in a game.
+    pub(crate) fn stand_in() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            effect: ItemEffect::Heal(1),
+            min_depth: crate::generation::FIRST_DEPTH,
+        }
+    }
 }
 
 /// Turns the entries of the item file into definitions, in file order.

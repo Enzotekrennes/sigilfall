@@ -4,12 +4,15 @@
 //! tiles or walls: whether a step is allowed is decided by the `action` module
 //! against a `map::Map`.
 
+use serde::{Deserialize, Serialize};
+
 /// A cell on the dungeon grid.
 ///
 /// `x` grows to the right and `y` grows downwards, matching terminal rows.
 /// Coordinates are signed so that stepping off the edge of a map yields a
-/// position that can be checked, instead of an integer underflow.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// position that can be checked, instead of an integer underflow. A save
+/// writes it as `(x: 5, y: 3)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Position {
     /// Column, `0` being the left edge of the map.
     pub x: i32,

@@ -220,6 +220,31 @@ impl Actor {
             ActorKind::Player => None,
         }
     }
+
+    /// Returns this actor with the values that change during play set as a
+    /// save recorded them: hit points, energy, essence and its maximum, and
+    /// turns held.
+    ///
+    /// Only the loading of a save uses it, on an actor built with
+    /// [`Actor::new`] from the saved position, speed, fighting values and
+    /// kind. The `save` module has already checked the values (hit points
+    /// from 0 to the maximum, essence from 0 to its maximum), so they are
+    /// taken as they are.
+    pub(crate) const fn with_saved_state(
+        mut self,
+        hp: i32,
+        energy: i32,
+        essence: i32,
+        max_essence: i32,
+        held_turns: u32,
+    ) -> Self {
+        self.hp = hp;
+        self.energy = energy;
+        self.essence = essence;
+        self.max_essence = max_essence;
+        self.held_turns = held_turns;
+        self
+    }
 }
 
 /// What an actor is.
@@ -251,7 +276,10 @@ pub struct Monster {
 impl Monster {
     /// Creates the monster data of a creature of kind `definition`, with no
     /// memory of the player.
-    fn new(definition: &MonsterDef) -> Self {
+    ///
+    /// Loading a save also uses it, then restores the memory of the player
+    /// through `last_seen_player`.
+    pub(crate) fn new(definition: &MonsterDef) -> Self {
         Self {
             definition: definition.id().to_owned(),
             family: definition.family(),

@@ -19,5 +19,6 @@ pub mod item;
 pub mod map;
 pub mod path;
 pub mod rng;
+pub mod save;
 pub mod schedule;
 pub mod sigil;

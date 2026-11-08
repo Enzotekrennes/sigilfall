@@ -155,6 +155,21 @@ impl Scheduler {
         self.turn_order.contains(&actor)
     }
 
+    /// Returns the scheduled actors in turn order: the first one breaks ties
+    /// against all the others.
+    pub(crate) fn turn_order(&self) -> &[ActorId] {
+        &self.turn_order
+    }
+
+    /// Returns a scheduler with `turn_order` and `ticks` as a save recorded
+    /// them.
+    ///
+    /// Only the loading of a save uses it; the `save` module has already
+    /// checked that every key names a distinct actor of the loaded game.
+    pub(crate) const fn restored(turn_order: Vec<ActorId>, ticks: u64) -> Self {
+        Self { turn_order, ticks }
+    }
+
     /// Returns the number of ticks elapsed since the scheduler was created.
     ///
     /// Only [`Scheduler::next_actor`] advances it; performing or refusing an

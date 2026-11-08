@@ -12,10 +12,10 @@ workspace = true
 
 [dependencies]
 rand = { version = "0.10.3", default-features = false }
-rand_chacha = { version = "0.10.0", default-features = false }
-ron = "0.12.3"
+rand_chacha = { version = "0.10.0", default-features = false, features = ["serde"] }
+ron = { version = "0.12.3", features = ["integer128"] }
 serde = { version = "1.0.229", features = ["derive"] }
-slotmap = "1.1.1"
+slotmap = { version = "1.1.1", features = ["serde"] }
 thiserror = "2.0.21"
 
 [dev-dependencies]

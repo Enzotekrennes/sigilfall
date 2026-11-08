@@ -75,6 +75,37 @@ impl World {
         self.items.get(id)
     }
 
+    /// Returns a world as a save recorded it: the floor `map`, `actors`
+    /// with the player's key `player`, `items`, the keys of the carried
+    /// items in pick-up order (`inventory`) and the glyphs `engravings`.
+    ///
+    /// Only the loading of a save uses it; the `saved` module has already
+    /// checked the invariants of [`World`] (one item per cell, carried items
+    /// listed once in the inventory, the player among the actors).
+    pub(super) const fn restored(
+        map: Map,
+        actors: SlotMap<ActorId, Actor>,
+        player: ActorId,
+        items: SlotMap<ItemId, Item>,
+        inventory: Vec<ItemId>,
+        engravings: Vec<Engraving>,
+    ) -> Self {
+        Self {
+            map,
+            actors,
+            player,
+            items,
+            inventory,
+            engravings,
+        }
+    }
+
+    /// Returns the slot map of every item, on the floor or carried, as a
+    /// save copies it: keys, freed slots and all.
+    pub(super) const fn item_slots(&self) -> &SlotMap<ItemId, Item> {
+        &self.items
+    }
+
     /// Iterates over every item, on the floor or carried, with its key.
     pub(super) fn items(&self) -> impl Iterator<Item = (ItemId, &Item)> {
         self.items.iter()
