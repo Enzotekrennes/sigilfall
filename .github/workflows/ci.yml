@@ -1,7 +1,8 @@
 # Continuous integration: checks formatting once, then lints, tests and builds
 # the documentation of the whole workspace on Linux, Windows and macOS, and
 # checks that the workspace still builds on its minimum supported Rust
-# version. Every cargo command runs with `--locked`, so CI fails instead of
+# version, and checks the licenses and security advisories of every
+# dependency (deny.toml). Every cargo command runs with `--locked`, so CI fails instead of
 # silently resolving other versions than the committed Cargo.lock.
 # The demo GIF of the README is recorded from demo.tape on demand and on
 # version tags, and published as an artifact: CI never commits anything.
@@ -20,6 +21,9 @@ on:
 permissions:
   contents: read
 
+# Every action is pinned to a commit (version in the comment), so a moved tag
+# cannot change what runs; .github/dependabot.yml proposes the updates.
+
 # A newer push to the same branch or pull request makes the running checks obsolete.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -34,7 +38,7 @@ jobs:
     # Formatting does not depend on the platform, one run is enough.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
       # Installs the toolchain and components pinned in rust-toolchain.toml.
@@ -52,13 +56,13 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
       # Installs the toolchain and components pinned in rust-toolchain.toml.
       - name: Install toolchain
         run: rustup toolchain install
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Test
@@ -68,18 +72,34 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
+  deny:
+    name: Licenses and advisories
+    # Licenses of every crate of Cargo.lock against deny.toml, and the RustSec
+    # advisory database (vulnerable, unmaintained or yanked crates). A new
+    # advisory can fail this job without any change to the repository: update
+    # the crate, or record the decision in deny.toml.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: cargo deny
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check licenses advisories
+
   msrv:
     name: Minimum Rust version (1.88)
     # The rust-version of Cargo.toml: ratatui 0.30 needs 1.88. Compiling is
     # enough to prove it; lints and tests stay on the pinned stable toolchain.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
       - name: Install Rust 1.88
         run: rustup toolchain install 1.88 --profile minimal
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Check
         # `+1.88` overrides the stable channel of rust-toolchain.toml.
         run: cargo +1.88 check --workspace --locked
@@ -92,12 +112,12 @@ jobs:
     # VHS drives a real terminal (ttyd) and encodes with ffmpeg: Linux only.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
       - name: Install toolchain
         run: rustup toolchain install
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Build the game
         run: cargo build --release --locked --bin sigilfall
       # demo.tape types `sigilfall`, so the binary just built must be first
@@ -105,7 +125,7 @@ jobs:
       - name: Put the game on the PATH
         run: echo "$GITHUB_WORKSPACE/target/release" >> "$GITHUB_PATH"
       - name: Record demo.tape
-        uses: charmbracelet/vhs-action@v2
+        uses: charmbracelet/vhs-action@f6d7db07a432fcd3b06772628d36a57f96d95dcf # v2.1.1
         with:
           path: demo.tape
           # JetBrains Mono, the font demo.tape asks for, has every glyph
@@ -114,7 +134,7 @@ jobs:
       # The GIF goes to the run's artifacts; copying it to assets/demo.gif
       # in the repository is left to a person, in a reviewed commit.
       - name: Publish the GIF
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: demo-gif
           path: assets/demo.gif

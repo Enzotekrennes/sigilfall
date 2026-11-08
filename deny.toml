@@ -1,0 +1,56 @@
+# Dependency policy checked by `cargo deny check` (cargo-deny, a development
+# tool, not a dependency of the game), locally and in CI:
+# - licenses: every crate of Cargo.lock uses a license from `allow` below,
+#   all compatible with distributing the game as MIT OR Apache-2.0 binaries;
+# - advisories: no crate has a known vulnerability, or is unmaintained or
+#   yanked, according to the RustSec advisory database;
+# - bans, sources: crates come from crates.io only.
+# The notices those licenses require are gathered in THIRD-PARTY-LICENSES
+# (about.toml) and shipped in every release archive.
+
+[graph]
+# The four release targets of dist-workspace.toml: crates used only on other
+# platforms are not shipped, so their licenses do not matter.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+]
+all-features = false
+
+[advisories]
+# Unmaintained crates are reported for the whole graph, not only direct
+# dependencies, and yanked versions are refused.
+unmaintained = "all"
+yanked = "deny"
+ignore = []
+
+[licenses]
+# The licenses found in Cargo.lock today; a new one fails the check until it
+# is reviewed and added. All permissive, except MPL-2.0 (option-ext, through
+# directories): a file-level copyleft that only asks for the source of the
+# MPL files themselves, unmodified and available on crates.io, and for its
+# notice, which THIRD-PARTY-LICENSES carries. Compatible with distributing
+# the game as MIT OR Apache-2.0.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "Unicode-3.0",
+    "Zlib",
+    "MPL-2.0",
+]
+# Crates are judged on their declared license expression only.
+confidence-threshold = 0.93
+
+[bans]
+# Two versions of a crate cost build time but are not a risk: reported only.
+multiple-versions = "warn"
+# A `*` version requirement would let any future release in.
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

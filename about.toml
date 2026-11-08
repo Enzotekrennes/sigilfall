@@ -1,0 +1,34 @@
+# Configuration of cargo-about (a development tool, not a dependency of the
+# game), which writes THIRD-PARTY-LICENSES: the license text of every crate
+# compiled into the released binary, as those licenses require. The file is
+# committed and shipped in each release archive (`include` in
+# dist-workspace.toml). Regenerate it after any change to Cargo.lock:
+#
+#     cargo about generate --workspace --locked -o THIRD-PARTY-LICENSES about.hbs
+#
+# CI checks the same licenses with `cargo deny check` (deny.toml).
+
+# Same list as `allow` in deny.toml; a crate under any other license makes
+# the generation fail.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "Unicode-3.0",
+    "Zlib",
+    "MPL-2.0",
+]
+
+# The four release targets of dist-workspace.toml.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+]
+
+# Crates used only by tests or build scripts are left out; the two workspace
+# crates (the game itself) stay listed under MIT.
+ignore-dev-dependencies = true
+ignore-build-dependencies = true

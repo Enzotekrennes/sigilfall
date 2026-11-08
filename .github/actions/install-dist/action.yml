@@ -1,0 +1,79 @@
+# Installs dist (cargo-dist) on the runner from its prebuilt GitHub release
+# archive, after checking the archive against a SHA-256 pinned below: unlike
+# the `curl | sh` installer `dist generate` writes, a replaced or tampered
+# archive stops the release instead of running.
+#
+# Puts `dist` in ~/.cargo/bin (where release.yml caches it from) and on the
+# PATH. Supports the runners release.yml uses: Linux x86_64, macOS (Apple
+# Silicon and Intel) and Windows x86_64.
+#
+# The version must match cargo-dist-version in dist-workspace.toml. To move
+# to another version, change DIST_VERSION and take the four hashes from the
+# `sha256.sum` file of that release:
+# https://github.com/axodotdev/cargo-dist/releases
+name: Install dist
+description: Installs a pinned, checksum-verified dist release binary.
+
+runs:
+  using: composite
+  steps:
+    - name: Install dist
+      shell: bash
+      env:
+        DIST_VERSION: "0.34.0"
+        SHA256_X86_64_LINUX: 7fee44ff3ff71ed0064b32d4ec62fee6b58bd37c5887b12a86aedddc5af0c7b5
+        SHA256_AARCH64_MACOS: d1eec30e63eed23e5a5bd48fe96eae314799811bffca254ec1d2264638ba1890
+        SHA256_X86_64_MACOS: 6aa89bb1e7c18f51ae8b148ce2fc6ab00ac46ed8173d4f2ed9afa12101218773
+        SHA256_X86_64_WINDOWS: 7bb53fbc998321f77a3bbb044084a52747c8ed041cf6d6a604802aa57b9c80c6
+      run: |
+        set -euo pipefail
+
+        case "$RUNNER_OS/$RUNNER_ARCH" in
+          Linux/X64)   archive="cargo-dist-x86_64-unknown-linux-gnu.tar.xz"; expected="$SHA256_X86_64_LINUX" ;;
+          macOS/ARM64) archive="cargo-dist-aarch64-apple-darwin.tar.xz";     expected="$SHA256_AARCH64_MACOS" ;;
+          macOS/X64)   archive="cargo-dist-x86_64-apple-darwin.tar.xz";      expected="$SHA256_X86_64_MACOS" ;;
+          Windows/X64) archive="cargo-dist-x86_64-pc-windows-msvc.zip";      expected="$SHA256_X86_64_WINDOWS" ;;
+          *)
+            echo "::error::No pinned dist archive for runner $RUNNER_OS/$RUNNER_ARCH; add its SHA-256 to .github/actions/install-dist/action.yml"
+            exit 1
+            ;;
+        esac
+
+        work_dir="$RUNNER_TEMP/install-dist"
+        mkdir -p "$work_dir"
+        curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+          --output "$work_dir/$archive" \
+          "https://github.com/axodotdev/cargo-dist/releases/download/v$DIST_VERSION/$archive"
+
+        # sha256sum on Linux and in Git Bash on Windows, shasum on macOS.
+        if command -v sha256sum > /dev/null 2>&1; then
+          actual="$(sha256sum "$work_dir/$archive" | cut -d ' ' -f 1)"
+        else
+          actual="$(shasum -a 256 "$work_dir/$archive" | cut -d ' ' -f 1)"
+        fi
+        if [ "$actual" != "$expected" ]; then
+          echo "::error::$archive has SHA-256 $actual, expected $expected: refusing to install it"
+          exit 1
+        fi
+
+        # The .tar.xz archives hold a cargo-dist-<target>/ folder, the .zip
+        # archive holds dist.exe at its root.
+        bin_dir="$HOME/.cargo/bin"
+        mkdir -p "$bin_dir"
+        case "$archive" in
+          *.zip)
+            unzip -o -q "$work_dir/$archive" dist.exe -d "$work_dir"
+            dist_bin="$bin_dir/dist.exe"
+            cp "$work_dir/dist.exe" "$dist_bin"
+            cygpath -w "$bin_dir" >> "$GITHUB_PATH"
+            ;;
+          *)
+            tar -xJf "$work_dir/$archive" -C "$work_dir"
+            dist_bin="$bin_dir/dist"
+            cp "$work_dir/${archive%.tar.xz}/dist" "$dist_bin"
+            chmod +x "$dist_bin"
+            echo "$bin_dir" >> "$GITHUB_PATH"
+            ;;
+        esac
+
+        "$dist_bin" --version

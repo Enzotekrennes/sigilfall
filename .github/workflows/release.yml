@@ -1,232 +1,301 @@
 # Release: builds the binaries and installers described in dist-workspace.toml
-# and publishes them as a GitHub release when a version tag is pushed.
+# and publishes them as a GitHub release when a version tag is pushed; on a
+# pull request it only checks that the release configuration is valid.
 #
-# Follows the workflow `dist generate` writes for that configuration (dist
-# plans the release, builds each target on its own runner, builds the
-# installers and checksums, then creates the release with every file). To
-# change targets or installers, edit dist-workspace.toml and run
-# `dist generate`, which rewrites this file.
+# This is the workflow `dist generate` (dist 0.34.0) writes for
+# dist-workspace.toml, plus hardening dist cannot express in its
+# configuration; each change is marked "Hardening:" below and listed above
+# `allow-dirty` in dist-workspace.toml, so it can be reapplied after the next
+# `dist generate`. The action pins come from dist-workspace.toml.
 #
-# Steps:
-# - plan: works out what to build from the tag; on a pull request it only
-#   checks that the configuration is valid;
+# Jobs:
+# - plan: works out what to build from the tag;
 # - build-local-artifacts: one archive per target, on that target's runner;
 # - build-global-artifacts: the shell and PowerShell installers, checksums;
-# - host: creates the GitHub release for the tag and uploads every file.
+# - host: creates the GitHub release for the tag and uploads every file (the
+#   only job allowed to write to the repository);
+# - announce: marks the end of a successful release.
 #
 # A tag such as v0.1.0 or v0.2.0-beta.1 starts a release; the version in the
-# tag must be the version of the `sigilfall` package in Cargo.toml.
-name: Release
+# tag must be the version of the `sigilfall` package in Cargo.toml, and a
+# suffix such as -beta.1 marks the release as a prerelease.
+#
+# Parts of the original template: Copyright 2022-2024, axodotdev,
+# SPDX-License-Identifier: MIT or Apache-2.0.
 
+name: Release
+# Hardening: read-only by default; `host` alone gets `contents: write`.
 permissions:
-  # Creating the release and uploading its files needs write access.
-  contents: write
+  "contents": "read"
 
 on:
   pull_request:
   push:
     tags:
-      - "v[0-9]+.[0-9]+.[0-9]+*"
+      - '**[0-9]+.[0-9]+.[0-9]+*'
 
 jobs:
+  # Run 'dist plan' (or host) to determine what tasks we need to do
   plan:
-    runs-on: ubuntu-22.04
+    runs-on: "ubuntu-22.04"
     outputs:
       val: ${{ steps.plan.outputs.manifest }}
       tag: ${{ !github.event.pull_request && github.ref_name || '' }}
       tag-flag: ${{ !github.event.pull_request && format('--tag={0}', github.ref_name) || '' }}
       publishing: ${{ !github.event.pull_request }}
     env:
+      # Read-only here (workflow permissions above).
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
           submodules: recursive
+      # Hardening: checksum-verified archive instead of `curl | sh`.
       - name: Install dist
-        # The version is cargo-dist-version in dist-workspace.toml.
-        shell: bash
-        run: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.34.0/cargo-dist-installer.sh | sh"
+        uses: ./.github/actions/install-dist
       - name: Cache dist
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cargo-dist-cache
           path: ~/.cargo/bin/dist
-      # On a tag, `dist host --steps=create` also checks that the tag names
-      # a package version; on a pull request, `dist plan` only checks the
+      # On a tag, `dist host --steps=create` also checks that the tag names a
+      # package version; on a pull request, `dist plan` only checks the
       # configuration.
+      # Hardening: the tag reaches the script through `env:`, not `${{ }}`.
       - id: plan
+        env:
+          RELEASE_TAG: ${{ !github.event.pull_request && github.ref_name || '' }}
         run: |
-          dist ${{ (!github.event.pull_request && format('host --steps=create --tag={0}', github.ref_name)) || 'plan' }} --output-format=json > plan-dist-manifest.json
+          if [ -n "$RELEASE_TAG" ]; then
+            dist host --steps=create --tag="$RELEASE_TAG" --output-format=json > plan-dist-manifest.json
+          else
+            dist plan --output-format=json > plan-dist-manifest.json
+          fi
           echo "dist ran successfully"
           cat plan-dist-manifest.json
           echo "manifest=$(jq -c "." plan-dist-manifest.json)" >> "$GITHUB_OUTPUT"
-      - name: Upload dist-manifest.json
-        uses: actions/upload-artifact@v6
+      - name: "Upload dist-manifest.json"
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: artifacts-plan-dist-manifest
           path: plan-dist-manifest.json
 
+  # Build and packages all the platform-specific things
   build-local-artifacts:
     name: build-local-artifacts (${{ join(matrix.targets, ', ') }})
+    # Let the initial task tell us to not run (currently very blunt)
     needs:
       - plan
     if: ${{ fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix.include != null && (needs.plan.outputs.publishing == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload') }}
     strategy:
       fail-fast: false
-      # One entry per target of dist-workspace.toml, with its runner and
-      # the command that installs dist there.
+      # Target platforms/runners are computed by dist in create-release.
+      # Each member of the matrix has the following arguments:
+      #
+      # - runner: the github runner
+      # - dist-args: cli flags to pass to dist
+      # - install-dist: expression to run to install dist on the runner
+      #
+      # Typically there will be:
+      # - 1 "global" task that builds universal installers
+      # - N "local" tasks that build each platform's binaries and platform-specific installers
       matrix: ${{ fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix }}
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container && matrix.container.image || null }}
+    # Hardening: no GH_TOKEN, building never calls the GitHub API.
     env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       BUILD_MANIFEST_NAME: target/distrib/${{ join(matrix.targets, '-') }}-dist-manifest.json
     steps:
-      - name: Enable long paths on Windows
-        run: git config --global core.longpaths true
-      - uses: actions/checkout@v6
+      - name: enable windows longpaths
+        run: |
+          git config --global core.longpaths true
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
           submodules: recursive
-      - name: Install Rust if the container lacks it
+      - name: Install Rust non-interactively if not already installed
         if: ${{ matrix.container }}
         run: |
           if ! command -v cargo > /dev/null 2>&1; then
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
             echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           fi
+      # Hardening: checksum-verified archive instead of the matrix's
+      # `install_dist.run` (`curl | sh` or `irm | iex`).
       - name: Install dist
-        run: ${{ matrix.install_dist.run }}
-      - name: Fetch the plan
-        uses: actions/download-artifact@v7
+        uses: ./.github/actions/install-dist
+      # Get the dist-manifest
+      - name: Fetch local artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: artifacts-*
           path: target/distrib/
           merge-multiple: true
+      # Hardening: the commands come through `env:`, not `${{ }}`. They are
+      # computed by `dist plan` from dist-workspace.toml (empty for the
+      # current targets, which need no system package).
       - name: Install dependencies
+        shell: bash
+        env:
+          PACKAGES_INSTALL: ${{ matrix.packages_install }}
         run: |
-          ${{ matrix.packages_install }}
+          if [ -n "$PACKAGES_INSTALL" ]; then
+            eval "$PACKAGES_INSTALL"
+          fi
+      # Hardening: tag and dist arguments come through `env:`, not `${{ }}`;
+      # bash on every runner so the script is the same on Windows.
       - name: Build artifacts
-        run: dist build ${{ needs.plan.outputs.tag-flag }} --print=linkage --output-format=json ${{ matrix.dist_args }} > dist-manifest.json
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+          DIST_ARGS: ${{ matrix.dist_args }}
+        run: |
+          # DIST_ARGS holds several flags, such as "--artifacts=local --target=x".
+          read -r -a dist_args <<< "$DIST_ARGS"
+          # Actually do builds and make zips and whatnot
+          dist build ${RELEASE_TAG:+"--tag=$RELEASE_TAG"} --print=linkage --output-format=json "${dist_args[@]}" > dist-manifest.json
+          echo "dist ran successfully"
       - id: cargo-dist
         name: Post-build
-        # bash on every runner, so the output syntax below is the same on
-        # Windows.
+        # We force bash here just because github makes it really hard to get values up
+        # to "real" actions without writing to env-vars, and writing to env-vars has
+        # inconsistent syntax between shell and powershell.
         shell: bash
         run: |
-          # List what was just built, for the upload below.
-          echo "paths<<EOF" >> "$GITHUB_OUTPUT"
-          dist print-upload-files-from-manifest --manifest dist-manifest.json >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+          # Parse out what we just built and upload it to scratch storage
+          # (one redirect for the three lines, as shellcheck asks).
+          {
+            echo "paths<<EOF"
+            dist print-upload-files-from-manifest --manifest dist-manifest.json
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
           cp dist-manifest.json "$BUILD_MANIFEST_NAME"
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v6
+      - name: "Upload artifacts"
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: artifacts-build-local-${{ join(matrix.targets, '_') }}
           path: |
             ${{ steps.cargo-dist.outputs.paths }}
             ${{ env.BUILD_MANIFEST_NAME }}
 
+  # Build and package all the platform-agnostic(ish) things
   build-global-artifacts:
     needs:
       - plan
       - build-local-artifacts
-    runs-on: ubuntu-22.04
+    runs-on: "ubuntu-22.04"
+    # Hardening: no GH_TOKEN, building never calls the GitHub API.
     env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       BUILD_MANIFEST_NAME: target/distrib/global-dist-manifest.json
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
           submodules: recursive
       - name: Install cached dist
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: cargo-dist-cache
           path: ~/.cargo/bin/
       - run: chmod +x ~/.cargo/bin/dist
-      # The installers and checksums are computed from every archive.
+      # Get all the local artifacts for the global tasks to use (for e.g. checksums)
       - name: Fetch local artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: artifacts-*
           path: target/distrib/
           merge-multiple: true
+      # Hardening: the tag comes through `env:`, not `${{ }}`.
       - id: cargo-dist
         shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
         run: |
-          dist build ${{ needs.plan.outputs.tag-flag }} --output-format=json "--artifacts=global" > dist-manifest.json
+          dist build ${RELEASE_TAG:+"--tag=$RELEASE_TAG"} --output-format=json "--artifacts=global" > dist-manifest.json
           echo "dist ran successfully"
 
-          # List what was just built, for the upload below.
-          echo "paths<<EOF" >> "$GITHUB_OUTPUT"
-          jq --raw-output ".upload_files[]" dist-manifest.json >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+          # Parse out what we just built and upload it to scratch storage
+          # (one redirect for the three lines, as shellcheck asks).
+          {
+            echo "paths<<EOF"
+            jq --raw-output ".upload_files[]" dist-manifest.json
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
           cp dist-manifest.json "$BUILD_MANIFEST_NAME"
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v6
+      - name: "Upload artifacts"
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: artifacts-build-global
           path: |
             ${{ steps.cargo-dist.outputs.paths }}
             ${{ env.BUILD_MANIFEST_NAME }}
-
+  # Determines if we should publish/announce
   host:
     needs:
       - plan
       - build-local-artifacts
       - build-global-artifacts
-    # Only for a tag, and only if nothing before failed (skipped is fine).
+    # Only run if we're "publishing", and only if plan, local and global didn't fail (skipped is fine)
     if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') }}
+    # Hardening: the only job that writes, to create the release and upload
+    # its files.
+    permissions:
+      "contents": "write"
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    runs-on: ubuntu-22.04
+    runs-on: "ubuntu-22.04"
     outputs:
       val: ${{ steps.host.outputs.manifest }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
           submodules: recursive
       - name: Install cached dist
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: cargo-dist-cache
           path: ~/.cargo/bin/
       - run: chmod +x ~/.cargo/bin/dist
+      # Fetch artifacts from scratch-storage
       - name: Fetch artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: artifacts-*
           path: target/distrib/
           merge-multiple: true
+      # Hardening: the tag comes through `env:`, not `${{ }}`.
       - id: host
         shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
         run: |
-          dist host ${{ needs.plan.outputs.tag-flag }} --steps=upload --steps=release --output-format=json > dist-manifest.json
+          dist host ${RELEASE_TAG:+"--tag=$RELEASE_TAG"} --steps=upload --steps=release --output-format=json > dist-manifest.json
           echo "artifacts uploaded and released successfully"
           cat dist-manifest.json
           echo "manifest=$(jq -c "." dist-manifest.json)" >> "$GITHUB_OUTPUT"
-      - name: Upload dist-manifest.json
-        uses: actions/upload-artifact@v6
+      - name: "Upload dist-manifest.json"
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          # Replaces the copy uploaded by the plan.
+          # Overwrite the previous copy
           name: artifacts-dist-manifest
           path: dist-manifest.json
-          overwrite: true
-      - name: Download every artifact
-        uses: actions/download-artifact@v7
+      # Create a GitHub Release while uploading all files to it
+      - name: "Download GitHub Artifacts"
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: artifacts-*
           path: artifacts
           merge-multiple: true
-      - name: Remove the per-target manifests
-        run: rm -f artifacts/*-dist-manifest.json
-      - name: Create the GitHub release
+      - name: Cleanup
+        run: |
+          # Remove the granular manifests
+          rm -f artifacts/*-dist-manifest.json
+      # Hardening: the tag comes through `env:`, not `${{ }}`.
+      - name: Create GitHub Release
         env:
           PRERELEASE_FLAG: "${{ fromJson(steps.host.outputs.manifest).announcement_is_prerelease && '--prerelease' || '' }}"
           ANNOUNCEMENT_TITLE: "${{ fromJson(steps.host.outputs.manifest).announcement_title }}"
@@ -234,9 +303,27 @@ jobs:
           RELEASE_COMMIT: "${{ github.sha }}"
           RELEASE_TAG: "${{ needs.plan.outputs.tag }}"
         run: |
-          # Notes go through a file so their quotes never break the command.
+          # Write and read notes from a file to avoid quoting breaking things
           echo "$ANNOUNCEMENT_BODY" > "$RUNNER_TEMP/notes.txt"
 
           # PRERELEASE_FLAG is empty or one word: left unquoted on purpose.
           # shellcheck disable=SC2086
           gh release create "$RELEASE_TAG" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*
+
+  announce:
+    needs:
+      - plan
+      - host
+    # use "always() && ..." to allow us to wait for all publish jobs while
+    # still allowing individual publish jobs to skip themselves (for prereleases).
+    # "host" however must run to completion, no skipping allowed!
+    if: ${{ always() && needs.host.result == 'success' }}
+    runs-on: "ubuntu-22.04"
+    env:
+      # Read-only here (workflow permissions above).
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          submodules: recursive
