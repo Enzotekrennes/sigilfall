@@ -1273,3 +1273,31 @@ fn ctrl_c_quits_at_once_during_the_grace() {
     app.save_on_exit().expect("nothing to save");
     assert!(!folder.save_file().path().exists());
 }
+
+#[test]
+fn keys_typed_during_the_grace_are_not_kept_for_later_and_q_quits_only_after_it() {
+    let folder = ScratchFolder::new("f9-grace-nothing-kept");
+    let clock = ManualClock::new();
+    let mut app = executioner_app(&folder, 1, &clock);
+    fight_the_executioner(&mut app);
+
+    // Enter pressed at the very start of the grace must not be remembered:
+    // once the grace is over the end screen is still there, waiting for a
+    // key pressed on purpose.
+    app.handle_key(press(KeyCode::Enter));
+    clock.advance(END_SCREEN_GRACE);
+    assert_eq!(app.state(), State::GameOver, "no key was queued");
+    assert!(screen_text(&app, 80, 24).contains("T H E   D E S C E N T   E N D S"));
+
+    // A fresh end screen, to try `q` on the two sides of the delay.
+    let folder = ScratchFolder::new("f9-grace-q");
+    let clock = ManualClock::new();
+    let mut app = executioner_app(&folder, 1, &clock);
+    fight_the_executioner(&mut app);
+    clock.advance(END_SCREEN_GRACE - MILLISECOND);
+    app.handle_key(press(KeyCode::Char('q')));
+    assert_eq!(app.state(), State::GameOver, "q a millisecond too early");
+    clock.advance(MILLISECOND);
+    app.handle_key(press(KeyCode::Char('q')));
+    assert_eq!(app.state(), State::Quit, "q once the grace is over quits");
+}
