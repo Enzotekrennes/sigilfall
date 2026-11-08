@@ -1,12 +1,12 @@
 //! The main game screen: status line with the turn and the run's seed, map
-//! with the monsters in view and the player, key help.
+//! with the monsters in view and the player, side panel, message log, key
+//! help.
 //!
 //! Exposes [`render`]. The layout follows the game screen of
 //! `docs/design.md`: status line on the first row, map below it on the
-//! left, side panel on the right, message log under both, key help on the
-//! last row. Only the areas that have something to show are drawn for now:
-//! the side panel and the log keep their place but stay empty until the
-//! health bar and the log exist. The map is seen through a
+//! left, side panel on the right (drawn by `ui::hud`), message log under
+//! both (drawn by `ui::log`), key help on the last row. The map is seen
+//! through a
 //! [`Camera`] that follows the player, and each map cell is drawn according
 //! to what the player knows of it ([`Sight`]): in full when in view, only
 //! its landmarks when explored but out of view, not at all when never seen.
@@ -18,12 +18,15 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Position as ScreenPosition, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use sigilfall_core::content::Content;
 use sigilfall_core::game::{Game, VisibleMonster};
 use sigilfall_core::geometry::Position;
 use sigilfall_core::map::Tile;
 use sigilfall_core::rng::Seed;
 
 use super::camera::Camera;
+use super::{hud, log};
+use crate::message_log::MessageLog;
 use crate::theme::Theme;
 
 /// Width of the side panel, in columns, its left border included.
@@ -49,6 +52,10 @@ struct GameLayout {
     status: Rect,
     /// The map, which takes every row and column the other areas leave.
     map: Rect,
+    /// Right of the map: health and what is in view, border included.
+    side_panel: Rect,
+    /// Under the map and the panel: separator and messages.
+    log: Rect,
     /// Last row: key help.
     help: Rect,
 }
@@ -57,21 +64,26 @@ impl GameLayout {
     /// Splits `area` as on the game screen of `docs/design.md`: status
     /// line, map and side panel side by side, log, key help.
     ///
-    /// Beyond 80 × 24 only the map grows; the panel and the log keep their
-    /// size. Their areas are left out of the result until something is
-    /// drawn in them.
+    /// Beyond 80 × 24 only the map grows; the panel keeps its width and the
+    /// log its height.
     fn new(area: Rect) -> Self {
-        let [status, body, _log, help] = Layout::vertical([
+        let [status, body, log, help] = Layout::vertical([
             Constraint::Length(1),
             Constraint::Fill(1),
             Constraint::Length(LOG_HEIGHT),
             Constraint::Length(1),
         ])
         .areas(area);
-        let [map, _side_panel] =
+        let [map, side_panel] =
             Layout::horizontal([Constraint::Fill(1), Constraint::Length(SIDE_PANEL_WIDTH)])
                 .areas(body);
-        Self { status, map, help }
+        Self {
+            status,
+            map,
+            side_panel,
+            log,
+            help,
+        }
     }
 }
 
@@ -82,12 +94,27 @@ pub fn map_area(screen: Rect) -> Rect {
     GameLayout::new(screen).map
 }
 
-/// Draws the game screen for `game` inside `area`, with `theme`.
+/// Returns the message log's area of a screen drawn over `screen`: the
+/// rows above the key help, as on the game screen. The end screen keeps its
+/// log there too.
+pub fn log_area(screen: Rect) -> Rect {
+    GameLayout::new(screen).log
+}
+
+/// Draws the game screen for `game` inside `area`, with the messages of
+/// `log`, monster names from `content` and `theme`.
 ///
 /// `area` is expected to be at least 80 × 24 (checked by the caller); a
 /// smaller area is still drawn without panicking, only clipped. The
 /// background is expected to be painted already.
-pub fn render(frame: &mut Frame, area: Rect, game: &Game, theme: &Theme) {
+pub fn render(
+    frame: &mut Frame,
+    area: Rect,
+    game: &Game,
+    log: &MessageLog,
+    content: &Content,
+    theme: &Theme,
+) {
     let layout = GameLayout::new(area);
     frame.render_widget(status_line(game, theme), layout.status);
     let seed_area = Rect {
@@ -96,6 +123,14 @@ pub fn render(frame: &mut Frame, area: Rect, game: &Game, theme: &Theme) {
     };
     frame.render_widget(seed_label(game.seed(), theme), seed_area);
     render_map(frame.buffer_mut(), layout.map, game, theme);
+    hud::render(frame.buffer_mut(), layout.side_panel, game, content, theme);
+    log::render(
+        frame.buffer_mut(),
+        layout.log,
+        Some(layout.side_panel.x),
+        log,
+        theme,
+    );
     frame.render_widget(key_help(theme), layout.help);
 }
 
@@ -324,11 +359,18 @@ mod tests {
         game
     }
 
-    /// Renders `game` on a whole 80 × 24 screen with `theme`.
+    /// Renders `game` on a whole 80 × 24 screen with `theme`, an empty log
+    /// and monster names from the shipped content.
     fn draw(game: &Game, theme: &Theme) -> Buffer {
+        let content = Content::load().expect("the shipped content is valid");
+        draw_with(game, theme, &content)
+    }
+
+    /// Renders `game` like [`draw`], with monster names from `content`.
+    fn draw_with(game: &Game, theme: &Theme, content: &Content) -> Buffer {
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         terminal
-            .draw(|frame| crate::ui::render(frame, game, theme))
+            .draw(|frame| crate::ui::render(frame, game, &MessageLog::default(), content, theme))
             .unwrap();
         terminal.backend().buffer().clone()
     }
@@ -372,6 +414,8 @@ mod tests {
 
         assert_eq!(layout.status, Rect::new(0, 0, 80, 1));
         assert_eq!(layout.map, Rect::new(0, 1, 58, 16));
+        assert_eq!(layout.side_panel, Rect::new(58, 1, 22, 16));
+        assert_eq!(layout.log, Rect::new(0, 17, 80, 6));
         assert_eq!(layout.help, Rect::new(0, 23, 80, 1));
     }
 
@@ -831,7 +875,8 @@ mod tests {
     #[test]
     fn every_form_in_view_in_ascii() {
         let game = room_with_every_form();
-        let screen = draw(&game, &Theme::new(ColorMode::Monochrome, GlyphSet::Ascii));
+        let theme = Theme::new(ColorMode::Monochrome, GlyphSet::Ascii);
+        let screen = draw_with(&game, &theme, &every_form());
 
         assert_snapshot!(screen_text(&screen));
     }

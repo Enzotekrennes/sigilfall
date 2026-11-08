@@ -11,6 +11,8 @@
 mod app;
 mod cli;
 mod input;
+mod message_log;
+mod messages;
 mod theme;
 mod ui;
 

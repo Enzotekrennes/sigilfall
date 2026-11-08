@@ -7,6 +7,11 @@
 //! restoring the terminal is left to `main`. Rendering only records the size
 //! of the frame it drew, so that keys are not played on a screen too small
 //! to show the game.
+//!
+//! The application keeps the message log: the events of each action are
+//! turned into English lines by the `messages` module and appended to it.
+//! Once the player has died, the end screen replaces the game and only the
+//! quit keys still work.
 
 use std::cell::Cell;
 
@@ -14,11 +19,14 @@ use anyhow::Context as _;
 use ratatui::crossterm::event::{self, Event, KeyEvent};
 use ratatui::layout::Size;
 use ratatui::{DefaultTerminal, Frame};
+use sigilfall_core::action::Action;
 use sigilfall_core::content::Content;
 use sigilfall_core::game::Game;
 use sigilfall_core::rng::Seed;
 
 use crate::input::{self, Command};
+use crate::message_log::MessageLog;
+use crate::messages;
 use crate::theme::Theme;
 use crate::ui;
 
@@ -27,16 +35,23 @@ use crate::ui;
 pub enum State {
     /// A game is in progress and keys control the player.
     Playing,
+    /// The player has died: the end screen is shown, the game takes no
+    /// more actions and only the quit keys work.
+    GameOver,
     /// The player asked to leave; the event loop stops.
     Quit,
 }
 
-/// The running application: a game, the screen showing it and the theme
-/// it is drawn with.
+/// The running application: a game, its message log, the screen showing
+/// them and the theme they are drawn with.
 #[derive(Debug)]
 pub struct App {
     /// The game in progress.
     game: Game,
+    /// The game data, for the names the log and the side panel show.
+    content: Content,
+    /// What happened so far, in words, newest last.
+    log: MessageLog,
     /// The active screen.
     state: State,
     /// Colours and glyphs of every screen, chosen at start-up.
@@ -52,24 +67,35 @@ pub struct App {
 impl App {
     /// Starts the application on a new game of the run identified by
     /// `seed`, peopled from `content`, in [`State::Playing`], drawn with
-    /// `theme`.
+    /// `theme`. The log opens with the welcome message.
     pub fn new(theme: Theme, seed: Seed, content: &Content) -> Self {
-        Self {
-            game: Game::new(seed, content),
-            state: State::Playing,
-            theme,
-            screen_size: Cell::new(None),
-        }
+        Self::start(theme, Game::new(seed, content), content.clone())
     }
 
     /// Starts the application on `game` instead of a new game of a seed,
     /// so tests can play in a map they know, such as the fixed room of
-    /// `Game::in_fixed_room`.
+    /// `Game::in_fixed_room`; `content` names its monsters.
     #[cfg(test)]
-    pub const fn with_game(theme: Theme, game: Game) -> Self {
+    pub fn with_game(theme: Theme, game: Game, content: Content) -> Self {
+        Self::start(theme, game, content)
+    }
+
+    /// Builds the application around `game`: the log holds the welcome
+    /// message, and the screen is [`State::GameOver`] if the game is already
+    /// over, [`State::Playing`] otherwise.
+    fn start(theme: Theme, game: Game, content: Content) -> Self {
+        let mut log = MessageLog::default();
+        log.push(messages::welcome());
+        let state = if game.is_over() {
+            State::GameOver
+        } else {
+            State::Playing
+        };
         Self {
             game,
-            state: State::Playing,
+            content,
+            log,
+            state,
             theme,
             screen_size: Cell::new(None),
         }
@@ -87,12 +113,21 @@ impl App {
         &self.game
     }
 
+    /// Returns the message log, so tests can check what it says.
+    #[cfg(test)]
+    pub const fn log(&self) -> &MessageLog {
+        &self.log
+    }
+
     /// Reacts to one key event.
     ///
     /// The key is translated by `input::command_for`: releases, repeats and
     /// unbound keys do nothing. A game action is submitted to the game, which
-    /// may refuse it (a move into a wall) without any time passing. Once the
-    /// application has quit, keys are ignored.
+    /// may refuse it (a move into a wall) without any time passing, and what
+    /// happened is added to the log (`messages::describe`). If the player
+    /// died, the application moves to [`State::GameOver`], where game
+    /// actions are ignored and only quitting works. Once the application has
+    /// quit, keys are ignored.
     ///
     /// While the last frame drawn was smaller than 80 × 24 (see `ui::fits`),
     /// the screen shows a resize message instead of the game, so game
@@ -100,30 +135,38 @@ impl App {
     /// frame the size is unknown and actions are accepted: the event loop
     /// always draws before it reads a key.
     pub fn handle_key(&mut self, key: KeyEvent) {
-        if self.state != State::Playing {
+        if self.state == State::Quit {
             return;
         }
         match input::command_for(key) {
             None => {}
             Some(Command::Quit) => self.state = State::Quit,
-            Some(Command::Act(_)) if !self.game_is_visible() => {}
-            Some(Command::Act(action)) => {
-                // The events will feed the message log; there is no log yet,
-                // and the map is drawn from the game state itself.
-                self.game.submit(action);
-            }
+            Some(Command::Act(_)) if self.state == State::GameOver || !self.game_is_visible() => {}
+            Some(Command::Act(action)) => self.play(action),
+        }
+    }
+
+    /// Submits the player's `action` to the game, adds what happened to the
+    /// log and moves to [`State::GameOver`] if the player died.
+    fn play(&mut self, action: Action) {
+        let events = self.game.submit(action);
+        self.log
+            .extend(messages::describe(&events, &self.game, &self.content));
+        if self.game.is_over() {
+            self.state = State::GameOver;
         }
     }
 
     /// Draws the active screen over the whole frame, with the application's
-    /// theme.
+    /// theme: the game screen with its log, or the end screen once the game
+    /// is over.
     ///
     /// Any frame size is accepted: below 80 × 24 a message asks for a larger
     /// terminal instead (see `ui::render`). The frame's size is recorded, and
     /// decides whether [`App::handle_key`] plays game actions.
     pub fn render(&self, frame: &mut Frame) {
         self.screen_size.set(Some(frame.area().as_size()));
-        ui::render(frame, &self.game, &self.theme);
+        ui::render(frame, &self.game, &self.log, &self.content, &self.theme);
     }
 
     /// Returns whether the game screen is shown: `true` when the last frame
@@ -132,8 +175,9 @@ impl App {
         self.screen_size.get().is_none_or(ui::fits)
     }
 
-    /// Runs the event loop on `terminal` until the player quits: draw, wait
-    /// for the next terminal event, handle it, repeat.
+    /// Runs the event loop on `terminal` until the player quits, from the
+    /// game or from the end screen: draw, wait for the next terminal event,
+    /// handle it, repeat.
     ///
     /// A resize event needs no handling of its own: the next draw adapts to
     /// the new size and records it before any further key is read.
@@ -143,7 +187,7 @@ impl App {
     /// Returns an error if drawing or reading terminal input fails. The
     /// terminal is left as it is; restoring it is the caller's job.
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
-        while self.state == State::Playing {
+        while self.state != State::Quit {
             terminal
                 .draw(|frame| self.render(frame))
                 .context("cannot draw the game screen on the terminal")?;
@@ -194,7 +238,12 @@ mod tests {
 
     /// A new application on `seed` in the fixed room, drawn with `theme`.
     fn fixed_room_app(theme: Theme, seed: Seed) -> App {
-        App::with_game(theme, Game::in_fixed_room(seed))
+        App::with_game(theme, Game::in_fixed_room(seed), shipped_content())
+    }
+
+    /// The game's own monsters, for their names.
+    fn shipped_content() -> Content {
+        Content::load().expect("the shipped content is valid")
     }
 
     /// A key press of `code`, as crossterm reports it.
@@ -374,6 +423,7 @@ mod tests {
         App::with_game(
             Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode),
             Game::on_floor(SEED, generation::generate(SEED, FIRST_DEPTH)),
+            shipped_content(),
         )
     }
 
@@ -485,6 +535,462 @@ mod tests {
         }
     }
 
+    /// The side panel, the message log and the end screen (T16), driven by
+    /// keys like a player and read back from the rendered screen.
+    mod combat_screens {
+        use ratatui::style::{Color, Style};
+        use sigilfall_core::actor::ActorId;
+
+        use super::*;
+        use crate::ui::hud::{HP_BAR_WIDTH, filled_cells};
+
+        /// Test monsters whose blows are known in advance:
+        /// - the cave gnat (attack 0) always deals exactly 1 damage to the
+        ///   player (defense 1), and its 999 hit points outlast any fight;
+        /// - the wax moth dies from any blow of the player;
+        /// - the executioner (attack 99) kills the player's 30 hit points in
+        ///   one blow.
+        const TEST_MONSTERS: &str = r#"[
+            Monster(id: "gnat", name: "cave gnat", family: Vermin, elite: false,
+                speed: 100, hp: 999, attack: 0, defense: 0, min_depth: 1),
+            Monster(id: "moth", name: "wax moth", family: Vermin, elite: false,
+                speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
+            Monster(id: "executioner", name: "executioner", family: Acolyte, elite: true,
+                speed: 100, hp: 999, attack: 99, defense: 0, min_depth: 1),
+        ]"#;
+
+        /// Column of the first character of the side panel's content.
+        const PANEL_LEFT: u16 = 60;
+        /// Last column of the side panel's content on an 80-column screen.
+        const PANEL_RIGHT: u16 = 78;
+        /// Row of "HP" and its value.
+        const HP_ROW: u16 = 1;
+        /// Row of the health bar.
+        const BAR_ROW: u16 = 2;
+        /// Row of the "IN VIEW" title.
+        const IN_VIEW_ROW: u16 = 4;
+        /// Row of the log's separator.
+        const LOG_SEPARATOR_ROW: u16 = 17;
+        /// First and last rows of the log's messages.
+        const LOG_ROWS: std::ops::RangeInclusive<u16> = 18..=22;
+
+        /// Picks the health token a level is drawn with out of a theme.
+        type HealthToken = fn(&Theme) -> Style;
+
+        /// The four rendering modes of `docs/design.md`.
+        const MODES: [ColorMode; 4] = [
+            ColorMode::TrueColorDark,
+            ColorMode::TrueColorLight,
+            ColorMode::Ansi16,
+            ColorMode::Monochrome,
+        ];
+
+        /// An application in the fixed room of [`SEED`], drawn with
+        /// `theme`, with a monster of each `(definition, cell)` of
+        /// [`TEST_MONSTERS`]. Returns the keys of the monsters, in order.
+        fn arena(theme: Theme, monsters: &[(&str, Position)]) -> (App, Vec<ActorId>) {
+            let content = Content::parse(TEST_MONSTERS).expect("valid test monsters");
+            let mut game = Game::in_fixed_room(SEED);
+            let ids = monsters
+                .iter()
+                .map(|&(id, cell)| game.spawn_monster(cell, content.monster(id).unwrap()))
+                .collect();
+            (App::with_game(theme, game, content), ids)
+        }
+
+        /// The cell east of the player's start, where the duels happen.
+        fn east() -> Position {
+            PLAYER_START.step(Direction::East)
+        }
+
+        /// The default theme of Windows Terminal (see [`new_app`]).
+        fn dark() -> Theme {
+            Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode)
+        }
+
+        /// The player's hit points.
+        fn player_hp(app: &App) -> i32 {
+            app.game().player_actor().hp()
+        }
+
+        /// Waits until the cave gnat, one blow of 1 per turn, has brought
+        /// the player down to `hp`; bounded so a gnat that never strikes
+        /// fails the test instead of looping.
+        fn wait_until_hp(app: &mut App, hp: i32) {
+            for _ in 0..100 {
+                if player_hp(app) <= hp {
+                    break;
+                }
+                app.handle_key(press(KeyCode::Char('.')));
+            }
+            assert_eq!(player_hp(app), hp, "the gnat deals exactly 1 per blow");
+        }
+
+        /// Rows `rows` of `buffer`, as text.
+        fn rows(buffer: &Buffer, rows: std::ops::RangeInclusive<u16>) -> Vec<String> {
+            rows.map(|y| row_text(buffer, y)).collect()
+        }
+
+        /// The text of the side panel's content on row `y`, trimmed.
+        fn panel_text(buffer: &Buffer, y: u16) -> String {
+            (PANEL_LEFT..=PANEL_RIGHT)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+                .trim()
+                .to_owned()
+        }
+
+        /// Asserts that the cell `(x, y)` of `buffer` has exactly the
+        /// colour and emphasis of `style`.
+        fn assert_style(buffer: &Buffer, (x, y): (u16, u16), style: Style, what: &str) {
+            let cell = &buffer[(x, y)];
+            assert_eq!(cell.fg, style.fg.unwrap_or(Color::Reset), "{what}");
+            assert_eq!(cell.modifier, style.add_modifier, "{what}");
+        }
+
+        #[test]
+        fn a_new_game_shows_full_health_and_the_welcome_message() {
+            let app = new_app();
+            let screen = render(&app, 80, 24).backend().buffer().clone();
+
+            assert_eq!(
+                panel_text(&screen, HP_ROW),
+                format!("HP{}30/30", " ".repeat(12))
+            );
+            assert_eq!(panel_text(&screen, BAR_ROW), "█".repeat(18));
+            assert_eq!(panel_text(&screen, IN_VIEW_ROW), "IN VIEW");
+            assert_eq!(panel_text(&screen, IN_VIEW_ROW + 1), "@ you");
+            assert_eq!(
+                row_text(&screen, 18).trim_end(),
+                "   You enter the dungeon."
+            );
+            let separator = row_text(&screen, LOG_SEPARATOR_ROW);
+            assert!(separator.starts_with("─ Log ──"), "{separator:?}");
+            assert_eq!(
+                screen[(58, LOG_SEPARATOR_ROW)].symbol(),
+                "┴",
+                "the panel's border meets the separator"
+            );
+            assert_eq!(screen[(58, 1)].symbol(), "│");
+        }
+
+        #[test]
+        fn each_blow_is_logged_with_its_damage_and_the_health_bar_drops() {
+            let (mut app, ids) = arena(dark(), &[("gnat", east())]);
+            let gnat_hp = |app: &App| app.game().actor(ids[0]).unwrap().hp();
+
+            let before = gnat_hp(&app);
+            app.handle_key(press(KeyCode::Char('l')));
+            let dealt = before - gnat_hp(&app);
+            for _ in 0..3 {
+                app.handle_key(press(KeyCode::Char('.')));
+            }
+
+            let screen = render(&app, 80, 24).backend().buffer().clone();
+            let log = rows(&screen, LOG_ROWS);
+            assert!(
+                log.iter()
+                    .any(|line| line.trim_end() == format!("   You hit the cave gnat ({dealt}).")),
+                "{log:#?}"
+            );
+            let taken = 30 - player_hp(&app);
+            assert!(taken >= 1, "the gnat struck back");
+            let danger = log
+                .iter()
+                .filter(|line| line.trim_end() == " ! The cave gnat hits you (1).")
+                .count();
+            assert_eq!(danger, usize::try_from(taken).unwrap(), "{log:#?}");
+            let hp = player_hp(&app);
+            assert_eq!(
+                panel_text(&screen, HP_ROW),
+                format!("HP{}{hp}/30", " ".repeat(19 - 2 - format!("{hp}/30").len()))
+            );
+            let filled = usize::from(filled_cells(hp, 30, HP_BAR_WIDTH));
+            assert_eq!(
+                panel_text(&screen, BAR_ROW),
+                format!("{}{}", "█".repeat(filled), "░".repeat(18 - filled))
+            );
+            assert_eq!(panel_text(&screen, IN_VIEW_ROW + 2), "v cave gnat");
+        }
+
+        #[test]
+        fn danger_lines_carry_the_danger_colour_and_the_bang_prefix_in_every_mode() {
+            for mode in MODES {
+                let theme = Theme::new(mode, GlyphSet::Unicode);
+                let (mut app, _) = arena(theme.clone(), &[("gnat", east())]);
+                wait_until_hp(&mut app, 29);
+
+                let screen = render(&app, 80, 24).backend().buffer().clone();
+                let row = LOG_ROWS
+                    .clone()
+                    .find(|&y| row_text(&screen, y).contains("hits you"))
+                    .unwrap_or_else(|| panic!("{mode:?}: the blow is logged"));
+                assert_eq!(screen[(1, row)].symbol(), "!", "{mode:?}");
+                assert_style(
+                    &screen,
+                    (1, row),
+                    theme.log_danger,
+                    &format!("{mode:?}: prefix"),
+                );
+                assert_style(
+                    &screen,
+                    (3, row),
+                    theme.log_danger,
+                    &format!("{mode:?}: text"),
+                );
+                assert_style(
+                    &screen,
+                    (3, 18),
+                    theme.log_info,
+                    &format!("{mode:?}: welcome"),
+                );
+            }
+        }
+
+        #[test]
+        fn a_killing_blow_names_the_victim_and_removes_it_from_the_panel() {
+            let (mut app, ids) = arena(dark(), &[("moth", east())]);
+            let before = render(&app, 80, 24).backend().buffer().clone();
+            assert_eq!(panel_text(&before, IN_VIEW_ROW + 2), "v wax moth");
+
+            app.handle_key(press(KeyCode::Char('l')));
+
+            assert!(app.game().actor(ids[0]).is_none(), "the moth died");
+            let screen = render(&app, 80, 24).backend().buffer().clone();
+            let log = rows(&screen, LOG_ROWS);
+            let kill = log
+                .iter()
+                .find(|line| line.starts_with(" + You kill the wax moth ("))
+                .unwrap_or_else(|| panic!("{log:#?}"));
+            assert!(kill.trim_end().ends_with(")."), "{kill:?}");
+            assert!(!log.iter().any(|line| line.contains("dies")), "{log:#?}");
+            assert_style(&screen, (1, 19), dark().log_success, "kill line");
+            assert_eq!(panel_text(&screen, IN_VIEW_ROW + 2), "");
+        }
+
+        #[test]
+        fn the_log_scrolls_to_keep_the_five_newest_messages() {
+            // A wall bump writes nothing, so alternate blows and waits:
+            // each turn adds the player's blow and the gnat's reply.
+            let (mut app, _) = arena(dark(), &[("gnat", east())]);
+            for _ in 0..4 {
+                app.handle_key(press(KeyCode::Char('l')));
+            }
+            assert!(app.log().len() > 5, "more messages than rows");
+
+            let screen = render(&app, 80, 24).backend().buffer().clone();
+            let shown: Vec<_> = rows(&screen, LOG_ROWS)
+                .into_iter()
+                .map(|line| line[3..].trim_end().to_owned())
+                .collect();
+            let mut newest: Vec<_> = app
+                .log()
+                .newest_first()
+                .take(5)
+                .map(|message| message.text.clone())
+                .collect();
+            newest.reverse();
+            assert_eq!(shown, newest, "oldest at the top, newest at the bottom");
+            assert!(!shown.iter().any(|line| line.contains("enter the dungeon")));
+        }
+
+        #[test]
+        fn walking_into_a_wall_writes_nothing_in_the_log() {
+            let mut app = new_app();
+            press_all(&mut app, &[KeyCode::Char('h'); 6]);
+
+            assert_eq!(app.log().len(), 1, "only the welcome message");
+        }
+
+        #[test]
+        fn the_health_value_and_bar_follow_the_thresholds_in_every_mode() {
+            // 16/30 is above half, 15/30 exactly half (mid), 8/30 the last
+            // mid value, 7/30 under a quarter (low, marked "!").
+            let levels: [(i32, &str, HealthToken); 4] = [
+                (16, "16/30", |t| t.hp_high),
+                (15, "15/30", |t| t.hp_mid),
+                (8, "8/30", |t| t.hp_mid),
+                (7, "! 7/30", |t| t.hp_low),
+            ];
+            for mode in MODES {
+                for glyph_set in [GlyphSet::Unicode, GlyphSet::Ascii] {
+                    let theme = Theme::new(mode, glyph_set);
+                    let (mut app, _) = arena(theme.clone(), &[("gnat", east())]);
+                    for (hp, value, token) in levels {
+                        wait_until_hp(&mut app, hp);
+                        let case = format!("{mode:?}, {glyph_set:?}, {hp} HP");
+                        let screen = render(&app, 80, 24).backend().buffer().clone();
+
+                        let figures = panel_text(&screen, HP_ROW);
+                        assert!(figures.starts_with("HP "), "{case}: {figures:?}");
+                        assert!(figures.ends_with(value), "{case}: {figures:?}");
+                        assert_eq!(
+                            row_text(&screen, HP_ROW).chars().nth(78),
+                            value.chars().last(),
+                            "{case}: right-aligned"
+                        );
+                        assert_style(&screen, (PANEL_RIGHT, HP_ROW), token(&theme), &case);
+                        assert_style(&screen, (PANEL_LEFT, HP_ROW), theme.text_muted, &case);
+
+                        let filled = filled_cells(hp, 30, HP_BAR_WIDTH);
+                        for offset in 0..HP_BAR_WIDTH {
+                            let cell = (PANEL_LEFT + offset, BAR_ROW);
+                            let (glyph, style) = if offset < filled {
+                                (theme.glyphs.bar_full, token(&theme))
+                            } else {
+                                (theme.glyphs.bar_empty, theme.border)
+                            };
+                            assert_eq!(
+                                screen[cell].symbol(),
+                                glyph.to_string(),
+                                "{case}: bar cell {offset}"
+                            );
+                            assert_style(
+                                &screen,
+                                cell,
+                                style,
+                                &format!("{case}: bar cell {offset}"),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn monochrome_tells_low_health_by_the_mark_alone() {
+            let theme = Theme::new(ColorMode::Monochrome, GlyphSet::Ascii);
+            let (mut app, _) = arena(theme, &[("gnat", east())]);
+            wait_until_hp(&mut app, 8);
+            let mid = render(&app, 80, 24).backend().buffer().clone();
+            wait_until_hp(&mut app, 7);
+            let low = render(&app, 80, 24).backend().buffer().clone();
+
+            assert!(!panel_text(&mid, HP_ROW).contains('!'));
+            assert!(panel_text(&low, HP_ROW).contains("! 7/30"));
+            assert_eq!(
+                panel_text(&low, BAR_ROW),
+                format!("{}{}", "=".repeat(5), "-".repeat(13))
+            );
+        }
+
+        /// An application whose player was just killed by the executioner,
+        /// with the turn of the death.
+        fn killed_app(theme: Theme) -> App {
+            let (mut app, _) = arena(theme, &[("executioner", east())]);
+            for _ in 0..10 {
+                if app.state() == State::GameOver {
+                    break;
+                }
+                app.handle_key(press(KeyCode::Char('.')));
+            }
+            assert_eq!(app.state(), State::GameOver);
+            assert!(app.game().is_over());
+            app
+        }
+
+        #[test]
+        fn the_player_death_is_logged_and_the_end_screen_names_the_killer() {
+            let app = killed_app(dark());
+            let turn = app.game().player_turns();
+
+            let last = app.log().newest_first().next().unwrap();
+            assert!(
+                last.text.starts_with("The executioner kills you (") && last.text.ends_with(")."),
+                "{last:?}"
+            );
+            let screen = render(&app, 80, 24).backend().buffer().clone();
+            let text = rows(&screen, 0..=23).join(
+                "
+",
+            );
+            assert!(
+                text.contains(&format!("Killed by an executioner on turn {turn}.")),
+                "{text}"
+            );
+            assert!(text.contains("Seed  7F3A-91C2-0B5E-D4A8"), "{text}");
+            assert!(
+                text.contains("Replay this seed: sigilfall --seed 7F3A-91C2-0B5E-D4A8"),
+                "{text}"
+            );
+            assert!(
+                text.contains(&format!(" ! {}", last.text)),
+                "the last blow stays readable:\n{text}"
+            );
+            assert!(row_text(&screen, 23).starts_with(" q quit"), "{text}");
+            assert!(!text.contains("Turn "), "no game screen:\n{text}");
+            assert_snapshot!(render(&app, 80, 24).backend());
+        }
+
+        #[test]
+        fn no_game_action_is_played_after_death_but_quitting_works() {
+            let mut app = killed_app(dark());
+            let ticks = app.game().ticks();
+            let turns = app.game().player_turns();
+            let messages = app.log().len();
+            let before = render(&app, 80, 24).backend().buffer().clone();
+
+            press_all(
+                &mut app,
+                &[
+                    KeyCode::Char('l'),
+                    KeyCode::Right,
+                    KeyCode::Char('.'),
+                    KeyCode::Char('5'),
+                    KeyCode::Enter,
+                ],
+            );
+
+            assert_eq!(app.state(), State::GameOver);
+            assert_eq!(app.game().ticks(), ticks, "no time passes");
+            assert_eq!(app.game().player_turns(), turns);
+            assert_eq!(app.log().len(), messages, "nothing new is logged");
+            assert_eq!(
+                render(&app, 80, 24).backend().buffer(),
+                &before,
+                "the end screen stays as it is"
+            );
+
+            app.handle_key(press(KeyCode::Esc));
+            assert_eq!(app.state(), State::Quit);
+        }
+
+        #[test]
+        fn the_end_screen_also_asks_for_room_below_80_by_24() {
+            let app = killed_app(dark());
+
+            let text = render(&app, 79, 24).backend().to_string();
+
+            assert!(text.contains("Enlarge the terminal"), "{text}");
+            assert!(!text.contains("Killed by"), "{text}");
+        }
+
+        #[test]
+        fn a_fight_on_screen_shows_the_panel_and_the_log_together() {
+            let (mut app, _) = arena(dark(), &[("gnat", east()), ("moth", Position::new(6, 7))]);
+            press_all(
+                &mut app,
+                &[KeyCode::Char('l'), KeyCode::Char('l'), KeyCode::Char('.')],
+            );
+
+            assert_snapshot!(render(&app, 80, 24).backend());
+        }
+
+        #[test]
+        fn the_combat_screens_are_plain_ascii_with_ascii_glyphs() {
+            let theme = Theme::new(ColorMode::Monochrome, GlyphSet::Ascii);
+            let (mut app, _) = arena(theme.clone(), &[("gnat", east())]);
+            wait_until_hp(&mut app, 5);
+            let playing = render(&app, 80, 24).backend().to_string();
+            assert!(playing.is_ascii(), "{playing}");
+
+            let dead = killed_app(theme);
+            let end = render(&dead, 80, 24).backend().to_string();
+            assert!(end.is_ascii(), "{end}");
+            assert_snapshot!(playing);
+        }
+    }
+
     /// Acceptance tests of "move around the dungeon" (F1), written from the
     /// player's side: only keys go in and only the rendered screen and the
     /// game clock are read back.
@@ -524,11 +1030,13 @@ mod tests {
             (cell.x, cell.y)
         }
 
-        /// Every cell of the buffer that shows the player glyph.
+        /// Every cell of the map area of an 80 × 24 `buffer` that shows the
+        /// player glyph. The side panel's "in view" list also shows `@`, as
+        /// a legend, so it is left out.
         fn player_cells(buffer: &Buffer) -> Vec<(u16, u16)> {
-            let area = buffer.area;
-            (0..area.height)
-                .flat_map(|y| (0..area.width).map(move |x| (x, y)))
+            let area = ui::game::map_area(buffer.area);
+            (area.top()..area.bottom())
+                .flat_map(|y| (area.left()..area.right()).map(move |x| (x, y)))
                 .filter(|&(x, y)| buffer[(x, y)].symbol() == "@")
                 .collect()
         }

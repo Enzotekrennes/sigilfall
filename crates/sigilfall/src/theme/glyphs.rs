@@ -5,8 +5,8 @@
 //! "Glyphes" of `docs/design.md`; every Unicode glyph there is present in
 //! Cascadia Mono, the default font of Windows Terminal. Only the glyphs of
 //! elements the game already has are listed: the others (arches,
-//! engravings, items, sigil grid, frames) join this table with the tasks
-//! that bring them to the screen.
+//! engravings, items, sigil grid, rounded frames) join this table with the
+//! tasks that bring them to the screen.
 //!
 //! Creatures are drawn with the letter of their family, lower case for the
 //! common form and upper case for the elite one ([`Glyphs::creature`]).
@@ -55,9 +55,20 @@ pub struct Glyphs {
     pub arrow_right: char,
     /// Down arrow of the key help: `↓`, or `v` in ASCII.
     pub arrow_down: char,
-    /// Sign between the two terms of a size, as in "80 × 24": `×`, or `x`
-    /// in ASCII.
+    /// Sign between the two terms of a size, as in "80 × 24", and before a
+    /// count, as in "×2": `×`, or `x` in ASCII.
     pub dimension: char,
+    /// Horizontal line of frames and separators: `─`, or `-` in ASCII.
+    pub frame_horizontal: char,
+    /// Vertical line of frames and separators: `│`, or `|` in ASCII.
+    pub frame_vertical: char,
+    /// Junction where a vertical line meets a horizontal one from above:
+    /// `┴`, or `+` in ASCII.
+    pub frame_junction_up: char,
+    /// Filled cell of the health bar: `█`, or `=` in ASCII.
+    pub bar_full: char,
+    /// Empty cell of the health bar: `░`, or `-` in ASCII.
+    pub bar_empty: char,
 }
 
 impl Glyphs {
@@ -79,6 +90,11 @@ impl Glyphs {
                 arrow_right: '→',
                 arrow_down: '↓',
                 dimension: '×',
+                frame_horizontal: '─',
+                frame_vertical: '│',
+                frame_junction_up: '┴',
+                bar_full: '█',
+                bar_empty: '░',
             },
             GlyphSet::Ascii => Self {
                 floor: '.',
@@ -95,6 +111,11 @@ impl Glyphs {
                 arrow_right: '>',
                 arrow_down: 'v',
                 dimension: 'x',
+                frame_horizontal: '-',
+                frame_vertical: '|',
+                frame_junction_up: '+',
+                bar_full: '=',
+                bar_empty: '-',
             },
         }
     }
@@ -136,7 +157,7 @@ mod tests {
     use super::*;
 
     /// Every glyph of `glyphs`, with its field name for failure messages.
-    fn all(glyphs: Glyphs) -> [(&'static str, char); 14] {
+    fn all(glyphs: Glyphs) -> [(&'static str, char); 19] {
         [
             ("floor", glyphs.floor),
             ("wall", glyphs.wall),
@@ -152,6 +173,11 @@ mod tests {
             ("arrow_right", glyphs.arrow_right),
             ("arrow_down", glyphs.arrow_down),
             ("dimension", glyphs.dimension),
+            ("frame_horizontal", glyphs.frame_horizontal),
+            ("frame_vertical", glyphs.frame_vertical),
+            ("frame_junction_up", glyphs.frame_junction_up),
+            ("bar_full", glyphs.bar_full),
+            ("bar_empty", glyphs.bar_empty),
         ]
     }
 
@@ -174,6 +200,11 @@ mod tests {
             ("arrow_right", '\u{2192}'),
             ("arrow_down", '\u{2193}'),
             ("dimension", '\u{00D7}'),
+            ("frame_horizontal", '\u{2500}'),
+            ("frame_vertical", '\u{2502}'),
+            ("frame_junction_up", '\u{2534}'),
+            ("bar_full", '\u{2588}'),
+            ("bar_empty", '\u{2591}'),
         ];
         assert_eq!(all(glyphs), expected);
     }

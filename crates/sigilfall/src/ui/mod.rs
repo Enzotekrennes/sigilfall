@@ -1,20 +1,27 @@
 //! Screens of the game, drawn with ratatui from read-only game state.
 //!
 //! Exposes [`render`], which picks what to draw for the current terminal
-//! size, one module per screen ([`game`] for now) and the [`camera`] that
-//! decides which part of the map is seen. Drawing never changes
-//! the game and never touches the real terminal: it fills a [`Frame`], so
-//! every screen can be rendered into a test backend. Every colour and glyph
-//! comes from the [`Theme`] passed in.
+//! size and the state of the game, one module per screen ([`game`] while
+//! playing, [`death`] once the player has died), the parts of the game
+//! screen ([`hud`], the side panel, and [`log`], the message log) and the
+//! [`camera`] that decides which part of the map is seen. Drawing never
+//! changes the game and never touches the real terminal: it fills a
+//! [`Frame`], so every screen can be rendered into a test backend. Every
+//! colour and glyph comes from the [`Theme`] passed in.
 
 pub mod camera;
+pub mod death;
 pub mod game;
+pub mod hud;
+pub mod log;
 
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect, Size};
 use ratatui::widgets::{Paragraph, Wrap};
+use sigilfall_core::content::Content;
 use sigilfall_core::game::Game;
 
+use crate::message_log::MessageLog;
 use crate::theme::Theme;
 
 /// Smallest terminal width, in columns, the game screen is laid out for.
@@ -36,20 +43,24 @@ pub const fn fits(size: Size) -> bool {
     size.width >= MIN_WIDTH && size.height >= MIN_HEIGHT
 }
 
-/// Draws the screen for `game` over the whole frame, with `theme`.
+/// Draws the screen for `game` over the whole frame, with `theme`: the game
+/// screen with the messages of `log` while the game is played, the end
+/// screen once it is over. Monster names come from `content`.
 ///
 /// The theme's background is painted on every cell first. When the frame
 /// is smaller than [`MIN_WIDTH`] × [`MIN_HEIGHT`], a message asking for a
-/// larger terminal is drawn instead of a truncated game screen.
+/// larger terminal is drawn instead of either screen.
 /// Any frame size is accepted, down to zero, without panicking; the check is
 /// made on every frame, so resizing the terminal switches between the two.
-pub fn render(frame: &mut Frame, game: &Game, theme: &Theme) {
+pub fn render(frame: &mut Frame, game: &Game, log: &MessageLog, content: &Content, theme: &Theme) {
     let area = frame.area();
     frame.buffer_mut().set_style(area, theme.bg);
-    if fits(area.as_size()) {
-        game::render(frame, area, game, theme);
-    } else {
+    if !fits(area.as_size()) {
         render_too_small(frame, area, theme);
+    } else if game.is_over() {
+        death::render(frame, area, game, log, content, theme);
+    } else {
+        game::render(frame, area, game, log, content, theme);
     }
 }
 
@@ -116,13 +127,20 @@ mod tests {
     /// Screen cell of the first letter of the help label "move".
     const HELP_LABEL_CELL: (u16, u16) = (10, 23);
 
+    /// The game's own monsters, for their names.
+    fn content() -> Content {
+        Content::load().expect("the shipped content is valid")
+    }
+
     /// Renders a new game at 80 × 24 in `mode`, with Unicode glyphs, and
     /// returns the screen with the theme it was drawn with.
     fn screen(mode: ColorMode) -> (Buffer, Theme) {
         let theme = Theme::new(mode, GlyphSet::Unicode);
         let game = Game::in_fixed_room(SEED);
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-        terminal.draw(|frame| render(frame, &game, &theme)).unwrap();
+        terminal
+            .draw(|frame| render(frame, &game, &MessageLog::default(), &content(), &theme))
+            .unwrap();
         (terminal.backend().buffer().clone(), theme)
     }
 
@@ -236,7 +254,9 @@ mod tests {
         let theme = Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode);
         let game = Game::in_fixed_room(SEED);
         let mut terminal = Terminal::new(TestBackend::new(60, 20)).unwrap();
-        terminal.draw(|frame| render(frame, &game, &theme)).unwrap();
+        terminal
+            .draw(|frame| render(frame, &game, &MessageLog::default(), &content(), &theme))
+            .unwrap();
         let screen = terminal.backend().buffer();
 
         let first_letter = screen
