@@ -15,6 +15,10 @@ mod casting;
 mod cli;
 mod clock;
 #[cfg(test)]
+mod f10_acceptance;
+#[cfg(test)]
+mod f11_acceptance;
+#[cfg(test)]
 mod f6_acceptance;
 #[cfg(test)]
 mod f7_acceptance;
