@@ -13,7 +13,7 @@ use rand::RngExt as _;
 use rand_chacha::ChaCha8Rng;
 
 use super::Recognition;
-use crate::fov::SIGHT_RADIUS;
+use crate::fov::SIGHT_RANGE;
 
 /// Essence of the player at the start of a run, and the most it can hold.
 ///
@@ -47,11 +47,15 @@ pub const ESSENCE_REGEN_TICKS: u64 = 12;
 /// stockpiled across floors into a lasting immunity to backlash.
 pub const MAX_STEADY_CASTS: u32 = (MAX_ESSENCE / ESSENCE_COST).unsigned_abs();
 
-/// Farthest a spell aimed in a direction reaches, in cells.
+/// Farthest a spell aimed in a direction reaches, in cells: 8.
 ///
-/// The radius of sight: a spell never reaches a creature the player could
-/// not see along that line.
-pub const SPELL_RANGE: u32 = SIGHT_RADIUS;
+/// The reach of sight up and down, the short axis of [`SIGHT_RANGE`]: a
+/// spell aimed north or south stops where sight does. Along a row sight
+/// reaches twice as far (it is an ellipse, see the `fov` module), but aimed
+/// spells keep the same reach in every direction, the one they were balanced
+/// with.
+// Widening u16 to u32 is lossless; `u32::from` is not usable in a const.
+pub const SPELL_RANGE: u32 = SIGHT_RANGE.rows as u32;
 
 /// Hit points a [`Backlash::Scorch`] takes from the caster.
 ///

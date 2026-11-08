@@ -462,32 +462,43 @@ mod tests {
     /// Seed of the fixed-room games; the room does not depend on it.
     const FIXED_ROOM_SEED: Seed = Seed::new(42);
 
-    /// Steps the player takes east from [`PLAYER_START`] in
-    /// [`explored_fixed_room`], ending at (19, 5).
+    /// Steps the player first takes north from [`PLAYER_START`] in
+    /// [`explored_fixed_room`], up to the top row of the room, (5, 1).
+    const STEPS_NORTH: i32 = 4;
+
+    /// Steps the player then takes east along the top row in
+    /// [`explored_fixed_room`], ending at (19, 1).
     ///
-    /// From there the left wall, seen at the start, is 19 cells away, far
-    /// out of sight, while the right wall, 10 cells away, has never been
-    /// within the 8-cell sight radius.
+    /// From there the left wall, seen at the start, is 19 columns away, out
+    /// of the 16 cells sight reaches along a row. Sight reaches only 8 rows
+    /// up and down, so the bottom right corner of the room, 9 rows below the
+    /// top row and more than 16 columns from the start, has never been in
+    /// sight.
     const STEPS_EAST: i32 = 14;
 
-    /// Left wall on the player's row: seen at the start, out of view after
-    /// the walk.
+    /// Left wall on the start row: seen at the start, out of view after the
+    /// walk.
     const REMEMBERED_WALL: Position = Position::new(0, 5);
     /// Floor next to it: seen at the start, out of view after the walk.
     const REMEMBERED_FLOOR: Position = Position::new(1, 5);
-    /// The pillar, four cells behind the player after the walk.
+    /// The pillar, below and to the left of the player after the walk.
     const VISIBLE_WALL: Position = FIXED_ROOM_PILLAR;
-    /// Floor one cell east of the player after the walk.
+    /// Floor four rows below and one column east of the player after the
+    /// walk.
     const VISIBLE_FLOOR: Position = Position::new(20, 5);
-    /// Right wall on the player's row: never within sight.
-    const UNKNOWN_WALL: Position = Position::new(29, 5);
-    /// Floor next to it, nine cells from the player: never within sight.
-    const UNKNOWN_FLOOR: Position = Position::new(28, 5);
+    /// Right wall on the bottom floor row: never within sight.
+    const UNKNOWN_WALL: Position = Position::new(29, 10);
+    /// Floor next to it, nine rows below the player: never within sight.
+    const UNKNOWN_FLOOR: Position = Position::new(28, 10);
 
-    /// A game in the fixed room after the player walked [`STEPS_EAST`]
-    /// cells east, which leaves every cell state of the constants above.
+    /// A game in the fixed room after the player walked [`STEPS_NORTH`]
+    /// cells north then [`STEPS_EAST`] cells east, which leaves every cell
+    /// state of the constants above.
     fn explored_fixed_room() -> Game {
         let mut game = Game::in_fixed_room(FIXED_ROOM_SEED);
+        for _ in 0..STEPS_NORTH {
+            game.submit(Action::Move(Direction::North));
+        }
         for _ in 0..STEPS_EAST {
             game.submit(Action::Move(Direction::East));
         }
@@ -570,7 +581,7 @@ mod tests {
 
         assert_eq!(
             game.player_actor().position(),
-            Position::new(PLAYER_START.x + STEPS_EAST, PLAYER_START.y)
+            Position::new(PLAYER_START.x + STEPS_EAST, PLAYER_START.y - STEPS_NORTH)
         );
         for position in [VISIBLE_WALL, VISIBLE_FLOOR] {
             assert!(game.is_visible(position), "{position:?}");
@@ -766,8 +777,8 @@ mod tests {
     /// `docs/design.md` gives it ("Créatures") and the cell
     /// [`room_with_every_form`] places it on.
     ///
-    /// The cells form two rows of five, two rows above and below the player
-    /// of [`explored_fixed_room`] at (19, 5), east of the pillar so nothing
+    /// The cells form two rows of five, two and six rows below the player
+    /// of [`explored_fixed_room`] at (19, 1), east of the pillar so nothing
     /// hides them: commons on the upper row, elites under them.
     const FORMS: [(&str, char, Token, Position); 10] = [
         ("vermin", 'v', Token::Hostile, Position::new(17, 3)),
@@ -1011,7 +1022,7 @@ mod tests {
 
     /// Items of [`room_with_items`], with the glyph of their family in
     /// Unicode and in ASCII (`docs/design.md`, "Objets") and their cell: in
-    /// view, in a row two cells above the player of [`explored_fixed_room`].
+    /// view, in a row two cells below the player of [`explored_fixed_room`].
     const ITEMS: [(&str, char, char, Position); 3] = [
         ("healing_draught", '¡', '!', Position::new(18, 3)),
         ("veil_page", '¶', '?', Position::new(19, 3)),

@@ -43,7 +43,7 @@ library, and the terminal application in a binary that depends on it.
 | `content::floor`, `content::floor_file` | `FloorKind` (rooms or caves) and the floor rules: the weight of each kind, floor by floor, with the checks a rule must pass. |
 | `event` | `Event`: what happened during a turn (moved, attacked, died, sigil cast, glyph learned, picked up, descended…). |
 | `explore` | `explore_step`: the step of automatic exploration towards the nearest unseen cell next to known ground, by a Dijkstra map planned on what the player remembers. |
-| `fov` | Symmetric shadowcasting in integer fractions, with a sight radius of 8. |
+| `fov` | Symmetric shadowcasting in integer fractions, within an elliptical `SightRange`: 16 cells along a row, 8 along a column (`SIGHT_RANGE`). |
 | `game` | `Game`, the game in progress, and its single entry point `Game::submit`. |
 | `game::world` | What the current floor holds: map, actors, items, engraved glyphs, the player's inventory. |
 | `game::cast` | What `Action::Cast` does: cost, essence, target, effect, backlash. |
@@ -186,7 +186,7 @@ the alternative set aside.
 | D12 | `▒` walls, verdigris magic with a gold player, the grimoire visible while tracing. | `█` or `═ ║` walls, amethyst magic, tracing from memory. |
 | D13 | GitHub repository created at the end of the build, private then public. | A private repository from the first week. |
 | D14 | Camera centred on the player and clamped to the edges; the floor centred along an axis where the screen is larger. | A floor anchored at the top left. |
-| D15 | Sight radius 8, light passing a diagonal gap like a step does, walls lit when part of their face is. | Diagonal gaps opaque to sight. |
+| D15 | Sight reaching an ellipse 16 cells across and 8 up and down (a terminal cell is about twice as tall as wide, so it looks round), light passing a diagonal gap like a step does, walls lit when part of their face is. | Diagonal gaps opaque to sight; a disc of radius 8; a 12 × 8 ellipse. |
 | D16 | Six monsters out of sight of the start, with random starting energy; monsters see through the player's field of view. | Zero starting energy, one field of view per monster. |
 | D17 | Bump attacks; damage = max(1, attack − defense + roll in −1..+1); no miss. | A separate attack action, a to-hit roll, player stats in data. |
 | D18 | Recognition by Levenshtein distance on nodes; patterns at least 3 edits apart, so a near miss matches one sigil only. | A 2-edit gap with "first in the file wins". |

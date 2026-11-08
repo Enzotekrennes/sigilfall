@@ -7,8 +7,8 @@
 //! come from the code under test; reachability and distances are recomputed
 //! with a plain breadth-first search. The rules are written out (6 monsters
 //! on the first floor then one more per floor up to 12, 2 glyphs, 3 items,
-//! sight radius 8) instead of read from the production constants, except
-//! where a test says so.
+//! sight 16 cells along a row and 8 along a column) instead of read from the
+//! production constants, except where a test says so.
 
 use std::collections::{HashSet, VecDeque};
 
@@ -414,8 +414,10 @@ fn an_unknown_kind_names_the_kind_field() {
 
 // --- Placement in a cave ---------------------------------------------------
 
-/// Sight radius of the player, written out from the design.
-const SIGHT: f64 = 8.0;
+/// Sight range of the player along a row, written out from the design.
+const SIGHT_COLUMNS: f64 = 16.0;
+/// Sight range of the player along a column, written out from the design.
+const SIGHT_ROWS: f64 = 8.0;
 
 /// Breadth-first reach from `from` over open cells with the eight moves.
 fn reach(map: &Map, from: Position) -> HashSet<Position> {
@@ -436,8 +438,13 @@ fn reach(map: &Map, from: Position) -> HashSet<Position> {
     seen
 }
 
-fn distance(a: Position, b: Position) -> f64 {
-    f64::from((a.x - b.x).pow(2) + (a.y - b.y).pow(2)).sqrt()
+/// Whether `b` is within the player's sight range of `a`, walls ignored:
+/// its centre lies inside the ellipse whose half-axes are half a cell longer
+/// than the range (no cell lies on its edge, so rounding cannot matter).
+fn within_sight(a: Position, b: Position) -> bool {
+    let dx = f64::from(a.x - b.x) / (SIGHT_COLUMNS + 0.5);
+    let dy = f64::from(a.y - b.y) / (SIGHT_ROWS + 0.5);
+    dx * dx + dy * dy < 1.0
 }
 
 /// Everything the placement of a cave must respect, for one floor.
@@ -458,9 +465,9 @@ fn check_placement(seed: Seed, depth: u32, floor: &Floor) -> Result<(), String> 
         if map.tile(p) != Some(Tile::Floor) || !reachable.contains(&p) {
             return fail(format!("monster at {p:?} is not on reachable floor"));
         }
-        if distance(p, floor.start()) <= SIGHT {
+        if within_sight(p, floor.start()) {
             return fail(format!(
-                "monster at {p:?} is within {SIGHT} of the start {:?}",
+                "monster at {p:?} is within sight range of the start {:?}",
                 floor.start()
             ));
         }

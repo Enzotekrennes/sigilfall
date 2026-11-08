@@ -61,7 +61,12 @@ Sleep 2s
 Type@110ms "bbbbyybbyyyyykk"
 Sleep 2s
 
-# A rat comes into sight: trace Ember (7, 5, 3) on the grid and cast it.
+# Up the corridor, across the next room and along the passage that leads
+# to the stairs, until a rat comes into sight.
+Type@110ms "kkkyhhhhhyyyyykkkkkullllllll"
+Sleep 1.5s
+
+# Trace Ember (7, 5, 3) on the grid and cast it at the rat.
 Type "t"
 Sleep 1.2s
 Type@500ms "753"
@@ -70,7 +75,7 @@ Enter
 Sleep 2s
 
 # On to the stairs, through a wax beetle that has to be fought in melee.
-Type@130ms "kkkyhhhhhyyyyykkkkkullllllllllllllllukkkk"
+Type@130ms "llllllyyyyyykkk"
 Sleep 1.5s
 
 # Down to the second floor.

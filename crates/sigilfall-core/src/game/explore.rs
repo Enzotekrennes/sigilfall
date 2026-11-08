@@ -169,14 +169,14 @@ mod tests {
 
         assert_eq!(
             game.player_actor().position(),
-            Position::new(23, 1),
-            "8 cells short of the end wall, which the player then sees"
+            Position::new(15, 1),
+            "16 cells short of the end wall, which the player then sees"
         );
-        assert_eq!(steps, 22);
+        assert_eq!(steps, 14);
         assert_eq!(
             events.last(),
             Some(&Event::NothingToExplore {
-                position: Position::new(23, 1)
+                position: Position::new(15, 1)
             })
         );
     }
@@ -272,7 +272,8 @@ mod tests {
             let reachable = flood_fill(game.map(), game.player_actor().position());
 
             // Each step walks towards a cell never seen, and sight reaches
-            // 8 cells: a floor needs far fewer steps than it has open cells.
+            // 8 to 16 cells: a floor needs far fewer steps than it has open
+            // cells.
             explore_to_the_end(&mut game, reachable.len());
 
             for cell in reachable {

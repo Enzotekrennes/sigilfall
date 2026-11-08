@@ -39,7 +39,7 @@ use rand::RngExt as _;
 use rand_chacha::ChaCha8Rng;
 
 use crate::content::{Content, FloorKind, ItemDef, MonsterDef, SigilDef};
-use crate::fov::{self, SIGHT_RADIUS};
+use crate::fov::{self, SIGHT_RANGE};
 use crate::geometry::Position;
 use crate::map::{Map, Tile};
 use crate::path::DijkstraMap;
@@ -342,7 +342,7 @@ pub fn floor_kind(seed: Seed, depth: u32, content: &Content) -> FloorKind {
 ///
 /// - a cell drawn uniformly among the free floor cells of the open cells,
 ///   the start room excluded on a floor of rooms, that lie out of
-///   [`SIGHT_RADIUS`] of the start (whatever the walls), so the player sees
+///   [`SIGHT_RANGE`] of the start (whatever the walls), so the player sees
 ///   no monster on arrival;
 /// - a definition drawn among `content.monster_weights(depth)`, each with a
 ///   chance proportional to its weight, in one draw of the stream;
@@ -512,7 +512,7 @@ fn monster_cells(
         .filter(|&cell| {
             start_room.is_none_or(|room| !inside(room, cell))
                 && floor.map.tile(cell) == Some(Tile::Floor)
-                && !fov::in_sight_range(floor.start, cell, SIGHT_RADIUS)
+                && !fov::in_sight_range(floor.start, cell, SIGHT_RANGE)
         })
         .collect()
 }
@@ -893,7 +893,7 @@ mod tests {
             assert_eq!(floor.glyphs().len(), GLYPHS_PER_FLOOR, "{context}");
             assert_eq!(floor.items().len(), ITEMS_PER_FLOOR, "{context}");
             let distances = DijkstraMap::new(floor.map(), [floor.start()]);
-            let seen_at_start = fov::visible_cells(floor.map(), floor.start(), SIGHT_RADIUS);
+            let seen_at_start = fov::visible_cells(floor.map(), floor.start(), SIGHT_RANGE);
             let mut cells: Vec<Position> = Vec::new();
             let monsters = floor.monsters().iter().map(MonsterSpawn::position);
             let glyphs = floor.glyphs().iter().map(Engraving::position);
@@ -909,7 +909,7 @@ mod tests {
             }
             for cell in monsters {
                 assert!(
-                    !fov::in_sight_range(floor.start(), cell, SIGHT_RADIUS),
+                    !fov::in_sight_range(floor.start(), cell, SIGHT_RANGE),
                     "{context}: {cell:?} within sight range"
                 );
                 assert!(!seen_at_start.contains(&cell), "{context}: {cell:?} seen");
@@ -981,7 +981,7 @@ mod tests {
             if let Some(start_room) = layout.start_room {
                 assert!(inside(start_room, floor.start()), "{context}");
             }
-            let seen_at_start = fov::visible_cells(floor.map(), floor.start(), SIGHT_RADIUS);
+            let seen_at_start = fov::visible_cells(floor.map(), floor.start(), SIGHT_RANGE);
             let allowed: Vec<&str> = content.monsters_at(depth).map(MonsterDef::id).collect();
 
             assert_eq!(
@@ -1002,7 +1002,7 @@ mod tests {
                     "{context}: {cell:?} outside the rooms"
                 );
                 assert!(
-                    !fov::in_sight_range(floor.start(), cell, SIGHT_RADIUS),
+                    !fov::in_sight_range(floor.start(), cell, SIGHT_RANGE),
                     "{context}: {cell:?} within sight range"
                 );
                 assert!(!seen_at_start.contains(&cell), "{context}: {cell:?} seen");

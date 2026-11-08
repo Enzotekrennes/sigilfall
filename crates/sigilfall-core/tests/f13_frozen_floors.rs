@@ -7,7 +7,13 @@
 //! last commit before caves existed (`7d65daa`, task T29), taken with the
 //! same dump function in a copy of that commit. They are frozen here, so the
 //! test fails if a later change alters one of those floors, whatever the
-//! unit tests of the generator say. `generate` is the rooms-only layout and
+//! unit tests of the generator say.
+//!
+//! One change was made on purpose since: when sight became an ellipse 16
+//! cells across and 8 up and down (task T31, decision D15 revised), monsters
+//! must start out of that wider range, so the monster positions of the full
+//! floors moved (their kinds and energies, the layouts, glyphs and items did
+//! not). The full hashes were taken again then; the bare ones are unchanged. `generate` is the rooms-only layout and
 //! `generate_with_monsters` the full floor of the shipped content: floors 1
 //! and 2, always rooms, must be the same as before; deeper floors drawn
 //! as rooms must be too.
@@ -62,32 +68,32 @@ fn dump(floor: &Floor) -> String {
 
 /// `(seed, depth, "bare" | "full", hash)` for floors generated before caves
 /// existed: the bare layout of rooms, and the full floor with monsters,
-/// glyphs and items for floors 1 and 2.
+/// glyphs and items for floors 1 and 2 (monster positions as of T31).
 const BEFORE_CAVES: &[(u64, u32, &str, u64)] = &[
     (0, 1, "bare", 0x753ba0fc96a2a4cb),
     (0, 1, "full", 0x934ca905b13cd564),
     (0, 2, "bare", 0xdb1383726a7f4059),
-    (0, 2, "full", 0xaf539b712c09b499),
+    (0, 2, "full", 0xf009adc19ecfdcfb),
     (1, 1, "bare", 0xac35e5164c003aa5),
-    (1, 1, "full", 0x570c7c8b0c33ffdc),
+    (1, 1, "full", 0x3bd42a2fb170d435),
     (1, 2, "bare", 0x3cf05770c23d536e),
-    (1, 2, "full", 0xbf9da98c55c5b591),
+    (1, 2, "full", 0xf72e66c6ee23cb20),
     (42, 1, "bare", 0xa6b102c9168a7448),
-    (42, 1, "full", 0x02b0d908d89615d6),
+    (42, 1, "full", 0x74d3752876efd84a),
     (42, 2, "bare", 0xfd46457738006f39),
-    (42, 2, "full", 0x6313c8b25882182c),
+    (42, 2, "full", 0xa4a2fa5e5158fa38),
     (9940, 1, "bare", 0x8a518556f43a5ce6),
-    (9940, 1, "full", 0x96976987b94f221b),
+    (9940, 1, "full", 0xdd953059236c28b4),
     (9940, 2, "bare", 0xc9d4b2309a4c776b),
-    (9940, 2, "full", 0x01a069635a80d382),
+    (9940, 2, "full", 0x277d2f17fbbd8f19),
     (9167800254066513064, 1, "bare", 0x2eef9c52cc9837e3),
-    (9167800254066513064, 1, "full", 0xaaade9e17a56c152),
+    (9167800254066513064, 1, "full", 0xcc61e94fba477964),
     (9167800254066513064, 2, "bare", 0x06d86fbf29f9b8de),
-    (9167800254066513064, 2, "full", 0x89e5ea98df08562e),
+    (9167800254066513064, 2, "full", 0xba5ae13caf9324cd),
     (18446744073709551615, 1, "bare", 0x80611dbe0eb97b62),
-    (18446744073709551615, 1, "full", 0xcdda75b9b455aba8),
+    (18446744073709551615, 1, "full", 0x3a91eb0d7b2afefc),
     (18446744073709551615, 2, "bare", 0x9c81b912b5f29345),
-    (18446744073709551615, 2, "full", 0xe4776330564da7ac),
+    (18446744073709551615, 2, "full", 0x1e8cce4790e6384d),
     (0, 3, "bare", 0x58646a555618db6c),
     (0, 7, "bare", 0xa731dbf88086d05f),
     (0, 10, "bare", 0xb74735cdde612c4e),

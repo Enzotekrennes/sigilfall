@@ -15,7 +15,7 @@ use sigilfall_core::actor::ActorId;
 use sigilfall_core::combat::Combatant;
 use sigilfall_core::content::Content;
 use sigilfall_core::event::Event;
-use sigilfall_core::fov::SIGHT_RADIUS;
+use sigilfall_core::fov::SIGHT_RANGE;
 use sigilfall_core::game::{Game, Status};
 use sigilfall_core::generation::MONSTERS_PER_FLOOR;
 use sigilfall_core::geometry::{Direction, Position};
@@ -53,15 +53,17 @@ fn chebyshev(a: Position, b: Position) -> u32 {
     a.x.abs_diff(b.x).max(a.y.abs_diff(b.y))
 }
 
-/// Squared straight-line distance between two cells.
-fn squared_distance(a: Position, b: Position) -> u32 {
-    let (dx, dy) = (a.x.abs_diff(b.x), a.y.abs_diff(b.y));
-    dx * dx + dy * dy
+/// Whether `b` can be in sight of `a`, walls ignored: its centre lies inside
+/// the ellipse whose half-axes are half a cell longer than `SIGHT_RANGE`
+/// (`fov::SightRange::reaches`), written here in floating point. No cell
+/// lies on the edge of that ellipse, so rounding cannot change the answer.
+fn within_sight_range(a: Position, b: Position) -> bool {
+    let dx = f64::from(a.x.abs_diff(b.x));
+    let dy = f64::from(a.y.abs_diff(b.y));
+    let columns = f64::from(SIGHT_RANGE.columns) + 0.5;
+    let rows = f64::from(SIGHT_RANGE.rows) + 0.5;
+    (dx / columns).powi(2) + (dy / rows).powi(2) < 1.0
 }
-
-/// Squared distance up to which a cell can be seen (`fov::visible_cells`: a
-/// cell is in range when `dx^2 + dy^2 <= radius^2 + radius`).
-const SIGHT_RANGE_SQUARED: u32 = SIGHT_RADIUS * SIGHT_RADIUS + SIGHT_RADIUS;
 
 /// Keys of every monster, alive now.
 fn monsters(game: &Game) -> Vec<ActorId> {
@@ -160,7 +162,7 @@ fn assert_listing_is_consistent(game: &Game, context: &str) {
         assert_eq!(monster.family, data.family(), "{context}");
         assert_eq!(monster.elite, data.elite(), "{context}");
         assert!(
-            squared_distance(player, monster.position) <= SIGHT_RANGE_SQUARED,
+            within_sight_range(player, monster.position),
             "{context}: a monster beyond the sight range is listed"
         );
     }
@@ -193,7 +195,7 @@ fn six_monsters_per_floor_none_in_view_none_within_sight_range_of_the_start() {
                 "seed {seed}: {position:?} in view"
             );
             assert!(
-                squared_distance(start, position) > SIGHT_RANGE_SQUARED,
+                !within_sight_range(start, position),
                 "seed {seed}: a monster starts at {position:?}, within sight range of {start:?}"
             );
             assert!(game.map().is_walkable(position), "seed {seed}");

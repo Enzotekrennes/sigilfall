@@ -72,7 +72,7 @@ use crate::ai;
 use crate::combat::{self, Combatant};
 use crate::content::{Content, Family, ItemDef, ItemFamily, MonsterDef, SigilDef};
 use crate::event::Event;
-use crate::fov::{self, SIGHT_RADIUS};
+use crate::fov::{self, SIGHT_RANGE};
 use crate::generation::{self, Engraving, FIRST_DEPTH, Floor, ItemSpawn, MonsterSpawn};
 use crate::geometry::{Direction, Position};
 use crate::item::{Item, ItemId};
@@ -595,10 +595,11 @@ impl Game {
 
     /// Returns whether the player sees `position` right now.
     ///
-    /// The field of view reaches [`SIGHT_RADIUS`] cells and is blocked by
-    /// walls (see the `fov` module). It is computed when the game starts and
-    /// after every action of the player that took time. The player's own
-    /// cell is always visible; cells outside the map never are.
+    /// The field of view reaches as far as [`SIGHT_RANGE`] (16 cells along a
+    /// row, 8 along a column) and is blocked by walls (see the `fov`
+    /// module). It is computed when the game starts and after every action
+    /// of the player that took time. The player's own cell is always
+    /// visible; cells outside the map never are.
     pub fn is_visible(&self, position: Position) -> bool {
         self.world.map.is_visible(position)
     }
@@ -676,7 +677,7 @@ impl Game {
     /// it on the map, which also remembers those cells.
     fn update_field_of_view(&mut self) {
         let origin = self.world.actors[self.world.player].position;
-        let field = fov::visible_cells(&self.world.map, origin, SIGHT_RADIUS);
+        let field = fov::visible_cells(&self.world.map, origin, SIGHT_RANGE);
         self.world.map.set_visible(field);
     }
 
@@ -949,7 +950,7 @@ mod tests {
     const SEED: Seed = Seed::new(42);
 
     /// Cells of the fixed room out of the player's sight from
-    /// [`PLAYER_START`] (more than eight cells away), where monsters wait
+    /// [`PLAYER_START`] (more than 16 columns away), where monsters wait
     /// unseen as long as the player stays near the left wall.
     const FAR_CELLS: [Position; 2] = [Position::new(25, 3), Position::new(27, 8)];
 
@@ -1623,17 +1624,19 @@ mod tests {
                 .positions()
                 .filter(|&p| game.is_visible(p))
                 .collect::<Vec<_>>(),
-            fov::visible_cells(game.map(), PLAYER_START, SIGHT_RADIUS)
+            fov::visible_cells(game.map(), PLAYER_START, SIGHT_RANGE)
         );
-        // Nine cells to the right is beyond the radius of eight.
-        assert!(!game.is_visible(Position::new(14, 5)));
-        assert!(!game.is_remembered(Position::new(14, 5)));
+        // Seventeen cells to the right is beyond the 16 cells sight reaches
+        // along a row.
+        assert!(game.is_visible(Position::new(21, 5)));
+        assert!(!game.is_visible(Position::new(22, 5)));
+        assert!(!game.is_remembered(Position::new(22, 5)));
     }
 
     #[test]
     fn the_field_of_view_follows_the_player() {
         let mut game = fixed_room_game();
-        let far_right = Position::new(14, 5);
+        let far_right = Position::new(22, 5);
 
         for _ in 0..3 {
             game.submit(Action::Move(Direction::East));
@@ -1648,7 +1651,7 @@ mod tests {
                 .positions()
                 .filter(|&p| game.is_visible(p))
                 .collect::<Vec<_>>(),
-            fov::visible_cells(game.map(), player, SIGHT_RADIUS)
+            fov::visible_cells(game.map(), player, SIGHT_RANGE)
         );
     }
 
@@ -1699,7 +1702,7 @@ mod tests {
 
         let visible: Vec<Position> = map.positions().filter(|&p| game.is_visible(p)).collect();
 
-        assert_eq!(visible, fov::visible_cells(map, start, SIGHT_RADIUS));
+        assert_eq!(visible, fov::visible_cells(map, start, SIGHT_RANGE));
         assert!(visible.contains(&start));
         // The rest of the floor lies behind walls or beyond the radius.
         assert!(visible.len() < map.positions().count());
@@ -1835,7 +1838,7 @@ mod tests {
         game.world.actors[game.world.player].position = hidden;
         game.update_field_of_view();
         assert!(
-            !fov::visible_cells(game.map(), position_of(&game, monster), SIGHT_RADIUS)
+            !fov::visible_cells(game.map(), position_of(&game, monster), SIGHT_RANGE)
                 .contains(&hidden)
         );
 
@@ -1884,7 +1887,7 @@ mod tests {
                 .filter(|&p| game.map().is_walkable(p))
             {
                 let monster_sees =
-                    fov::visible_cells(game.map(), cell, SIGHT_RADIUS).contains(&player);
+                    fov::visible_cells(game.map(), cell, SIGHT_RANGE).contains(&player);
                 assert_eq!(
                     monster_sees,
                     game.is_visible(cell),

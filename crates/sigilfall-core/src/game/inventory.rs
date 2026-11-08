@@ -205,7 +205,7 @@ mod tests {
     const SEED: Seed = Seed::new(42);
 
     /// A cell of the fixed room out of the player's sight from
-    /// [`PLAYER_START`] (more than eight cells away).
+    /// [`PLAYER_START`] (more than 16 columns away).
     const FAR_CELL: Position = Position::new(25, 3);
 
     /// The content shipped with the game.
@@ -759,13 +759,13 @@ mod tests {
         // Walking within sight of the far item shows it and leaves the near
         // one behind, out of sight; stepping back swaps them again, although
         // the far cell stays remembered.
-        for _ in 0..12 {
+        for _ in 0..18 {
             game.submit(Action::Move(Direction::East));
         }
         assert!(game.is_visible(FAR_CELL) && !game.is_visible(near));
         let positions: Vec<Position> = game.visible_items().map(|i| i.position).collect();
         assert_eq!(positions, [FAR_CELL]);
-        for _ in 0..12 {
+        for _ in 0..18 {
             game.submit(Action::Move(Direction::West));
         }
         assert!(game.is_remembered(FAR_CELL) && !game.is_visible(FAR_CELL));

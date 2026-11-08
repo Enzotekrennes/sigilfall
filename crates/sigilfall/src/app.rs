@@ -4458,9 +4458,10 @@ mod tests {
                         &what,
                     );
 
-                    // Walk far east along the clear row 5: both glyphs drop
-                    // out of the 8-cell sight.
-                    for _ in 0..14 {
+                    // Walk far east along the clear row 5, to (25, 5): both
+                    // glyphs drop out of the 16 cells sight reaches along a
+                    // row.
+                    for _ in 0..18 {
                         game.submit(Action::Move(Direction::East));
                     }
                     assert!(!game.is_visible(read) && game.is_remembered(read));
