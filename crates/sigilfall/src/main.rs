@@ -21,6 +21,8 @@ mod f11_acceptance;
 #[cfg(test)]
 mod f12_acceptance;
 #[cfg(test)]
+mod f3_acceptance;
+#[cfg(test)]
 mod f6_acceptance;
 #[cfg(test)]
 mod f7_acceptance;
