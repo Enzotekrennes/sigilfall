@@ -4,8 +4,9 @@
 //!
 //! Exposes [`describe`], which turns the events of one `Game::submit` into
 //! [`Message`]s, the opening messages ([`welcome`], [`welcome_back`],
-//! [`save_set_aside`]), the save notice [`save_not_deleted`], the cause of
-//! death of the end screen ([`cause_of_death`]), monster, sigil and item names
+//! [`save_set_aside`]), the save notice [`save_not_deleted`], the words of
+//! the death summary (its [`epitaph`], [`cause_of_death`], the labels of its
+//! counts and [`cast_breakdown`]), monster, sigil and item names
 //! ([`monster_name`], [`sigil_name`], [`item_name`]), what a sigil or an
 //! item does in a few words ([`effect_summary`], [`item_summary`]), the time
 //! a cast takes ([`cast_time`]), why the game refused an item
@@ -31,6 +32,7 @@ use sigilfall_core::item::{INVENTORY_CAPACITY, ItemId, ItemRefusal};
 use sigilfall_core::rng::Seed;
 use sigilfall_core::schedule::{MOVE_COST, STROKE_COST, cast_cost};
 use sigilfall_core::sigil::{CastQuality, Node};
+use sigilfall_core::stats::CastCounts;
 
 use crate::message_log::{Message, Tone};
 
@@ -131,11 +133,42 @@ pub const EMPTY_TRACE: &str = "Link at least one node first.";
 /// `docs/design.md`.
 pub const DEATH_TITLE: &str = "T H E   D E S C E N T   E N D S";
 
-/// Line under the end screen's title.
-pub const DEATH_SUBTITLE: &str = "The walls will keep your trace.";
+/// Lines under the death summary's title, one per run, chosen from the
+/// seed by [`epitaph`]: each speaks of the trace the player leaves in the
+/// dungeon, the theme of the game. At most 60 characters, so a line fits an
+/// 80-column screen with room to spare.
+pub const EPITAPHS: [&str; 8] = [
+    "The walls will keep your trace.",
+    "Your last stroke is still drying on the stone.",
+    "The ink outlived the hand that traced it.",
+    "Somewhere below, a glyph waits for another reader.",
+    "The dark learnt your sigils by heart.",
+    "Your essence seeps into the old carvings.",
+    "The grimoire closes; its margins remember you.",
+    "Dust settles over an unfinished pattern.",
+];
 
-/// Label before the seed on the end screen.
-pub const SEED_LABEL: &str = "Seed";
+/// Label inside the frame around the seed on the death summary.
+pub const SEED_LABEL: &str = "SEED";
+
+/// Label of the deepest floor reached, in the death summary's counts.
+pub const DEPTH_REACHED_LABEL: &str = "Depth reached";
+
+/// Label of the number of turns played, in the death summary's counts.
+pub const TURNS_LABEL: &str = "Turns";
+
+/// Label of the number of creatures killed, in the death summary's counts.
+pub const KILLS_LABEL: &str = "Creatures slain";
+
+/// Label of the number of glyphs read that taught a sigil, in the death
+/// summary's counts.
+pub const GLYPHS_LABEL: &str = "Glyphs learnt";
+
+/// Label of the number of sigils cast, in the death summary's counts.
+pub const CASTS_LABEL: &str = "Sigils cast";
+
+/// Label of the number of items used, in the death summary's counts.
+pub const ITEMS_USED_LABEL: &str = "Items used";
 
 /// Key that leaves the game, as the key help shows it.
 pub const QUIT_KEY: &str = "q";
@@ -645,23 +678,48 @@ pub fn capacity(carried: usize) -> String {
     format!("{carried}/{INVENTORY_CAPACITY}")
 }
 
-/// Returns the sentence of the end screen that says who killed the player
-/// and when: "Killed by an acolyte on turn 1283."
+/// Returns the sentence of the death summary that says who killed the
+/// player, where and when: "Killed by an acolyte at depth 4, on turn 1283."
 ///
-/// `turn` is the player's turn the death happened on, counted from 1 as on
-/// the status line. The player cannot kill itself today; should it happen,
-/// the sentence says so instead of naming a monster.
-pub fn cause_of_death(killed_by: &Combatant, turn: u64, content: &Content) -> String {
+/// `depth` is the floor of the death and `turn` the player's turn it
+/// happened on, counted from 1 as on the status line. A death by the
+/// player's own hand (`Combatant::Player`, such as its own spell, which no
+/// rule causes today) says so instead of naming a monster.
+pub fn cause_of_death(killed_by: &Combatant, depth: u32, turn: u64, content: &Content) -> String {
     match killed_by {
-        Combatant::Player => format!("You fell by your own hand on turn {turn}."),
+        Combatant::Player => {
+            format!("Undone by your own magic at depth {depth}, on turn {turn}.")
+        }
         Combatant::Monster { definition } => {
             let name = monster_name(content, definition);
             format!(
-                "Killed by {} {name} on turn {turn}.",
+                "Killed by {} {name} at depth {depth}, on turn {turn}.",
                 indefinite_article(name)
             )
         }
     }
+}
+
+/// Returns the line under the death summary's title for the run of `seed`,
+/// one of [`EPITAPHS`]: the same seed always gets the same line, so a
+/// replayed run ends the same way.
+pub fn epitaph(seed: Seed) -> &'static str {
+    let value = seed.value();
+    // Folding the high half in spreads the seeds typed by hand (small
+    // numbers) and the random ones alike over the whole list.
+    let mixed = value ^ (value >> 32);
+    let count = EPITAPHS.len() as u64;
+    let index = usize::try_from(mixed % count).unwrap_or_default();
+    EPITAPHS[index]
+}
+
+/// Returns the sigils cast by quality, as the death summary details them:
+/// "pure 22 · unstable 6 · fizzled 3", joined by `separator`.
+pub fn cast_breakdown(casts: CastCounts, separator: char) -> String {
+    format!(
+        "pure {} {separator} unstable {} {separator} fizzled {}",
+        casts.pure, casts.unstable, casts.fizzled
+    )
 }
 
 /// Returns the command that replays `seed`, as the end screen suggests it:
@@ -1106,16 +1164,54 @@ mod tests {
         };
 
         assert_eq!(
-            cause_of_death(&by("acolyte"), 1283, &content),
-            "Killed by an acolyte on turn 1283."
+            cause_of_death(&by("acolyte"), 4, 1283, &content),
+            "Killed by an acolyte at depth 4, on turn 1283."
         );
         assert_eq!(
-            cause_of_death(&by("ossuary_rat"), 7, &content),
-            "Killed by an ossuary rat on turn 7."
+            cause_of_death(&by("ossuary_rat"), 1, 7, &content),
+            "Killed by an ossuary rat at depth 1, on turn 7."
         );
         assert_eq!(
-            cause_of_death(&by("hierophant"), 12, &content),
-            "Killed by a hierophant on turn 12."
+            cause_of_death(&by("hierophant"), 10, 12, &content),
+            "Killed by a hierophant at depth 10, on turn 12."
+        );
+    }
+
+    #[test]
+    fn a_death_by_the_player_own_hand_names_no_monster() {
+        assert_eq!(
+            cause_of_death(&Combatant::Player, 3, 40, &content()),
+            "Undone by your own magic at depth 3, on turn 40."
+        );
+    }
+
+    #[test]
+    fn the_epitaph_follows_the_seed_and_every_one_can_be_drawn() {
+        let seed = Seed::new(0x7F3A_91C2_0B5E_D4A8);
+        assert_eq!(epitaph(seed), epitaph(seed), "deterministic");
+
+        let drawn: HashSet<&str> = (0..64).map(|value| epitaph(Seed::new(value))).collect();
+        assert_eq!(drawn.len(), EPITAPHS.len(), "small seeds reach them all");
+        for line in EPITAPHS {
+            assert!(line.is_ascii() && line.len() <= 60, "{line}");
+        }
+    }
+
+    #[test]
+    fn the_cast_breakdown_names_each_quality_in_order() {
+        let casts = CastCounts {
+            pure: 22,
+            unstable: 6,
+            fizzled: 3,
+        };
+
+        assert_eq!(
+            cast_breakdown(casts, '·'),
+            "pure 22 · unstable 6 · fizzled 3"
+        );
+        assert_eq!(
+            cast_breakdown(casts, '-'),
+            "pure 22 - unstable 6 - fizzled 3"
         );
     }
 

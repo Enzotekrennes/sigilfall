@@ -2,8 +2,8 @@
 //!
 //! Exposes [`render`], which picks what to draw for the current terminal
 //! size and the state of the game, the [`Overlay`] drawn over the map, one
-//! module per screen ([`game`] while playing, [`death`] once the player has
-//! died), the parts of the game screen ([`hud`], the side panel, [`log`],
+//! module per screen ([`game`] while playing, [`death`], the death
+//! summary, once the player has died), the parts of the game screen ([`hud`], the side panel, [`log`],
 //! the message log, [`sigil`], the overlay where sigils are traced, with
 //! its [`grimoire`], and [`inventory`], the overlay of what the player
 //! carries) and the [`camera`] that decides which part of the map is seen. Drawing never
@@ -63,7 +63,7 @@ pub const fn fits(size: Size) -> bool {
 /// Draws the screen for `game` over the whole frame, with `theme`: the game
 /// screen with the messages of `log` while the game is played, with
 /// `overlay` over its map while the player casts or looks at the
-/// inventory, and the end screen once the game is over. Monster and sigil
+/// inventory, and the death summary once the game is over. Monster and sigil
 /// names come from `content`.
 ///
 /// The theme's background is painted on every cell first. When the frame
@@ -84,7 +84,7 @@ pub fn render(
     if !fits(area.as_size()) {
         render_too_small(frame, area, theme);
     } else if game.is_over() {
-        death::render(frame, area, game, log, content, theme);
+        death::render(frame, area, game, content, theme);
     } else {
         game::render(frame, area, game, log, content, overlay, theme);
     }

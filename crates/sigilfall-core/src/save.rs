@@ -11,7 +11,8 @@
 //! map with the cells seen and remembered, every actor with its energy and
 //! its memory of the player, the turn order, the items on the floor and in
 //! the inventory, the engraved glyphs, the grimoire, the counters of time,
-//! the status and the exact position of the gameplay random stream. A game
+//! the status, the run's statistics (`Game::stats`) and the exact position
+//! of the gameplay random stream. A game
 //! read back therefore plays out exactly as the one saved: the same actions
 //! give the same events, with the same actor and item keys.
 //!
@@ -47,7 +48,10 @@ use crate::game::Game;
 /// differently: a field added, removed or renamed, or a rule whose state is
 /// kept differently. [`from_str`] refuses any other version rather than
 /// guessing.
-pub const FORMAT_VERSION: u32 = 1;
+///
+/// Version 2 (T25) moved the player's turn count into the run's statistics
+/// (`stats`), written last.
+pub const FORMAT_VERSION: u32 = 2;
 
 /// Depth of nesting from which the pretty printer writes a value on one
 /// line.

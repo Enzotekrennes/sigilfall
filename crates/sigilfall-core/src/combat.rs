@@ -116,6 +116,11 @@ pub fn roll_damage(attack: i32, defense: i32, rng: &mut ChaCha8Rng) -> i32 {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Combatant {
     /// The character controlled by the person playing.
+    ///
+    /// As the killer of the player itself (`Event::Died::killed_by`,
+    /// `Status::GameOver`), it means a death by the player's own hand, such
+    /// as its own spell; the end-of-run summary says so instead of naming a
+    /// monster.
     Player,
     /// A creature of the content files.
     Monster {

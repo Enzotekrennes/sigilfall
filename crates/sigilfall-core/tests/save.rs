@@ -7,7 +7,9 @@
 //! middle of a fight and on the second floor. The other tests refuse saves
 //! of another format version, truncated or corrupted text, references to
 //! definitions the content lacks and inconsistent values, and save a
-//! finished game. Written against the public API only.
+//! finished game. The run's statistics (`Game::stats`, T25) are part of
+//! every round trip and have their own. Written against the public API
+//! only.
 
 use rand::RngExt as _;
 use rand_chacha::ChaCha8Rng;
@@ -197,6 +199,7 @@ fn assert_same_future(
         text,
         "{case}: the loaded game saves the same"
     );
+    assert_eq!(loaded.stats(), original.stats(), "{case}: same stats");
     let mut coverage = Coverage {
         freed_slots: text.matches("vacant: [],").count() < 2,
         ..Coverage::default()
@@ -211,6 +214,7 @@ fn assert_same_future(
         coverage.fought |= events.iter().any(|e| matches!(e, Event::Attacked { .. }));
     }
     assert_eq!(saved(&loaded), saved(original), "{case}: same final state");
+    assert_eq!(loaded.stats(), original.stats(), "{case}: same final stats");
     coverage
 }
 
@@ -333,6 +337,8 @@ fn a_finished_game_is_saved_and_read_back_finished() {
     assert_eq!(loaded.player_actor().hp(), 0);
     assert_eq!(loaded.depth(), game.depth());
     assert_eq!(loaded.player_turns(), game.player_turns());
+    assert_eq!(loaded.stats(), game.stats());
+    assert!(game.stats().total_kills() > 0, "the reckless player killed");
     assert!(loaded.submit(Action::Wait).is_empty());
     assert!(game.submit(Action::Wait).is_empty());
     assert_eq!(saved(&loaded), text);
@@ -578,4 +584,129 @@ fn an_inconsistent_save_is_refused() {
             "`{to}` gives `{expected}`, got: {error}"
         );
     }
+}
+
+/// [`small_game`] after the player read the glyph of ember, killed a rat
+/// and cast ember (at nothing) and an unknown trace: every count of the
+/// stats holds something.
+fn game_with_stats(content: &Content) -> Game {
+    let mut game = small_game(content);
+    // From (7, 6), onto the glyph of ember at (8, 8).
+    game.submit(Action::Move(Direction::SouthEast));
+    game.submit(Action::Move(Direction::South));
+    let (item, _) = game.inventory().next().expect("the draught picked up");
+    game.submit(Action::Use(item));
+    let rat = content.monster("ossuary_rat").expect("a shipped monster");
+    game.spawn_monster(Position::new(9, 8), rat);
+    for _ in 0..10 {
+        if game.stats().total_kills() > 0 {
+            break;
+        }
+        game.submit(Action::Move(Direction::East));
+    }
+    for digits in [[7, 5, 3], [1, 9, 7]] {
+        let mut trace = Trace::new();
+        for digit in digits {
+            trace
+                .push(sigilfall_core::sigil::Node::new(digit).unwrap())
+                .unwrap();
+        }
+        game.submit(Action::Cast {
+            trace,
+            direction: None,
+        });
+    }
+    let stats = game.stats();
+    assert_eq!(stats.kills().collect::<Vec<_>>(), [("ossuary_rat", 1)]);
+    assert_eq!((stats.casts().pure, stats.casts().fizzled), (1, 1));
+    assert_eq!((stats.glyphs_learnt(), stats.items_used()), (1, 1));
+    game
+}
+
+#[test]
+fn the_stats_are_saved_and_read_back_and_go_on_counting() {
+    let content = content();
+    let mut game = game_with_stats(&content);
+    let text = saved(&game);
+    assert!(
+        text.contains(
+            "stats: (
+        turns: "
+        ) && text.contains(
+            "kills: {
+            \"ossuary_rat\": 1,
+        },"
+        ) && text.contains(
+            "pure: 1,
+            unstable: 0,
+            fizzled: 1,"
+        ),
+        "the stats are readable in the save:
+{text}"
+    );
+
+    let mut loaded = save::from_str(&text, &content).expect("the save reads back");
+
+    assert_eq!(loaded.stats(), game.stats());
+    assert_eq!(loaded.player_turns(), game.player_turns());
+    let rat = content.monster("ossuary_rat").expect("a shipped monster");
+    for game in [&mut game, &mut loaded] {
+        let here = game.player_actor().position();
+        game.spawn_monster(here.step(Direction::East), rat);
+        for _ in 0..10 {
+            game.submit(Action::Move(Direction::East));
+        }
+    }
+    assert_eq!(loaded.stats(), game.stats());
+    assert_eq!(loaded.stats().total_kills(), 2, "the count goes on");
+}
+
+#[test]
+fn faulty_stats_are_refused() {
+    let content = content();
+    let game = game_with_stats(&content);
+    let text = saved(&game);
+    let turns = format!(
+        "stats: (
+        turns: {},",
+        game.player_turns()
+    );
+    // Above the largest count a save accepts, half the range of `u64`.
+    let too_many_turns = "stats: (
+        turns: 9300000000000000000,";
+
+    let unknown = edited_error(&text, "\"ossuary_rat\": 1,", "\"xyz\": 1,", &content);
+    assert_eq!(
+        unknown,
+        SaveError::UnknownReference {
+            kind: Reference::Monster,
+            id: "xyz".to_owned()
+        }
+    );
+    let cases = [
+        (
+            "\"ossuary_rat\": 1,",
+            "\"ossuary_rat\": 0,",
+            "the count of `ossuary_rat` killed is 0",
+        ),
+        (
+            "deepest: 1,",
+            "deepest: 0,",
+            "the deepest floor reached is 0",
+        ),
+        (turns.as_str(), too_many_turns, "the player turn count"),
+    ];
+    for (from, to, expected) in cases {
+        let error = edited_error(&text, from, to, &content);
+
+        assert!(
+            matches!(&error, SaveError::Inconsistent(problem) if problem.contains(expected)),
+            "`{to}` gives `{expected}`, got: {error}"
+        );
+    }
+    let misspelt = edited_error(&text, "glyphs_learnt", "glyphs_read", &content);
+    assert!(
+        matches!(misspelt, SaveError::Malformed { .. }),
+        "{misspelt}"
+    );
 }

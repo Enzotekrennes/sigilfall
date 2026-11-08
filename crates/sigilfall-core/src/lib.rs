@@ -22,3 +22,4 @@ pub mod rng;
 pub mod save;
 pub mod schedule;
 pub mod sigil;
+pub mod stats;

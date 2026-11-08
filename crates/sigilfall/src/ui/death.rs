@@ -1,46 +1,70 @@
-//! The provisional end screen, shown once the player has died: who killed
-//! the player and when, the run's seed, the last messages of the log, and
-//! how to leave.
+//! The death summary, shown once the player has died: how the run ended,
+//! what the player did, and the seed to replay it.
 //!
-//! Exposes [`render`]. The full death summary of `docs/design.md` (floor,
-//! creatures killed, sigils cast, shareable line) replaces this screen in
-//! T25; until then it keeps the summary's title and seed so a run can be
-//! replayed, and the log stays where it was during the game, so the blows
-//! that led to the death can still be read.
+//! Exposes [`render`] and [`MAX_KILL_ROWS`]. The screen follows the
+//! "Récapitulatif de mort" mock-up of `docs/design.md`, from top to bottom:
+//! the title, an epitaph chosen from the seed, the cause of death with the
+//! depth and the turn, the counts of the run (deepest floor, turns,
+//! creatures slain by kind, glyphs learnt, sigils cast by quality, items
+//! used), the seed in a frame, the command that replays it, and the key
+//! help. Every count comes from `Game::stats`, which the game keeps from its
+//! events; this module only lays them out.
+//!
+//! The summary is centred as a block, with the counts aligned on their
+//! dots, and fits an 80 × 24 screen; larger screens centre it with more
+//! margin. It is drawn with the theme's tokens and glyphs only, so the ASCII
+//! glyph set gives a screen of plain ASCII, and colour never carries
+//! meaning: in monochrome every line still reads the same. The message log
+//! is not shown: the cause line says who dealt the last blow.
 
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use sigilfall_core::content::Content;
 use sigilfall_core::game::{Game, Status};
+use sigilfall_core::stats::Stats;
 
-use super::game::log_area;
-use super::log;
-use crate::message_log::MessageLog;
 use crate::messages;
 use crate::theme::Theme;
 
-/// Draws the end screen of `game` in `area`: the summary centred in the
-/// rows above the log, the messages of `log` in the same rows as on the
-/// game screen, and the key help on the last row. Monster names come from
-/// `content`.
+/// Most rows the list of creatures slain takes, its first row included.
+///
+/// Four rows keep the whole summary within an 80 × 24 screen with a row of
+/// margin above and below. Up to four kinds are listed whole; beyond, the
+/// three most slain are listed and the last row says how many kinds are
+/// left out ("and 5 more"), which is never less than two.
+pub const MAX_KILL_ROWS: usize = 4;
+
+/// Width of a count's label with its leader dots, as in "Turns ........ ",
+/// so the values line up in one column.
+///
+/// The longest label, "Creatures slain", is 15 characters: 22 leaves it
+/// at least a space and five dots, as in the mock-up.
+const LABEL_WIDTH: usize = 22;
+
+/// Blank columns between a value and its detail (the creatures slain by
+/// kind, the casts by quality).
+const DETAIL_GAP: usize = 3;
+
+/// Blank columns on each side of the seed inside its frame.
+const SEED_PADDING: usize = 4;
+
+/// Blank columns between the seed's label and the seed inside its frame.
+const SEED_LABEL_GAP: usize = 3;
+
+/// Draws the death summary of `game` over `area`: the summary centred in
+/// the rows above the last one, and the key help on the last row. Monster
+/// names come from `content`.
 ///
 /// The cause line is only written when the game is over; called on a game
-/// still in progress (a caller's mistake), the screen still shows its title
-/// and seed. The background is expected to be painted already, and an area
-/// too small for the text is clipped without panicking.
-pub fn render(
-    frame: &mut Frame,
-    area: Rect,
-    game: &Game,
-    log: &MessageLog,
-    content: &Content,
-    theme: &Theme,
-) {
-    let log_area = log_area(area);
+/// still in progress (a caller's mistake), the screen still shows the
+/// counts and the seed. The background is expected to be painted already,
+/// and an area too small for the text is clipped without panicking.
+pub fn render(frame: &mut Frame, area: Rect, game: &Game, content: &Content, theme: &Theme) {
     let summary_area = Rect {
-        height: log_area.y.saturating_sub(area.y),
+        height: area.height.saturating_sub(1),
         ..area
     };
     let lines = summary(game, content, theme);
@@ -56,8 +80,6 @@ pub fn render(
         text_area,
     );
 
-    log::render(frame.buffer_mut(), log_area, None, log, theme);
-
     let help = Line::from(vec![
         Span::raw(" "),
         Span::styled(messages::QUIT_KEY, theme.text),
@@ -71,28 +93,208 @@ pub fn render(
     frame.render_widget(help, help_area);
 }
 
-/// The centred lines of the end screen: title, subtitle, cause of death
-/// (when the game is over), seed and the command that replays it.
+/// The centred lines of the summary, top to bottom. Lines of one block (the
+/// counts, the frame of the seed) are padded to the same width, so that
+/// centring each line keeps the block aligned on its left edge.
 fn summary(game: &Game, content: &Content, theme: &Theme) -> Vec<Line<'static>> {
     let mut lines = vec![
         Line::styled(messages::DEATH_TITLE, theme.text_title),
-        Line::styled(messages::DEATH_SUBTITLE, theme.text_muted),
+        Line::styled(messages::epitaph(game.seed()), theme.text_muted),
         Line::default(),
     ];
     if let Status::GameOver { killed_by } = game.status() {
         lines.push(Line::styled(
-            messages::cause_of_death(killed_by, game.player_turns(), content),
+            messages::cause_of_death(killed_by, game.depth(), game.player_turns(), content),
             theme.text,
         ));
         lines.push(Line::default());
     }
-    lines.push(Line::from(vec![
-        Span::styled(format!("{}  ", messages::SEED_LABEL), theme.text_muted),
-        Span::styled(game.seed().to_string(), theme.text_title),
-    ]));
+    lines.extend(padded(counts(game.stats(), content, theme)));
+    lines.push(Line::default());
+    lines.extend(seed_frame(game, theme));
+    lines.push(Line::default());
     lines.push(Line::styled(
         messages::replay_hint(game.seed()),
         theme.text_muted,
     ));
     lines
+}
+
+/// One row of the counts: a label, its value and an optional detail.
+struct CountRow {
+    /// What is counted; empty on the rows that continue the detail of the
+    /// row above.
+    label: &'static str,
+    /// The count; empty on continuation rows.
+    value: String,
+    /// What the count is made of, in the muted style; may be empty.
+    detail: String,
+}
+
+impl CountRow {
+    /// A row with a label and a value, and no detail yet.
+    fn new(label: &'static str, value: impl ToString) -> Self {
+        Self {
+            label,
+            value: value.to_string(),
+            detail: String::new(),
+        }
+    }
+
+    /// A row that only continues the detail of the row above.
+    const fn continuation(detail: String) -> Self {
+        Self {
+            label: "",
+            value: String::new(),
+            detail,
+        }
+    }
+
+    /// Returns the row as a line: the label and its leader dots muted, the
+    /// value in the text style, left-aligned in a column `value_width`
+    /// characters wide, the detail muted.
+    fn line(self, value_width: usize, theme: &Theme) -> Line<'static> {
+        let lead = if self.label.is_empty() {
+            " ".repeat(LABEL_WIDTH)
+        } else {
+            let dots = LABEL_WIDTH.saturating_sub(self.label.chars().count() + 2);
+            format!("{} {} ", self.label, ".".repeat(dots))
+        };
+        let mut spans = vec![
+            Span::styled(lead, theme.text_muted),
+            Span::styled(format!("{:<value_width$}", self.value), theme.text),
+        ];
+        if !self.detail.is_empty() {
+            spans.push(Span::raw(" ".repeat(DETAIL_GAP)));
+            spans.push(Span::styled(self.detail, theme.text_muted));
+        }
+        Line::from(spans)
+    }
+}
+
+/// The rows of the run's counts: deepest floor, turns, creatures slain with
+/// the kinds listed beside and below (see [`kill_details`]), glyphs learnt,
+/// sigils cast with their qualities, items used.
+fn counts(stats: &Stats, content: &Content, theme: &Theme) -> Vec<Line<'static>> {
+    let mut rows = vec![
+        CountRow::new(messages::DEPTH_REACHED_LABEL, stats.deepest()),
+        CountRow::new(messages::TURNS_LABEL, stats.turns()),
+    ];
+    let mut kills = kill_details(stats, content).into_iter();
+    rows.push(CountRow {
+        detail: kills.next().unwrap_or_default(),
+        ..CountRow::new(messages::KILLS_LABEL, stats.total_kills())
+    });
+    rows.extend(kills.map(CountRow::continuation));
+    rows.push(CountRow::new(messages::GLYPHS_LABEL, stats.glyphs_learnt()));
+    let casts = stats.casts();
+    rows.push(CountRow {
+        detail: if casts.total() == 0 {
+            String::new()
+        } else {
+            messages::cast_breakdown(casts, theme.glyphs.separator)
+        },
+        ..CountRow::new(messages::CASTS_LABEL, casts.total())
+    });
+    rows.push(CountRow::new(
+        messages::ITEMS_USED_LABEL,
+        stats.items_used(),
+    ));
+    // The details start in one column, just past the widest value.
+    let value_width = rows
+        .iter()
+        .map(|row| row.value.chars().count())
+        .max()
+        .unwrap_or(0);
+    rows.into_iter()
+        .map(|row| row.line(value_width, theme))
+        .collect()
+}
+
+/// The creatures slain, one kind per row, most slain first (ties by name),
+/// as "12 ossuary rat" with the counts right-aligned; at most
+/// [`MAX_KILL_ROWS`] rows, the last one saying how many kinds are left out
+/// when they do not all fit. Empty when nothing was slain.
+fn kill_details(stats: &Stats, content: &Content) -> Vec<String> {
+    let mut kinds: Vec<(u32, &str)> = stats
+        .kills()
+        .map(|(definition, count)| (count, messages::monster_name(content, definition)))
+        .collect();
+    kinds.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
+    let shown = if kinds.len() > MAX_KILL_ROWS {
+        MAX_KILL_ROWS - 1
+    } else {
+        kinds.len()
+    };
+    let count_width = kinds
+        .iter()
+        .take(shown)
+        .map(|(count, _)| count.to_string().len())
+        .max()
+        .unwrap_or(0);
+    let mut rows: Vec<String> = kinds
+        .iter()
+        .take(shown)
+        .map(|(count, name)| format!("{count:>count_width$} {name}"))
+        .collect();
+    if kinds.len() > shown {
+        rows.push(messages::more_in_view(kinds.len() - shown));
+    }
+    rows
+}
+
+/// The seed in a frame of the theme's corners and lines, in the title
+/// style after its muted label: three lines of the same width.
+fn seed_frame(game: &Game, theme: &Theme) -> Vec<Line<'static>> {
+    let glyphs = theme.glyphs;
+    let seed = game.seed().to_string();
+    let inner = SEED_PADDING * 2
+        + messages::SEED_LABEL.chars().count()
+        + SEED_LABEL_GAP
+        + seed.chars().count();
+    let horizontal = glyphs.frame_horizontal.to_string().repeat(inner);
+    let vertical = glyphs.frame_vertical.to_string();
+    let padding = " ".repeat(SEED_PADDING);
+    vec![
+        Line::styled(
+            format!(
+                "{}{horizontal}{}",
+                glyphs.frame_top_left, glyphs.frame_top_right
+            ),
+            theme.border,
+        ),
+        Line::from(vec![
+            Span::styled(vertical.clone(), theme.border),
+            Span::raw(padding.clone()),
+            Span::styled(messages::SEED_LABEL, theme.text_muted),
+            Span::raw(" ".repeat(SEED_LABEL_GAP)),
+            Span::styled(seed, theme.text_title),
+            Span::raw(padding),
+            Span::styled(vertical, theme.border),
+        ]),
+        Line::styled(
+            format!(
+                "{}{horizontal}{}",
+                glyphs.frame_bottom_left, glyphs.frame_bottom_right
+            ),
+            theme.border,
+        ),
+    ]
+}
+
+/// Pads every line of `lines` with blanks to the width of the widest, so
+/// centring them one by one keeps their left edges aligned.
+fn padded(lines: Vec<Line<'static>>) -> Vec<Line<'static>> {
+    let width = lines.iter().map(Line::width).max().unwrap_or(0);
+    lines
+        .into_iter()
+        .map(|mut line| {
+            let missing = width - line.width();
+            if missing > 0 {
+                line.spans
+                    .push(Span::styled(" ".repeat(missing), Style::default()));
+            }
+            line
+        })
+        .collect()
 }

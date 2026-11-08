@@ -104,13 +104,6 @@ pub fn map_area(screen: Rect) -> Rect {
     GameLayout::new(screen).map
 }
 
-/// Returns the message log's area of a screen drawn over `screen`: the
-/// rows above the key help, as on the game screen. The end screen keeps its
-/// log there too.
-pub fn log_area(screen: Rect) -> Rect {
-    GameLayout::new(screen).log
-}
-
 /// Draws the game screen for `game` inside `area`, with the messages of
 /// `log`, monster names from `content` and `theme`; while the player casts
 /// or looks at the inventory, `overlay` covers the map and the key help is

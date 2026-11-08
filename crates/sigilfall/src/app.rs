@@ -10,8 +10,8 @@
 //!
 //! The application keeps the message log: the events of each action are
 //! turned into English lines by the `messages` module and appended to it.
-//! Once the player has died, the end screen replaces the game and only the
-//! quit keys still work.
+//! Once the player has died, the death summary (`ui::death`) replaces the
+//! game and only the quit keys still work.
 //!
 //! The quit keys are `q`, outside the overlays, and Ctrl+C everywhere.
 //! Escape never quits: it closes the overlays and verdicts below, and does
@@ -609,6 +609,7 @@ mod tests {
     use crate::theme::{ColorMode, GlyphSet};
     use crate::ui::camera::Camera;
 
+    mod death_summary;
     mod inventory_screen;
     mod save_files;
 
@@ -1595,17 +1596,15 @@ mod tests {
 ",
             );
             assert!(
-                text.contains(&format!("Killed by an executioner on turn {turn}.")),
+                text.contains(&format!(
+                    "Killed by an executioner at depth 1, on turn {turn}."
+                )),
                 "{text}"
             );
-            assert!(text.contains("Seed  7F3A-91C2-0B5E-D4A8"), "{text}");
+            assert!(text.contains("SEED   7F3A-91C2-0B5E-D4A8"), "{text}");
             assert!(
                 text.contains("Replay this seed: sigilfall --seed 7F3A-91C2-0B5E-D4A8"),
                 "{text}"
-            );
-            assert!(
-                text.contains(&format!(" ! {}", last.text)),
-                "the last blow stays readable:\n{text}"
             );
             assert!(row_text(&screen, 23).starts_with(" q quit"), "{text}");
             assert!(!text.contains("Turn "), "no game screen:\n{text}");
@@ -2371,6 +2370,17 @@ mod tests {
         /// Messages the log keeps (T16: "100 entries"), written out here so
         /// that a change of the limit is noticed.
         const HISTORY: usize = 100;
+
+        /// The rows [`LOG_ROWS`] of the log of `app` as the game screen
+        /// draws it at 80 × 24 (separator on row 17), for the fatal blow:
+        /// the death summary that replaces the game screen (T25) does not
+        /// show the log.
+        fn drawn_log(app: &App) -> Vec<String> {
+            let mut buffer = Buffer::empty(Rect::new(0, 0, 80, 24));
+            let area = Rect::new(0, *LOG_ROWS.start() - 1, 80, 6);
+            ui::log::render(&mut buffer, area, None, app.log(), &app.theme);
+            rows(&buffer, LOG_ROWS)
+        }
         /// Cells of the health bar.
         const BAR_CELLS: usize = 18;
 
@@ -2504,8 +2514,9 @@ mod tests {
                 &self.expected[skip..]
             }
 
-            /// Checks the whole log and the visible rows against the
-            /// twin's account.
+            /// Checks the whole log and, while the game screen shows it,
+            /// the visible rows against the twin's account. The death
+            /// summary does not show the log.
             fn assert_log_is_exact(&self, context: &str) {
                 let expected = self.expected_history();
                 let mut kept: Vec<(char, String)> = self
@@ -2516,6 +2527,9 @@ mod tests {
                     .collect();
                 kept.reverse();
                 assert_eq!(kept, expected, "{context}: log content");
+                if self.app.state() == State::GameOver {
+                    return;
+                }
 
                 let shown: Vec<String> = rows(&self.screen(), LOG_ROWS)
                     .into_iter()
@@ -2825,20 +2839,18 @@ mod tests {
                 let text = rows(&fight.screen(), 0..=23).join("\n");
                 assert!(text.contains("T H E   D E S C E N T   E N D S"), "{text}");
                 assert!(
-                    text.contains(&format!("Killed by an iron hammer on turn {turn}.")),
+                    text.contains(&format!(
+                        "Killed by an iron hammer at depth 1, on turn {turn}."
+                    )),
                     "cause and turn, seed {seed}:\n{text}"
                 );
-                assert!(text.contains(&format!("Seed  {seed}")), "{text}");
+                assert!(text.contains(&format!("SEED   {seed}")), "{text}");
                 assert!(!text.contains("Turn "), "no game screen:\n{text}");
                 assert!(!text.contains("IN VIEW"), "no side panel:\n{text}");
                 let last = fight.expected.last().unwrap();
                 assert!(
                     last.1.starts_with("The iron hammer kills you ("),
                     "{last:?}"
-                );
-                assert!(
-                    text.contains(&format!(" ! {}", last.1)),
-                    "the fatal blow is readable"
                 );
             }
         }
@@ -2849,11 +2861,12 @@ mod tests {
                 let (fight, _) = fight_to_death(seed);
                 let text = rows(&fight.screen(), 0..=23).join("\n");
 
-                // The seed is written after "Seed" and in the replay command.
+                // The seed is written in its frame after "SEED" and in the
+                // replay command.
                 let shown = text
                     .lines()
-                    .find_map(|l| l.trim().strip_prefix("Seed"))
-                    .map(str::trim)
+                    .find_map(|l| l.split_once("SEED"))
+                    .map(|(_, rest)| rest.trim().trim_end_matches('│').trim())
                     .expect("a seed line");
                 let hint = text
                     .lines()
@@ -2875,7 +2888,7 @@ mod tests {
             // And the seed does drive the blows.
             let ends: Vec<_> = seeds()
                 .into_iter()
-                .map(|seed| rows(&fight_to_death(seed).0.screen(), 17..=22))
+                .map(|seed| fight_to_death(seed).0.expected)
                 .collect();
             assert!(
                 ends[0] != ends[1] || ends[1] != ends[2],
@@ -2985,8 +2998,11 @@ mod tests {
             for (width, height) in [(120, 40), (200, 60)] {
                 let text = render(&fight.app, width, height).backend().to_string();
                 assert!(text.contains("T H E   D E S C E N T   E N D S"), "{text}");
-                assert!(text.contains("Seed  0000-0000-0000-002A"), "{text}");
-                assert!(text.contains("Killed by an iron hammer on turn"), "{text}");
+                assert!(text.contains("SEED   0000-0000-0000-002A"), "{text}");
+                assert!(
+                    text.contains("Killed by an iron hammer at depth 1"),
+                    "{text}"
+                );
                 assert!(text.contains("q quit"), "{text}");
             }
         }
@@ -3020,7 +3036,7 @@ mod tests {
                     "the gnat wins in the end"
                 );
                 // The fatal blow names the killer, whole, on the last row.
-                let log = rows(&fight.screen(), LOG_ROWS);
+                let log = drawn_log(&fight.app);
                 assert_eq!(
                     log.last().unwrap().trim_end(),
                     " ! The cave gnat kills you (1)."
@@ -3095,7 +3111,7 @@ mod tests {
         fn the_longest_monster_name_keeps_the_fatal_blow_whole_in_the_log() {
             let fight = lost_to_the_long_name();
 
-            let log: Vec<String> = rows(&fight.screen(), LOG_ROWS)
+            let log: Vec<String> = drawn_log(&fight.app)
                 .into_iter()
                 .map(|l| l.trim_end().to_owned())
                 .collect();
@@ -3131,7 +3147,7 @@ mod tests {
             let text = rows(&fight.screen(), 0..=23).join("\n");
 
             assert!(
-                text.contains(&format!("Killed by an {LONGEST_NAME} on turn")),
+                text.contains(&format!("Killed by an {LONGEST_NAME} at depth 1")),
                 "the cause of death is cut off on the end screen:\n{text}"
             );
         }

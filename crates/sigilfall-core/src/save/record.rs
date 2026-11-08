@@ -20,6 +20,7 @@ use super::slots::{SlotKey, SlotsRecord};
 use crate::game::Status;
 use crate::geometry::Position;
 use crate::map::{Map, Tile};
+use crate::stats::Stats;
 
 /// Longest side of a saved map, in cells.
 ///
@@ -58,8 +59,6 @@ pub(crate) struct GameRecord {
     pub(crate) floors_from_content: bool,
     /// Whether the player is still alive, and if not who killed it.
     pub(crate) status: Status,
-    /// Player actions that took time since the game started.
-    pub(crate) player_turns: u64,
     /// Ticks elapsed since the game started.
     pub(crate) ticks: u64,
     /// Tick from which the player's essence recovery is counted.
@@ -85,6 +84,9 @@ pub(crate) struct GameRecord {
     pub(crate) inventory: Vec<SlotKey>,
     /// Glyphs engraved on the current floor.
     pub(crate) engravings: Vec<EngravingRecord>,
+    /// What the player did so far, its turns included; written last, after
+    /// the state the game plays from.
+    pub(crate) stats: Stats,
 }
 
 /// A floor as a save writes it: one string per row, top row first, for the

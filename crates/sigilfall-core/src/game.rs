@@ -43,6 +43,9 @@
 //! inventory until it uses or drops them; their rules live in the
 //! `inventory` submodule. Only the player handles items.
 //!
+//! The game counts what the player does for the end-of-run summary
+//! ([`Game::stats`]), from the events of each [`Game::submit`].
+//!
 //! A game is written to and read back from a save by the `save` module; the
 //! `saved` submodule turns it into the save's records and back, checking
 //! every value read.
@@ -71,6 +74,7 @@ use crate::map::Map;
 use crate::rng::{Purpose, Seed};
 use crate::schedule::{ATTACK_COST, Scheduler, WAIT_COST, action_cost, spend_energy};
 use crate::sigil::{ESSENCE_REGEN_TICKS, Grimoire};
+use crate::stats::Stats;
 use world::World;
 
 /// Cell where the player starts in the fixed room of
@@ -102,8 +106,9 @@ pub struct Game {
     world: World,
     /// Turn order and elapsed time.
     scheduler: Scheduler,
-    /// Number of player actions that took time since the game started.
-    player_turns: u64,
+    /// What the player did so far, its turns included, for the end-of-run
+    /// summary.
+    stats: Stats,
     /// Stream of every random choice made while playing on the current
     /// floor, such as the damage of each blow or the backlash of an unstable
     /// cast: `seed.stream(depth, Purpose::Gameplay)`, started afresh on each
@@ -133,6 +138,10 @@ pub enum Status {
     /// nothing any more.
     GameOver {
         /// Who dealt the killing blow, for the end-of-run summary.
+        /// [`Combatant::Player`] means the player died by its own hand,
+        /// such as from the backlash of its own spell; no rule kills the
+        /// player that way today (a scorching backlash always spares the
+        /// last hit point), but saves and the summary accept it.
         killed_by: Combatant,
     },
 }
@@ -253,7 +262,7 @@ impl Game {
             content: None,
             world: World::new(map, actors, player),
             scheduler,
-            player_turns: 0,
+            stats: Stats::default(),
             gameplay_rng: seed.stream(FIRST_DEPTH, Purpose::Gameplay),
             status: Status::Playing,
             grimoire: Grimoire::new(),
@@ -416,16 +425,20 @@ impl Game {
     /// If the player dies, the list ends with its [`Event::Died`], no other
     /// actor acts and the game is over ([`Game::status`]). Once the game is
     /// over, this function changes nothing and returns no event.
+    ///
+    /// The events returned are counted in [`Game::stats`] before they are
+    /// returned.
     pub fn submit(&mut self, action: Action) -> Vec<Event> {
         let mut events = Vec::new();
         if self.is_over() {
             return events;
         }
         if self.perform(self.world.player, action, &mut events) {
-            self.player_turns += 1;
+            self.stats.count_turn();
             self.update_field_of_view();
             self.run_until_player_turn(&mut events);
         }
+        self.stats.record(&events);
         events
     }
 
@@ -526,7 +539,18 @@ impl Game {
     /// count, and the turns of other actors, whatever their speed, never
     /// change it.
     pub const fn player_turns(&self) -> u64 {
-        self.player_turns
+        self.stats.turns()
+    }
+
+    /// Returns what the player did so far, for the end-of-run summary:
+    /// creatures killed, sigils cast, glyphs learnt, items used, deepest
+    /// floor and turns (see [`Stats`]).
+    ///
+    /// The counts follow the events [`Game::submit`] returned since the game
+    /// started, and survive a save; they stay as they were once the game is
+    /// over.
+    pub const fn stats(&self) -> &Stats {
+        &self.stats
     }
 
     /// Returns whether the player sees `position` right now.

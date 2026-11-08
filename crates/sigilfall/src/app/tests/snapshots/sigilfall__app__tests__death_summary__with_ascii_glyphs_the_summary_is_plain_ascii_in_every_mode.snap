@@ -1,0 +1,28 @@
+---
+source: crates/sigilfall/src/app/tests/death_summary.rs
+expression: text
+---
+                                                                                
+                         T H E   D E S C E N T   E N D S                        
+                    The ink outlived the hand that traced it.                   
+                                                                                
+                 Killed by an executioner at depth 1, on turn 8.                
+                                                                                
+                      Depth reached ....... 1                                   
+                      Turns ............... 8                                   
+                      Creatures slain ..... 6   2 ash wisp                      
+                                                1 cave gnat                     
+                                                1 dust mite                     
+                                                and 2 more                      
+                      Glyphs learnt ....... 0                                   
+                      Sigils cast ......... 0                                   
+                      Items used .......... 0                                   
+                                                                                
+                      +----------------------------------+                      
+                      |    SEED   7F3A-91C2-0B5E-D4A8    |                      
+                      +----------------------------------+                      
+                                                                                
+             Replay this seed: sigilfall --seed 7F3A-91C2-0B5E-D4A8             
+                                                                                
+                                                                                
+ q quit

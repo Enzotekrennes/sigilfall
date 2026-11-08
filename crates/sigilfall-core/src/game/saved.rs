@@ -9,7 +9,7 @@
 //! be one the rules could have produced (actors, items and glyphs on
 //! walkable cells of the map, one of each per cell, hit points and essence
 //! within their maximums, counters within bounds, the turn order holding
-//! every actor once…).
+//! every actor once, statistics naming monsters of the content…).
 //!
 //! The format itself (records, version, RON) belongs to the `save` module.
 
@@ -35,6 +35,7 @@ use crate::save::{
 };
 use crate::schedule::{ACTION_THRESHOLD, Scheduler};
 use crate::sigil::{Grimoire, MAX_ESSENCE, MAX_STEADY_CASTS};
+use crate::stats::Stats;
 
 /// Largest energy an actor of a save may hold or owe, either way.
 ///
@@ -64,7 +65,6 @@ impl Game {
             depth: self.depth,
             floors_from_content: self.content.is_some(),
             status: self.status.clone(),
-            player_turns: self.player_turns,
             ticks: self.scheduler.ticks(),
             essence_since: self.essence_since,
             steady_casts: self.steady_casts,
@@ -90,6 +90,7 @@ impl Game {
                     sigil: engraving.sigil().id().to_owned(),
                 })
                 .collect(),
+            stats: self.stats.clone(),
         }
     }
 
@@ -104,6 +105,7 @@ impl Game {
     /// the game could not run with (see the module documentation).
     pub(crate) fn from_record(record: GameRecord, content: &Content) -> Result<Self, SaveError> {
         check_counters(&record)?;
+        check_stats(&record.stats, record.depth, content)?;
         let map = record.map.to_map()?;
         let grimoire = grimoire_of(&record.grimoire, content)?;
         let engravings = engravings_of(record.engravings, &map, content)?;
@@ -164,7 +166,7 @@ impl Game {
                 engravings,
             ),
             scheduler: Scheduler::restored(turn_order, record.ticks),
-            player_turns: record.player_turns,
+            stats: record.stats,
             gameplay_rng: record.gameplay_rng,
             status: record.status,
             grimoire,
@@ -301,11 +303,6 @@ fn check_counters(record: &GameRecord) -> Result<(), SaveError> {
     check_bounds("the depth", record.depth, FIRST_DEPTH..=u32::MAX)?;
     check_bounds("the tick count", record.ticks, 0..=MAX_COUNTER)?;
     check_bounds(
-        "the player turn count",
-        record.player_turns,
-        0..=MAX_COUNTER,
-    )?;
-    check_bounds(
         "the tick of the last essence recovery",
         record.essence_since,
         0..=record.ticks,
@@ -315,6 +312,40 @@ fn check_counters(record: &GameRecord) -> Result<(), SaveError> {
         record.steady_casts,
         0..=MAX_STEADY_CASTS,
     )
+}
+
+/// Checks the run's statistics `stats` of a game on floor `depth`.
+///
+/// The other counts (casts, glyphs, items) are not tied to anything else
+/// of the state, so any value is accepted.
+///
+/// # Errors
+///
+/// Returns [`SaveError::Inconsistent`] for a turn count above
+/// [`MAX_COUNTER`], a deepest floor above the current one, or a kind of
+/// monster killed 0 times, and [`SaveError::UnknownReference`] for a kind
+/// of monster `content` lacks.
+fn check_stats(stats: &Stats, depth: u32, content: &Content) -> Result<(), SaveError> {
+    check_bounds("the player turn count", stats.turns(), 0..=MAX_COUNTER)?;
+    check_bounds(
+        "the deepest floor reached",
+        stats.deepest(),
+        depth..=u32::MAX,
+    )?;
+    for (definition, &count) in stats.kill_entries() {
+        if content.monster(definition).is_none() {
+            return Err(SaveError::UnknownReference {
+                kind: Reference::Monster,
+                id: definition.clone(),
+            });
+        }
+        check_bounds(
+            &format!("the count of `{definition}` killed"),
+            count,
+            1..=u32::MAX,
+        )?;
+    }
+    Ok(())
 }
 
 /// Returns the definition of the sigil `id` in `content`.
