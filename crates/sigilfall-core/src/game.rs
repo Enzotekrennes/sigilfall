@@ -189,11 +189,14 @@ impl Game {
     /// Places a new monster of kind `definition` at `position` and returns
     /// its key.
     ///
-    /// Unlike the monsters of a generated floor, it starts with no energy,
-    /// so its first turn comes after the player's next action, and it takes
-    /// turns after every actor created before it when they are ready at the
-    /// same time. It has no memory of the player. It is still the player's
-    /// turn afterwards.
+    /// Unlike the monsters of a generated floor, it starts with no energy.
+    /// It takes turns after every actor created before it when they are
+    /// ready at the same time, the player included, so it never acts during
+    /// the player's next action: after that action the player and a monster
+    /// at least as fast both reach the action threshold on the same tick, and
+    /// the player plays first. Such a monster takes its first turn during the
+    /// player's second action; a slower one later. It has no memory of the
+    /// player. It is still the player's turn afterwards.
     ///
     /// # Panics
     ///

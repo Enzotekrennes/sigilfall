@@ -3,16 +3,16 @@
 //! Exposes [`MonsterDef`], the validated description of one kind of
 //! creature, [`Family`], and the bounds every definition must respect
 //! ([`MAX_SPEED`], [`MAX_HP`], [`MAX_ATTACK`], [`MAX_DEFENSE`]). [`validate`]
-//! turns the raw entries read by the `monster_file` module into definitions,
+//! turns the raw entries read from the monster file into definitions,
 //! or reports the first fault with the entry and field in cause. This module
 //! does not read RON, create actors nor pick which monsters spawn.
-
-use std::collections::HashMap;
 
 use serde::Deserialize;
 
 use super::MONSTERS_FILE;
-use super::error::{ContentError, FieldProblem};
+use super::check::{EntryCheck, UniqueIds};
+use super::entry_file::RawEntry;
+use super::error::ContentError;
 use super::monster_file::MonsterEntry;
 use crate::generation::FIRST_DEPTH;
 use crate::schedule::NORMAL_SPEED;
@@ -142,16 +142,6 @@ impl MonsterDef {
     }
 }
 
-/// Describes the monster entry at `position` (counted from 1) in error
-/// messages, with its identifier when known: "monster `acolyte` (entry 3)",
-/// or "monster entry 3".
-pub(super) fn entry_label(position: usize, id: Option<&str>) -> String {
-    match id {
-        Some(id) => format!("monster `{id}` (entry {position})"),
-        None => format!("monster entry {position}"),
-    }
-}
-
 /// Turns the entries of the monster file into definitions, in file order.
 ///
 /// Each entry is checked in turn (identifier form and uniqueness, presence of
@@ -165,20 +155,11 @@ pub(super) fn entry_label(position: usize, id: Option<&str>) -> String {
 /// [`ContentError::NoMonsterAtFirstDepth`].
 pub(super) fn validate(entries: Vec<MonsterEntry>) -> Result<Vec<MonsterDef>, ContentError> {
     let mut monsters: Vec<MonsterDef> = Vec::with_capacity(entries.len());
-    let mut first_entry_of: HashMap<String, usize> = HashMap::new();
+    let mut ids = UniqueIds::new(MonsterEntry::KIND);
     for (index, entry) in entries.into_iter().enumerate() {
         let position = index + 1;
         let monster = validate_entry(position, entry)?;
-        if let Some(&first_entry) = first_entry_of.get(&monster.id) {
-            return Err(EntryCheck::new(position, Some(&monster.id)).fail(
-                "id",
-                FieldProblem::Duplicate {
-                    id: monster.id,
-                    first_entry,
-                },
-            ));
-        }
-        first_entry_of.insert(monster.id.clone(), position);
+        ids.claim(position, &monster.id)?;
         monsters.push(monster);
     }
     check_first_depth(&monsters)?;
@@ -188,8 +169,9 @@ pub(super) fn validate(entries: Vec<MonsterEntry>) -> Result<Vec<MonsterDef>, Co
 /// Validates the entry at `position` (counted from 1) on its own, without
 /// looking at the other entries.
 fn validate_entry(position: usize, entry: MonsterEntry) -> Result<MonsterDef, ContentError> {
-    let id = EntryCheck::new(position, None).identifier(entry.id)?;
-    let check = EntryCheck::new(position, Some(&id));
+    let kind = MonsterEntry::KIND;
+    let id = EntryCheck::new(&kind, position, None).identifier(entry.id)?;
+    let check = EntryCheck::new(&kind, position, Some(&id));
     Ok(MonsterDef {
         name: check.text(entry.name, "name")?,
         family: check.required(entry.family, "family")?,
@@ -224,106 +206,7 @@ fn check_first_depth(monsters: &[MonsterDef]) -> Result<(), ContentError> {
     Err(ContentError::NoMonsterAtFirstDepth {
         file: MONSTERS_FILE,
         first_depth: FIRST_DEPTH,
-        entry: entry_label(index + 1, Some(&shallowest.id)),
+        entry: MonsterEntry::KIND.label(index + 1, Some(&shallowest.id)),
         min_depth: shallowest.min_depth,
     })
-}
-
-/// Checks the fields of one entry, building errors that name it.
-struct EntryCheck {
-    /// How errors designate the entry (see [`entry_label`]).
-    label: String,
-}
-
-impl EntryCheck {
-    /// Checks for the entry at `position` (counted from 1), identified by
-    /// `id` once it is known to be valid.
-    fn new(position: usize, id: Option<&str>) -> Self {
-        Self {
-            label: entry_label(position, id),
-        }
-    }
-
-    /// Builds the error for `field` of this entry.
-    fn fail(&self, field: &'static str, problem: FieldProblem) -> ContentError {
-        ContentError::InvalidField {
-            file: MONSTERS_FILE,
-            entry: self.label.clone(),
-            field,
-            problem,
-        }
-    }
-
-    /// Returns the value of `field`, or an error if it is missing.
-    fn required<T>(&self, value: Option<T>, field: &'static str) -> Result<T, ContentError> {
-        value.ok_or_else(|| self.fail(field, FieldProblem::Missing))
-    }
-
-    /// Returns the text of `field`, refusing a missing or blank one.
-    fn text(&self, value: Option<String>, field: &'static str) -> Result<String, ContentError> {
-        let text = self.required(value, field)?;
-        if text.trim().is_empty() {
-            return Err(self.fail(field, FieldProblem::Empty));
-        }
-        Ok(text)
-    }
-
-    /// Returns the identifier in `value`, refusing a missing one or one that
-    /// is not lower-case letters, digits and underscores starting with a
-    /// letter: that form survives renames of the displayed name and is safe in
-    /// save files.
-    fn identifier(&self, value: Option<String>) -> Result<String, ContentError> {
-        let id = self.required(value, "id")?;
-        let mut chars = id.chars();
-        let starts_with_letter = chars.next().is_some_and(|c| c.is_ascii_lowercase());
-        let rest_is_valid = chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
-        if !(starts_with_letter && rest_is_valid) {
-            return Err(self.fail("id", FieldProblem::BadIdentifier { id }));
-        }
-        Ok(id)
-    }
-
-    /// Returns the value of `field`, refusing a missing one or one outside
-    /// `min..=max`.
-    fn in_range(
-        &self,
-        value: Option<i32>,
-        field: &'static str,
-        min: i32,
-        max: i32,
-    ) -> Result<i32, ContentError> {
-        let value = self.required(value, field)?;
-        if !(min..=max).contains(&value) {
-            return Err(self.fail(
-                field,
-                FieldProblem::OutOfRange {
-                    value: value.into(),
-                    min: min.into(),
-                    max: max.into(),
-                },
-            ));
-        }
-        Ok(value)
-    }
-
-    /// Returns the value of `field`, refusing a missing one or one below
-    /// `min`.
-    fn at_least(
-        &self,
-        value: Option<u32>,
-        field: &'static str,
-        min: u32,
-    ) -> Result<u32, ContentError> {
-        let value = self.required(value, field)?;
-        if value < min {
-            return Err(self.fail(
-                field,
-                FieldProblem::TooLow {
-                    value: value.into(),
-                    min: min.into(),
-                },
-            ));
-        }
-        Ok(value)
-    }
 }

@@ -1,37 +1,56 @@
-//! The game's data: creature definitions read from RON files and validated.
+//! The game's data: creature and sigil definitions read from RON files and
+//! validated.
 //!
 //! Exposes [`Content`], with [`Content::load`] for the files built into the
-//! game and [`Content::parse`] for any text, [`MonsterDef`] and [`Family`],
-//! the bounds of a monster definition, and the errors [`ContentError`] and
-//! [`FieldProblem`]. The files are embedded in the binary at compile time
-//! (`include_str!`), so an installed game needs no asset folder.
+//! game, [`Content::parse`] and [`Content::parse_files`] for any text,
+//! [`MonsterDef`] and [`Family`], [`SigilDef`], [`Effect`] and
+//! [`Targeting`], the bounds of a definition, and the errors
+//! [`ContentError`] and [`FieldProblem`]. The files are embedded in the
+//! binary at compile time (`include_str!`), so an installed game needs no
+//! asset folder.
 //!
-//! This module only reads and checks data. Spawning monsters on a floor is
+//! This module only reads and checks data. Spawning monsters on a floor,
+//! recognising a trace (`sigil` module of the crate) and casting a sigil are
 //! not done here.
 
+mod check;
+mod entry_file;
 mod error;
 mod monster;
 mod monster_file;
+mod sigil;
+mod sigil_file;
 
 pub use error::{ContentError, FieldProblem};
 pub use monster::{Family, MAX_ATTACK, MAX_DEFENSE, MAX_HP, MAX_SPEED, MonsterDef};
+pub use sigil::{Effect, MAX_POWER, SigilDef, Targeting};
 
 /// Path of the monster file relative to the `sigilfall-core` crate, as named
 /// in error messages.
 pub const MONSTERS_FILE: &str = "content/monsters.ron";
 
+/// Path of the sigil file relative to the `sigilfall-core` crate, as named in
+/// error messages.
+pub const SIGILS_FILE: &str = "content/sigils.ron";
+
 /// The monster file shipped with the game.
 const MONSTERS_RON: &str = include_str!("../../content/monsters.ron");
+
+/// The sigil file shipped with the game.
+const SIGILS_RON: &str = include_str!("../../content/sigils.ron");
 
 /// Every piece of validated game data.
 ///
 /// A `Content` value always satisfies the rules of the content files: unique
-/// identifiers, values within bounds, and at least one monster for the first
-/// floor.
+/// identifiers, values within bounds, at least one monster for the first
+/// floor, and at least one sigil, each with a pattern the player can draw
+/// and far enough from the others (`sigil::MIN_PATTERN_DISTANCE`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Content {
     /// Monster definitions, in file order.
     monsters: Vec<MonsterDef>,
+    /// Sigil definitions, in file order.
+    sigils: Vec<SigilDef>,
 }
 
 impl Content {
@@ -43,31 +62,50 @@ impl Content {
     ///
     /// # Errors
     ///
-    /// Same as [`Content::parse`].
+    /// Same as [`Content::parse_files`].
     pub fn load() -> Result<Self, ContentError> {
-        Self::parse(MONSTERS_RON)
+        Self::parse_files(MONSTERS_RON, SIGILS_RON)
     }
 
-    /// Parses and validates `monsters`, the text of a monster file.
+    /// Parses and validates `monsters`, the text of a monster file, with the
+    /// sigil file shipped with the game.
     ///
     /// The text is a RON list of `Monster(...)` entries; see
-    /// `content/monsters.ron` for the fields and their meaning.
+    /// `content/monsters.ron` for the fields and their meaning. Tests that
+    /// need their own creatures use it.
     ///
     /// # Errors
     ///
+    /// Same as [`Content::parse_files`]; the shipped sigils are valid (a test
+    /// checks it), so the errors concern `monsters`.
+    pub fn parse(monsters: &str) -> Result<Self, ContentError> {
+        Self::parse_files(monsters, SIGILS_RON)
+    }
+
+    /// Parses and validates `monsters` and `sigils`, the texts of a monster
+    /// file and of a sigil file, in that order.
+    ///
+    /// Each text is a RON list of entries, `Monster(...)` or `Sigil(...)`;
+    /// see `content/monsters.ron` and `content/sigils.ron` for the fields and
+    /// their meaning.
+    ///
+    /// # Errors
+    ///
+    /// The first fault found, naming its file:
     /// - [`ContentError::Syntax`] with the line, the column, the entry and the
     ///   field when the text is not valid RON, uses an unknown or repeated
     ///   field, or a value of the wrong type;
     /// - [`ContentError::InvalidField`] naming the entry and the field when a
-    ///   field is missing, out of bounds, or an identifier is malformed or
-    ///   repeated;
+    ///   field is missing, out of bounds, an identifier is malformed or
+    ///   repeated, or a pattern cannot be drawn as written or is too close to
+    ///   the pattern of an earlier sigil;
     /// - [`ContentError::NoMonster`] or [`ContentError::NoMonsterAtFirstDepth`]
-    ///   when the first floor would have no creature.
-    pub fn parse(monsters: &str) -> Result<Self, ContentError> {
-        let entries = monster_file::read(monsters)?;
-        Ok(Self {
-            monsters: monster::validate(entries)?,
-        })
+    ///   when the first floor would have no creature;
+    /// - [`ContentError::NoSigil`] when the sigil file defines none.
+    pub fn parse_files(monsters: &str, sigils: &str) -> Result<Self, ContentError> {
+        let monsters = monster::validate(entry_file::read(monsters)?)?;
+        let sigils = sigil::validate(entry_file::read(sigils)?)?;
+        Ok(Self { monsters, sigils })
     }
 
     /// Returns every monster definition, in file order.
@@ -88,6 +126,17 @@ impl Content {
         self.monsters
             .iter()
             .filter(move |monster| monster.can_appear_at(depth))
+    }
+
+    /// Returns every sigil definition, in file order: the order
+    /// `sigil::recognize` expects.
+    pub fn sigils(&self) -> &[SigilDef] {
+        &self.sigils
+    }
+
+    /// Returns the sigil definition identified by `id`, if any.
+    pub fn sigil(&self, id: &str) -> Option<&SigilDef> {
+        self.sigils.iter().find(|sigil| sigil.id() == id)
     }
 }
 

@@ -19,3 +19,4 @@ pub mod map;
 pub mod path;
 pub mod rng;
 pub mod schedule;
+pub mod sigil;

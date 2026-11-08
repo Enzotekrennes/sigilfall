@@ -8,12 +8,14 @@
 
 use thiserror::Error;
 
+use crate::sigil::PatternError;
+
 /// Why the content files could not be loaded.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ContentError {
     /// The file is not valid RON, or does not have the expected shape (an
     /// unknown or repeated field, a value of the wrong type, an unknown
-    /// family…).
+    /// family or effect…).
     #[error("{file}, line {line}, column {column}, {place}: {message}")]
     Syntax {
         /// Path of the faulty file, relative to the crate.
@@ -24,7 +26,8 @@ pub enum ContentError {
         column: usize,
         /// The entry and field the parser was reading, such as
         /// "monster `shade` (entry 6), field `speed`", or where it was
-        /// outside the entries ("before the first monster").
+        /// outside the entries ("before the first monster", "after the last
+        /// sigil").
         place: String,
         /// What the RON parser expected or found.
         message: String,
@@ -45,6 +48,12 @@ pub enum ContentError {
     /// The file defines no entry at all.
     #[error("{file}: the file defines no monster, at least one is needed")]
     NoMonster {
+        /// Path of the faulty file, relative to the crate.
+        file: &'static str,
+    },
+    /// The sigil file defines no entry at all.
+    #[error("{file}: the file defines no sigil, at least one is needed")]
+    NoSigil {
         /// Path of the faulty file, relative to the crate.
         file: &'static str,
     },
@@ -109,4 +118,20 @@ pub enum FieldProblem {
     /// The text is empty or only blank.
     #[error("must not be empty")]
     Empty,
+    /// The list of nodes is not a pattern the player can draw exactly as
+    /// written.
+    #[error("{0}")]
+    BadPattern(PatternError),
+    /// The pattern is so close to the pattern of an earlier entry that a
+    /// near miss of one could be read as the other (see
+    /// `sigil::MIN_PATTERN_DISTANCE`).
+    #[error("{distance} edit(s) away from the pattern of {other}, expected at least {min}")]
+    TooClose {
+        /// The earlier entry, such as "sigil `ember` (entry 1)".
+        other: String,
+        /// Edit distance between the two patterns (`sigil::edit_distance`).
+        distance: usize,
+        /// Smallest distance accepted.
+        min: usize,
+    },
 }

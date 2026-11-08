@@ -1,0 +1,74 @@
+// Sigils the player can learn from glyphs carved in the floor and cast by
+// tracing them on the 3 × 3 grid. Loaded by `Content::load` and checked
+// before a game starts. Every field is required:
+//
+// - id:        stable key used by saves and the grimoire; lower-case letters,
+//              digits and underscores, starting with a letter. Never rename.
+// - name:      name shown to the player.
+// - pattern:   the nodes to link, in order, numbered like a numeric keypad
+//              (7 8 9 on top, 1 2 3 at the bottom). At least 3 nodes, none
+//              twice, and every node the player links must be listed: a
+//              stroke between two aligned nodes passes over the node between
+//              them (7 to 3 over 5), so write [7, 5, 3], not [7, 3]. Two
+//              patterns must be at least 2 edits apart (an edit adds, removes
+//              or replaces one node), so that a near miss of one sigil is
+//              never the exact pattern of another.
+// - effect:    Damage, Heal, Blink (moves the caster) or Hold (the target
+//              loses turns).
+// - power:     strength of the effect, from 1 to 99: hit points for Damage
+//              and Heal, cells for Blink, turns for Hold.
+// - targeting: Caster, Direction (chosen after the trace) or NearestEnemy
+//              (the nearest enemy in sight).
+// - min_depth: shallowest floor where its glyph can be found; 1 is the
+//              first floor.
+//
+// Powers are provisional until spells are balanced. The shipped patterns are
+// at least 3 edits apart, so a trace one edit from a pattern is never one
+// edit from another.
+[
+    Sigil(
+        id: "ember",
+        name: "Ember",
+        pattern: [7, 5, 3],
+        effect: Damage,
+        power: 6,
+        targeting: NearestEnemy,
+        min_depth: 1,
+    ),
+    Sigil(
+        id: "recall",
+        name: "Recall",
+        pattern: [8, 5, 2, 1],
+        effect: Heal,
+        power: 8,
+        targeting: Caster,
+        min_depth: 1,
+    ),
+    Sigil(
+        id: "veil",
+        name: "Veil",
+        pattern: [4, 7, 8, 9, 6],
+        effect: Hold,
+        power: 2,
+        targeting: NearestEnemy,
+        min_depth: 2,
+    ),
+    Sigil(
+        id: "passage",
+        name: "Passage",
+        pattern: [7, 4, 1, 2, 3],
+        effect: Blink,
+        power: 4,
+        targeting: Direction,
+        min_depth: 2,
+    ),
+    Sigil(
+        id: "lance",
+        name: "Lance",
+        pattern: [1, 5, 9, 6],
+        effect: Damage,
+        power: 9,
+        targeting: Direction,
+        min_depth: 3,
+    ),
+]
