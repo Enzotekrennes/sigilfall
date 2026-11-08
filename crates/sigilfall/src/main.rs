@@ -11,6 +11,8 @@
 mod app;
 mod casting;
 mod cli;
+#[cfg(test)]
+mod f6_acceptance;
 mod input;
 mod message_log;
 mod messages;
