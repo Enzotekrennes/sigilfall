@@ -96,10 +96,13 @@ impl SightRange {
 
 /// How far the player sees: 16 cells along a row, 8 along a column.
 ///
-/// On the smallest supported terminal (80 × 24) the map area is 16 rows high,
-/// so eight cells above and below the player reach its top and bottom edges:
-/// the field of view fills the screen height without lighting cells the
-/// camera cannot show. A terminal cell is about twice as tall as it is wide,
+/// On the smallest supported terminal (80 × 24) the map area is 16 rows high:
+/// with the camera centred on the player, it shows the 8 rows above the
+/// player but only 7 below, so the 8th row of sight under the player is cut
+/// off there, unless the camera stops at the top or bottom of the floor and
+/// the player is off centre. From 25 rows up the whole height of the field
+/// of view fits. Along a row, the 16 cells on each side always fit in the
+/// map area. A terminal cell is about twice as tall as it is wide,
 /// so 16 cells across cover the same distance on screen as 8 cells up or
 /// down: the lit area looks round to the player instead of squashed. It
 /// covers most of a generated room from its middle, while leaving long

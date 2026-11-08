@@ -30,8 +30,8 @@ use crate::event::Event;
 use crate::geometry::{Direction, Position};
 use crate::schedule::{action_cost, spend_energy};
 use crate::sigil::{
-    Backlash, CastQuality, DAZE_TURNS, ESSENCE_COST, Recognition, SCORCH_DAMAGE, SPELL_RANGE,
-    Trace, draw_backlash, recognize,
+    Backlash, CastQuality, DAZE_TURNS, ESSENCE_COST, NEAREST_FOE_REACH, Recognition, SCORCH_DAMAGE,
+    SPELL_RANGE, Trace, draw_backlash, recognize,
 };
 
 impl Game {
@@ -149,10 +149,12 @@ impl Game {
     /// `direction` if given, or `None` if nobody.
     ///
     /// - [`Targeting::Caster`]: the caster itself.
-    /// - [`Targeting::NearestEnemy`]: the foe on a cell the player sees that
-    ///   is the fewest steps away (Chebyshev distance), ties broken in
-    ///   reading order (upper row first, then left column first), so the
-    ///   choice never depends on anything but the positions.
+    /// - [`Targeting::NearestEnemy`]: among the foes on a cell the player
+    ///   sees and within [`NEAREST_FOE_REACH`] of the caster (the disc of
+    ///   radius [`SPELL_RANGE`]), the one the fewest steps away (Chebyshev
+    ///   distance), ties broken in reading order (upper row first, then left
+    ///   column first), so the choice never depends on anything but the
+    ///   positions. A foe seen farther along a row is out of reach.
     /// - [`Targeting::Direction`]: the first actor on the straight line from
     ///   the caster in `direction`, within [`SPELL_RANGE`] cells; the line
     ///   stops at the first step [`Map::can_step`](crate::map::Map::can_step)
@@ -174,8 +176,9 @@ impl Game {
         }
     }
 
-    /// Returns the foe of `caster` standing on a visible cell that is the
-    /// fewest steps away, ties broken in reading order, if any.
+    /// Returns the foe of `caster` standing on a visible cell within
+    /// [`NEAREST_FOE_REACH`] of it that is the fewest steps away, ties broken
+    /// in reading order, if any.
     fn nearest_visible_foe(&self, caster: ActorId) -> Option<ActorId> {
         let from = self.world.actors[caster].position;
         self.world
@@ -184,6 +187,8 @@ impl Game {
             .filter(|&(id, actor)| {
                 actor.is_player() != self.world.actors[caster].is_player()
                     && self.world.map.is_visible(actor.position)
+                    && NEAREST_FOE_REACH
+                        .reaches(actor.position.x - from.x, actor.position.y - from.y)
                     && id != caster
             })
             .min_by_key(|(_, actor)| {
@@ -584,6 +589,84 @@ mod tests {
         assert_eq!(game.actor(hidden).map(|a| a.hp()), Some(20));
         assert_eq!(game.player_actor().essence(), MAX_ESSENCE - ESSENCE_COST);
         assert_eq!(energy_spent(&game, before), cast_cost(3));
+    }
+
+    #[test]
+    fn a_spell_on_the_nearest_foe_misses_a_foe_seen_beyond_eight_cells() {
+        for id in ["ember", "veil"] {
+            let sigil = shipped(id);
+            let mut game = game_knowing(&[&sigil]);
+            // Nine cells east: in sight (16 along a row), out of the disc.
+            let seen = Position::new(START.x + 9, START.y);
+            let foe = game.spawn_monster(seen, &creature(NORMAL_SPEED, 20));
+            assert!(game.is_visible(seen));
+
+            let events = game.submit(Action::Cast {
+                trace: *sigil.pattern(),
+                direction: None,
+            });
+
+            assert_eq!(
+                events[1],
+                Event::SpellMissed {
+                    sigil: id.to_owned()
+                },
+                "{id}"
+            );
+            assert_eq!(
+                game.actor(foe).map(|a| (a.hp(), a.held_turns())),
+                Some((20, 0))
+            );
+        }
+    }
+
+    #[test]
+    fn a_spell_on_the_nearest_foe_reaches_eight_cells_along_a_row() {
+        for id in ["ember", "veil"] {
+            let sigil = shipped(id);
+            let mut game = game_knowing(&[&sigil]);
+            let foe = game.spawn_monster(
+                Position::new(START.x + 8, START.y),
+                &creature(NORMAL_SPEED, 20),
+            );
+
+            let events = game.submit(Action::Cast {
+                trace: *sigil.pattern(),
+                direction: None,
+            });
+
+            assert!(
+                matches!(
+                    events[1],
+                    Event::Wounded { actor, .. } | Event::Held { actor, .. } if actor == foe
+                ),
+                "{id}: {events:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_foe_fewer_steps_away_but_outside_the_disc_is_passed_over() {
+        let ember = shipped("ember");
+        let mut game = game_knowing(&[&ember]);
+        // 7 steps away (7 across, 5 down) but 7² + 5² = 74 > 8² + 8.
+        let outside = Position::new(START.x + 7, START.y + 5);
+        let skipped = game.spawn_monster(outside, &creature(NORMAL_SPEED, 20));
+        // 8 steps away, straight along the row: inside the disc.
+        let target = game.spawn_monster(
+            Position::new(START.x + 8, START.y),
+            &creature(NORMAL_SPEED, 20),
+        );
+        assert!(game.is_visible(outside));
+        assert!(!NEAREST_FOE_REACH.reaches(7, 5));
+
+        let events = cast(&mut game, &[7, 5, 3], None);
+
+        assert!(
+            matches!(events[1], Event::Wounded { actor, .. } if actor == target),
+            "{events:?}"
+        );
+        assert_eq!(game.actor(skipped).map(|a| a.hp()), Some(20));
     }
 
     #[test]

@@ -102,8 +102,9 @@ pub enum Event {
         /// Identifier of the sigil the trace would cast.
         sigil: String,
     },
-    /// A spell aimed at a creature found none: no enemy in sight, or none on
-    /// the line within `sigil::SPELL_RANGE`. Its cost is still paid.
+    /// A spell aimed at a creature found none: no enemy in sight within
+    /// `sigil::NEAREST_FOE_REACH`, or none on the line within
+    /// `sigil::SPELL_RANGE`. Its cost is still paid.
     SpellMissed {
         /// Identifier of the sigil cast.
         sigil: String,

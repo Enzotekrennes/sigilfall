@@ -25,6 +25,12 @@
 // items are equally likely. Deeper bands shift the weights towards stronger
 // creatures, while the number of creatures per floor grows with depth
 // (`generation::monsters_per_floor`): together, the rule of difficulty.
+//
+// From floor 5, where the elite creatures arrive and a run used to wear
+// down for want of healing, healing draughts weigh 6 instead of 3: 6 chances
+// in 10 for each item of the floor instead of 3 in 7, about 1.8 draughts a
+// floor instead of 1.3 (decision D24). A floor still holds 3 items, so
+// the other items stay and healing is never at will.
 [
     // --- Monsters --------------------------------------------------------
     Spawn(of: Monster("ossuary_rat"), from_depth: 1, to_depth: 1, weight: 1),
@@ -50,7 +56,8 @@
 
     // --- Items -----------------------------------------------------------
     Spawn(of: Item("healing_draught"), from_depth: 1, to_depth: 1, weight: 1),
-    Spawn(of: Item("healing_draught"), from_depth: 2, to_depth: 10, weight: 3),
+    Spawn(of: Item("healing_draught"), from_depth: 2, to_depth: 4, weight: 3),
+    Spawn(of: Item("healing_draught"), from_depth: 5, to_depth: 10, weight: 6),
     Spawn(of: Item("essence_phial"), from_depth: 1, to_depth: 1, weight: 1),
     Spawn(of: Item("essence_phial"), from_depth: 2, to_depth: 10, weight: 2),
     Spawn(of: Item("steadying_ink"), from_depth: 1, to_depth: 10, weight: 1),

@@ -3,7 +3,8 @@
 //!
 //! Exposes the essence constants ([`MAX_ESSENCE`], [`ESSENCE_COST`],
 //! [`ESSENCE_REGEN_TICKS`]), the most steadied casts the player can hold
-//! ([`MAX_STEADY_CASTS`]), the reach of aimed spells ([`SPELL_RANGE`]),
+//! ([`MAX_STEADY_CASTS`]), the reach of spells ([`SPELL_RANGE`] for aimed
+//! spells, [`NEAREST_FOE_REACH`] for spells on the nearest foe in sight),
 //! [`CastQuality`], the closed list of [`Backlash`]es with their strength
 //! ([`SCORCH_DAMAGE`], [`DAZE_TURNS`]) and [`draw_backlash`]. The time a cast
 //! takes is set by the `schedule` module (`STROKE_COST`, `CAST_COST`), and
@@ -13,7 +14,7 @@ use rand::RngExt as _;
 use rand_chacha::ChaCha8Rng;
 
 use super::Recognition;
-use crate::fov::SIGHT_RANGE;
+use crate::fov::{SIGHT_RANGE, SightRange};
 
 /// Essence of the player at the start of a run, and the most it can hold.
 ///
@@ -53,9 +54,23 @@ pub const MAX_STEADY_CASTS: u32 = (MAX_ESSENCE / ESSENCE_COST).unsigned_abs();
 /// spell aimed north or south stops where sight does. Along a row sight
 /// reaches twice as far (it is an ellipse, see the `fov` module), but aimed
 /// spells keep the same reach in every direction, the one they were balanced
-/// with.
+/// with. Spells on the nearest foe in sight share it: see
+/// [`NEAREST_FOE_REACH`].
 // Widening u16 to u32 is lossless; `u32::from` is not usable in a const.
 pub const SPELL_RANGE: u32 = SIGHT_RANGE.rows as u32;
+
+/// Where a spell on the nearest foe in sight (`Targeting::NearestEnemy`,
+/// such as Ember and Veil) can find its target: the disc of radius
+/// [`SPELL_RANGE`] around the caster.
+///
+/// A foe counts when the player sees its cell and it lies in this disc,
+/// `dx² + dy² ≤ 8² + 8` cells away (the rule of
+/// [`SightRange::reaches`](crate::fov::SightRange::reaches) with equal
+/// axes). That is the reach these spells had while sight was a disc of
+/// radius 8, the one they were balanced with: sight now reaches 16 cells
+/// along a row, and a foe seen beyond the disc is out of their reach, as it
+/// is out of the reach of an aimed spell.
+pub const NEAREST_FOE_REACH: SightRange = SightRange::new(SIGHT_RANGE.rows, SIGHT_RANGE.rows);
 
 /// Hit points a [`Backlash::Scorch`] takes from the caster.
 ///

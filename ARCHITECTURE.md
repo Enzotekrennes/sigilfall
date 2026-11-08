@@ -71,7 +71,7 @@ library, and the terminal application in a binary that depends on it.
 | `sigil::trace` | `Node` and `Trace`: the grid and the rules a trace follows. |
 | `sigil::recognition` | `recognize`: a finished trace matched against the known sigils by edit distance. |
 | `sigil::grimoire` | `Grimoire`: the sigils the player has learnt. |
-| `sigil::casting` | Essence, range, cast quality and backlash. |
+| `sigil::casting` | Essence, the reach of spells (`SPELL_RANGE`, 8 cells, for spells aimed in a direction; `NEAREST_FOE_REACH`, the disc of radius 8, for spells on the nearest foe in sight), cast quality and backlash. |
 | `stats` | `Stats`: what the player did during the run, for the death summary. |
 
 ### `sigilfall`
@@ -192,7 +192,7 @@ the alternative set aside.
 | D16 | Six monsters out of sight of the start, with random starting energy; monsters see through the player's field of view. | Zero starting energy, one field of view per monster. |
 | D17 | Bump attacks; damage = max(1, attack − defense + roll in −1..+1); no miss. | A separate attack action, a to-hit roll, player stats in data. |
 | D18 | Recognition by Levenshtein distance on nodes; patterns at least 3 edits apart, so a near miss matches one sigil only. | A 2-edit gap with "first in the file wins". |
-| D19 | One `Action::Cast` per trace: 50 energy plus 25 per node, 2 essence per cast (6 at most, 1 back every 12 ticks), glyphs read by stepping on them. | Node-by-node tracing in the core, essence cost per sigil, a dedicated "read" action. |
+| D19 | One `Action::Cast` per trace: 50 energy plus 25 per node, 2 essence per cast (6 at most, 1 back every 12 ticks), glyphs read by stepping on them; every spell that seeks a creature reaches 8 cells, as when sight was a disc of radius 8: an aimed spell along its line, a spell on the nearest foe within the disc of radius 8 among the foes in sight. | Node-by-node tracing in the core, essence cost per sigil, a dedicated "read" action; spells on the nearest foe reaching as far as sight (16 cells along a row). |
 | D20 | `Action::Descend` on the stairs only; a gameplay stream per floor; weighted spawn tables in `spawns.ron`; more monsters deeper (6 + depth − 1, at most 12). | Spawn weights inside each definition, difficulty by stats only. |
 | D21 | Readable RON saves with a format version (v4 since T33: the seal tile and the won status; v3 added the date of a daily run), state only (definitions by id), the exact gameplay stream and slot-map reuse order. | `slotmap`'s own serde form, or a binary format. |
 | D22 | Floor kinds in data (`floors.ron`, weights by band of floors), drawn on a stream of their own (`FloorKind`); caves grown by a cellular automaton (45 % rock, 5 passes, rule 4-5), the largest area kept, regrown below 900 cells; floors 1-2 always rooms, 10 and deeper always caves. | Floor weights added to `spawns.ron`, and the kind drawn on the generation stream, which would have changed every existing floor and the demo. |

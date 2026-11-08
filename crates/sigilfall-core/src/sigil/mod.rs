@@ -22,7 +22,7 @@ mod trace;
 
 pub use casting::{
     Backlash, CastQuality, DAZE_TURNS, ESSENCE_COST, ESSENCE_REGEN_TICKS, MAX_ESSENCE,
-    MAX_STEADY_CASTS, SCORCH_DAMAGE, SPELL_RANGE, draw_backlash,
+    MAX_STEADY_CASTS, NEAREST_FOE_REACH, SCORCH_DAMAGE, SPELL_RANGE, draw_backlash,
 };
 pub use grimoire::Grimoire;
 pub use recognition::{

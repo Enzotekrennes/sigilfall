@@ -1014,7 +1014,7 @@ fn no_monster_is_in_view_from_the_start_of_a_floor() {
 }
 
 // ---------------------------------------------------------------------------
-// Sight against the reach of spells (decision D15, "to judge in play")
+// Sight against the reach of spells (decision D15; B2 of F3, task T32)
 // ---------------------------------------------------------------------------
 
 /// Shipped sigils learnt by walking over their glyphs, as the game teaches
@@ -1059,35 +1059,65 @@ fn wounded(events: &[sigilfall_core::event::Event], id: sigilfall_core::actor::A
         .any(|e| matches!(e, sigilfall_core::event::Event::Wounded { actor, .. } if *actor == id))
 }
 
-/// Characterisation of a consequence of the 16 × 8 view that the plan leaves
-/// "to judge in play": a spell that picks the nearest foe in sight (Ember)
-/// now reaches 16 cells along a row, while a spell aimed in a direction
-/// (Lance) still stops at 8 cells, so the two kinds of spell no longer share a
-/// reach.
+/// Whether `events` wound or hold the actor `id`: the effect of Ember or Veil
+/// reached it.
+fn touched(events: &[sigilfall_core::event::Event], id: sigilfall_core::actor::ActorId) -> bool {
+    use sigilfall_core::event::Event;
+    events.iter().any(
+        |e| matches!(e, Event::Wounded { actor, .. } | Event::Held { actor, .. } if *actor == id),
+    )
+}
+
+/// Whether `events` report that the spell `sigil` found no target.
+fn missed(events: &[sigilfall_core::event::Event], sigil: &str) -> bool {
+    events.iter().any(|e| {
+        matches!(e, sigilfall_core::event::Event::SpellMissed { sigil: missed } if missed == sigil)
+    })
+}
+
+/// B2 of the F3 test, settled by task T32: a spell on the nearest foe in
+/// sight (Ember, Veil) reaches the foes in sight within the disc of radius 8
+/// it had before the 16 × 8 view (`sigil::NEAREST_FOE_REACH`), so a foe seen
+/// 9 to 16 cells away along a row is out of its reach, as it is out of the
+/// reach of a spell aimed in a direction (Lance), which still stops at 8.
 #[test]
-fn a_spell_on_the_nearest_foe_in_sight_reaches_16_along_a_row_but_an_aimed_one_stops_at_8() {
+fn a_spell_on_the_nearest_foe_in_sight_and_an_aimed_one_both_stop_at_8_along_a_row() {
     let snail = snail();
     let player = Position::new(5, 5);
 
-    // Ember: foe 16 cells east, in sight.
-    let mut game = learnt(&["ember", "lance"]);
-    let far = game.spawn_monster(at(player.x + 16, 5), &snail);
-    settle(&mut game);
-    assert!(game.is_visible(at(player.x + 16, 5)));
-    let events = cast(&mut game, &[7, 5, 3], None);
-    assert!(
-        wounded(&events, far),
-        "Ember reaches a foe 16 cells away along a row: {events:?}"
-    );
+    // Ember and Veil: a foe in sight 9 to 16 cells east is not reached.
+    for (id, digits) in [("ember", &[7, 5, 3][..]), ("veil", &[4, 7, 8, 9, 6][..])] {
+        for gap in [9, 12, 16] {
+            let mut game = learnt(&["ember", "veil"]);
+            let far = game.spawn_monster(at(player.x + gap, 5), &snail);
+            settle(&mut game);
+            assert!(game.is_visible(at(player.x + gap, 5)));
+            let events = cast(&mut game, digits, None);
+            assert!(
+                missed(&events, id) && !touched(&events, far),
+                "{id} misses a foe {gap} cells away along a row: {events:?}"
+            );
+        }
+
+        // ... and a foe 8 cells east is.
+        let mut game = learnt(&["ember", "veil"]);
+        let near = game.spawn_monster(at(player.x + 8, 5), &snail);
+        settle(&mut game);
+        let events = cast(&mut game, digits, None);
+        assert!(
+            touched(&events, near),
+            "{id} reaches a foe 8 cells away: {events:?}"
+        );
+    }
 
     // Lance, aimed east: a foe 8 cells away is hit, one 9 cells away is not.
-    let mut game = learnt(&["ember", "lance"]);
+    let mut game = learnt(&["lance"]);
     let near = game.spawn_monster(at(player.x + 8, 5), &snail);
     settle(&mut game);
     let events = cast(&mut game, &[1, 5, 9, 6], Some(Direction::East));
     assert!(wounded(&events, near), "Lance reaches 8 cells: {events:?}");
 
-    let mut game = learnt(&["ember", "lance"]);
+    let mut game = learnt(&["lance"]);
     let beyond = game.spawn_monster(at(player.x + 9, 5), &snail);
     settle(&mut game);
     assert!(
