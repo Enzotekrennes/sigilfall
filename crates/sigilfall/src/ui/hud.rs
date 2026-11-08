@@ -9,8 +9,8 @@
 //! `docs/design.md`: a border down the left, "HP" with its value, the bar,
 //! "Essence" with its value, a blank row, "SIGILS" with the count known out
 //! of those that exist and their names, a blank row, then "IN VIEW" with
-//! the player, one line per kind of monster, one per kind of item and one
-//! per kind of engraved glyph in view.
+//! the player, one line per kind of monster, one per kind of item, one per
+//! kind of engraved glyph and one for the stairs down in view.
 //!
 //! The rows left under the fixed lines are shared by the sigil names and
 //! the "in view" block, in this order of priority: the "in view" block
@@ -32,6 +32,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Widget as _;
 use sigilfall_core::content::Content;
 use sigilfall_core::game::Game;
+use sigilfall_core::geometry::Position;
+use sigilfall_core::map::Tile;
 use sigilfall_core::sigil::ESSENCE_COST;
 
 use crate::messages;
@@ -333,7 +335,8 @@ struct Entry {
 /// the player, then one entry per kind of monster in view, in the order of
 /// `Game::visible_monsters`, then one per kind of item in view, in the
 /// order of `Game::visible_items`, then the engraved glyphs in view, unread
-/// ones first, with "×2" after the name when several of a kind are in view.
+/// ones first, then the stairs down when in view, with "×2" after the name
+/// when several of a kind are in view.
 /// Monsters come first since they threaten the player; items, which the
 /// player may pick up, come before the glyphs, as in the mock-up.
 fn in_view_entries(game: &Game, content: &Content, width: u16, theme: &Theme) -> Vec<Entry> {
@@ -404,7 +407,34 @@ fn in_view_entries(game: &Game, content: &Content, width: u16, theme: &Theme) ->
             name: counted_name(name, count, name_width, theme.glyphs.dimension),
         },
     ));
+    if stairs_in_view(game) {
+        entries.push(Entry {
+            glyph: theme.glyphs.stairs,
+            glyph_style: theme.stairs,
+            name: counted_name(
+                messages::STAIRS_IN_VIEW,
+                1,
+                name_width,
+                theme.glyphs.dimension,
+            ),
+        });
+    }
     entries
+}
+
+/// Returns whether the player sees stairs down: a cell in view holds
+/// [`Tile::StairsDown`]. Stairs only remembered do not count, like every
+/// other entry of the list.
+fn stairs_in_view(game: &Game) -> bool {
+    let map = game.map();
+    // Floors are 80 × 40 (`generation::FLOOR_WIDTH` and `FLOOR_HEIGHT`), so
+    // their sides always fit an `i32`.
+    let (Ok(width), Ok(height)) = (i32::try_from(map.width()), i32::try_from(map.height())) else {
+        return false;
+    };
+    (0..height)
+        .flat_map(|y| (0..width).map(move |x| Position::new(x, y)))
+        .any(|cell| map.tile(cell) == Some(Tile::StairsDown) && game.is_visible(cell))
 }
 
 /// The "in view" block in at most `rows` rows: its title, then `entries`

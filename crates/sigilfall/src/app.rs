@@ -33,6 +33,12 @@
 //! back to the map, so the player sees at once what the monsters did in the
 //! meantime; a refusal of the game took no time and keeps the inventory
 //! open, with the reason under the list.
+//!
+//! Going down the stairs (`>`, or `D`) is a game action like a move: the
+//! game replaces the floor and its field of view, the screen draws the new
+//! one around the player with the depth on the status line, and the log
+//! keeps the floors above. Off the stairs the game refuses it at no cost,
+//! and the log says so.
 
 use std::cell::Cell;
 
@@ -804,6 +810,280 @@ mod tests {
         }
     }
 
+    /// Going down the stairs (T22b), driven by keys like a player on the
+    /// bare floors of [`SEED`] (see [`generated_floor_app`]), where no
+    /// monster stands in the way, and read back from the rendered screen.
+    mod descent {
+        use sigilfall_core::map::Tile;
+
+        use super::*;
+
+        /// The cell of the stairs down of the floor `app`'s player is on.
+        fn stairs(app: &App) -> Position {
+            let map = app.game().map();
+            let width = i32::try_from(map.width()).unwrap();
+            let height = i32::try_from(map.height()).unwrap();
+            (0..height)
+                .flat_map(|y| (0..width).map(move |x| Position::new(x, y)))
+                .find(|&cell| map.tile(cell) == Some(Tile::StairsDown))
+                .expect("every generated floor has stairs")
+        }
+
+        /// Walks `app`'s player with the vi keys along a shortest path until
+        /// it is `distance` steps from the stairs of its floor, checking
+        /// each step brings it closer (which also bounds the loop).
+        fn walk_near_stairs(app: &mut App, distance: u32) {
+            // The distances borrow a map: a copy leaves `app` free to move.
+            let map = app.game().map().clone();
+            let to_stairs = DijkstraMap::new(&map, [stairs(app)]);
+            while to_stairs.distance(player_position(app)) > Some(distance) {
+                let before = to_stairs.distance(player_position(app));
+                let direction = to_stairs.downhill(player_position(app)).unwrap();
+                app.handle_key(press(vi_key(direction)));
+                assert!(
+                    to_stairs.distance(player_position(app)) < before,
+                    "the move {direction:?} was refused"
+                );
+            }
+        }
+
+        /// The first row of `app`'s screen, trimmed: "Depth 2 · Turn 40 …".
+        fn status(app: &App) -> String {
+            row_text(render(app, 80, 24).backend().buffer(), 0)
+                .trim()
+                .to_owned()
+        }
+
+        /// The texts of `app`'s log, oldest first.
+        fn log_texts(app: &App) -> Vec<String> {
+            let mut texts: Vec<_> = app
+                .log()
+                .newest_first()
+                .map(|message| message.text.clone())
+                .collect();
+            texts.reverse();
+            texts
+        }
+
+        /// What `app` measures of the game: depth, ticks, player turns and
+        /// the player's cell.
+        fn clock(app: &App) -> (u32, u64, u64, Position) {
+            let game = app.game();
+            (
+                game.depth(),
+                game.ticks(),
+                game.player_turns(),
+                player_position(app),
+            )
+        }
+
+        #[test]
+        fn the_status_line_starts_with_the_depth_then_the_turn() {
+            let app = generated_floor_app();
+
+            let line = status(&app);
+
+            assert!(line.starts_with("Depth 1 · Turn 1 "), "{line:?}");
+            assert!(line.ends_with("Seed 7F3A-91C2-0B5E-D4A8"), "{line:?}");
+        }
+
+        #[test]
+        fn greater_than_on_the_stairs_shows_the_next_floor_and_keeps_the_log() {
+            let mut app = generated_floor_app();
+            walk_near_stairs(&mut app, 1);
+            // One step short, the stairs are in view and named in the panel.
+            let before = render(&app, 80, 24).backend().to_string();
+            assert!(before.contains("▼ stairs down"), "{before}");
+            walk_near_stairs(&mut app, 0);
+            let turns = app.game().player_turns();
+            let history = log_texts(&app);
+
+            app.handle_key(KeyEvent::new(KeyCode::Char('>'), KeyModifiers::SHIFT));
+
+            assert_eq!(app.state(), State::Playing);
+            assert_eq!(app.game().depth(), 2);
+            assert_eq!(app.game().player_turns(), turns + 1, "a descent is a turn");
+            let next = generation::generate(SEED, 2);
+            assert_eq!(player_position(&app), next.start());
+            let line = status(&app);
+            assert!(
+                line.starts_with(&format!("Depth 2 · Turn {} ", turns + 2)),
+                "{line:?}"
+            );
+            assert!(line.ends_with("Seed 7F3A-91C2-0B5E-D4A8"), "{line:?}");
+            // The log keeps the floor above and adds one line.
+            let after = log_texts(&app);
+            assert_eq!(after[..history.len()], history[..]);
+            assert_eq!(after[history.len()..], ["You descend to depth 2."]);
+            // The screen shows the new floor around the player, and only
+            // what the player sees from its start: the floor above is
+            // forgotten with its map.
+            let terminal = render(&app, 80, 24);
+            let buffer = terminal.backend().buffer();
+            let camera = camera(&app, 80, 24);
+            let player = camera.screen_position(next.start()).expect("in view");
+            assert_eq!(buffer[player].symbol(), "@");
+            for (screen, cell) in camera.cells() {
+                if buffer[screen].symbol() != " " {
+                    assert!(app.game().is_visible(cell), "{cell:?} drawn unseen");
+                    assert_eq!(app.game().map().tile(cell), next.map().tile(cell));
+                }
+            }
+            assert_snapshot!(terminal.backend());
+        }
+
+        #[test]
+        fn a_descent_off_the_stairs_is_refused_at_no_cost_and_logged() {
+            let mut app = generated_floor_app();
+            walk_near_stairs(&mut app, 1);
+            let before = clock(&app);
+            let history = log_texts(&app);
+
+            for key in [
+                press(KeyCode::Char('>')),
+                KeyEvent::new(KeyCode::Char('D'), KeyModifiers::SHIFT),
+            ] {
+                app.handle_key(key);
+            }
+
+            assert_eq!(clock(&app), before, "no depth, time or turn spent");
+            assert_eq!(app.state(), State::Playing);
+            assert!(status(&app).starts_with("Depth 1 · "), "{}", status(&app));
+            let after = log_texts(&app);
+            assert_eq!(after[..history.len()], history[..]);
+            assert_eq!(
+                after[history.len()..],
+                ["There are no stairs here.", "There are no stairs here."]
+            );
+        }
+
+        #[test]
+        fn lowercase_d_and_less_than_never_descend() {
+            let mut app = generated_floor_app();
+            walk_near_stairs(&mut app, 0);
+            let before = clock(&app);
+            let messages = app.log().len();
+
+            press_all(&mut app, &[KeyCode::Char('d'), KeyCode::Char('<')]);
+
+            assert_eq!(clock(&app), before);
+            assert_eq!(app.log().len(), messages, "unbound keys log nothing");
+        }
+
+        #[test]
+        fn descending_again_and_again_counts_each_floor() {
+            let mut app = generated_floor_app();
+            let mut turn = 1;
+
+            for depth in 2..=4 {
+                walk_near_stairs(&mut app, 0);
+                // Both keys go down: `>` then the alternative, in turn.
+                let key = if depth % 2 == 0 {
+                    KeyEvent::new(KeyCode::Char('>'), KeyModifiers::SHIFT)
+                } else {
+                    KeyEvent::new(KeyCode::Char('D'), KeyModifiers::SHIFT)
+                };
+                app.handle_key(key);
+
+                assert_eq!(app.game().depth(), depth);
+                assert_eq!(
+                    player_position(&app),
+                    generation::generate(SEED, depth).start()
+                );
+                assert!(app.game().player_turns() + 1 > turn, "time went on");
+                turn = app.game().player_turns() + 1;
+                let line = status(&app);
+                assert!(
+                    line.starts_with(&format!("Depth {depth} · Turn {turn} ")),
+                    "{line:?}"
+                );
+                let newest = app.log().newest_first().next().unwrap();
+                assert_eq!(newest.text, format!("You descend to depth {depth}."));
+            }
+            let descents = log_texts(&app)
+                .into_iter()
+                .filter(|text| text.starts_with("You descend"))
+                .count();
+            assert_eq!(descents, 3, "the log keeps every floor");
+        }
+
+        #[test]
+        fn the_ascii_status_line_and_help_stay_plain_ascii() {
+            let app = App::with_game(
+                Theme::new(ColorMode::Ansi16, GlyphSet::Ascii),
+                Game::on_floor(SEED, generation::generate(SEED, FIRST_DEPTH)),
+                shipped_content(),
+            );
+            let buffer = render(&app, 80, 24).backend().buffer().clone();
+
+            let status = row_text(&buffer, 0);
+            let help = row_text(&buffer, 23);
+
+            assert!(status.starts_with(" Depth 1 - Turn 1 "), "{status:?}");
+            // Eight help entries fill the 80 columns exactly: nothing cut.
+            assert_eq!(
+                help,
+                " <^>v/1-9 move   . wait   t trace   g pick up   i inventory   > descend   q quit"
+            );
+        }
+    }
+
+    /// The overlays leave no sliver of the map against their frame (bug B1
+    /// of the F7 tests): on 80 × 24, the map column between the 57-column
+    /// frame and the side panel, and the map row under it, are blank.
+    mod overlay_gutter {
+        use super::*;
+
+        /// The map cells of an 80 × 24 screen around the overlays' frame:
+        /// column 57 of the map rows, then row 16 left of the side panel.
+        fn gutter() -> Vec<(u16, u16)> {
+            let column = (1..=16).map(|y| (57, y));
+            let row = (0..57).map(|x| (x, 16));
+            column.chain(row).collect()
+        }
+
+        /// The gutter cells of `buffer` that show something.
+        fn drawn(buffer: &Buffer) -> Vec<(u16, u16)> {
+            gutter()
+                .into_iter()
+                .filter(|&cell| buffer[cell].symbol() != " ")
+                .collect()
+        }
+
+        #[test]
+        fn the_inventory_and_the_trace_blank_the_map_around_their_frame() {
+            let theme = Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode);
+            let mut app = generated_floor_app();
+            // Walk towards the stairs until map glyphs fill the gutter, so
+            // the test shows they are hidden rather than never drawn.
+            let floor = generation::generate(SEED, FIRST_DEPTH);
+            let to_stairs = DijkstraMap::new(floor.map(), [floor.stairs()]);
+            while drawn(render(&app, 80, 24).backend().buffer()).is_empty() {
+                let direction = to_stairs
+                    .downhill(player_position(&app))
+                    .expect("map glyphs reach the gutter before the stairs");
+                app.handle_key(press(vi_key(direction)));
+            }
+
+            for (open, close) in [
+                (KeyCode::Char('i'), KeyCode::Esc),
+                (KeyCode::Char('t'), KeyCode::Esc),
+            ] {
+                app.handle_key(press(open));
+                let buffer = render(&app, 80, 24).backend().buffer().clone();
+
+                assert_eq!(drawn(&buffer), [], "{open:?}: the gutter is blank");
+                for cell in gutter() {
+                    assert_eq!(Some(buffer[cell].bg), theme.bg.bg, "{open:?} {cell:?}");
+                }
+                assert_eq!(buffer[(56, 1)].symbol(), "╮", "{open:?}: frame corner");
+                assert_eq!(buffer[(58, 1)].symbol(), "│", "{open:?}: panel border");
+                app.handle_key(press(close));
+            }
+            assert!(!drawn(render(&app, 80, 24).backend().buffer()).is_empty());
+        }
+    }
+
     /// The side panel, the message log and the end screen (T16), driven by
     /// keys like a player and read back from the rendered screen.
     mod combat_screens {
@@ -1336,8 +1616,8 @@ mod tests {
             let first_line = row_text(&screen(app), 0);
             first_line
                 .trim()
-                .strip_prefix("Turn ")
-                .and_then(|rest| rest.split_whitespace().next())
+                .split_once("Turn ")
+                .and_then(|(_, rest)| rest.split_whitespace().next())
                 .and_then(|value| value.parse().ok())
                 .unwrap_or_else(|| panic!("no turn counter on: {first_line:?}"))
         }
@@ -1739,7 +2019,10 @@ mod tests {
 
             press_all(&mut app, &[KeyCode::Char('l'), KeyCode::Char('.')]);
             let first_line = row_text(&screen(&app), 0);
-            assert!(first_line.starts_with(" Turn 3 "), "{first_line:?}");
+            assert!(
+                first_line.starts_with(" Depth 1 · Turn 3 "),
+                "{first_line:?}"
+            );
             assert!(
                 first_line.ends_with(" Seed 7F3A-91C2-0B5E-D4A8 "),
                 "the seed does not change while playing: {first_line:?}"
@@ -1759,7 +2042,10 @@ mod tests {
                 first_line.ends_with(" Seed 0000-0000-0000-002A "),
                 "{first_line:?}"
             );
-            assert!(first_line.starts_with(" Turn 1 "), "{first_line:?}");
+            assert!(
+                first_line.starts_with(" Depth 1 - Turn 1 "),
+                "{first_line:?}"
+            );
         }
 
         #[test]
@@ -2182,8 +2468,8 @@ mod tests {
             let first = row_text(render(app, 80, 24).backend().buffer(), 0);
             first
                 .trim()
-                .strip_prefix("Turn ")
-                .and_then(|rest| rest.split_whitespace().next())
+                .split_once("Turn ")
+                .and_then(|(_, rest)| rest.split_whitespace().next())
                 .and_then(|value| value.parse().ok())
                 .unwrap_or_else(|| panic!("no turn counter on {first:?}"))
         }

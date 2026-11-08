@@ -18,6 +18,18 @@ use sigilfall_core::action::Action;
 use sigilfall_core::geometry::Direction;
 use sigilfall_core::sigil::Node;
 
+/// Second key that goes down the stairs, beside `>`: `D`, typed Shift+d.
+///
+/// `>` is the key of the genre, and the one the key help names. On an
+/// AZERTY keyboard it is Shift and the `<` key next to it, as easy as Shift
+/// and `.` on QWERTY; but some layouts, such as AZERTY on a laptop without
+/// the `<` key, have no plain way to type it. `D` sits at the same place on
+/// every Latin layout, reads as "descend", and its lower case is bound to
+/// nothing on the game screen: `d` drops an item in the inventory, so a
+/// player pressing it once too many after a drop never leaves the floor by
+/// mistake.
+pub const DESCEND_ALTERNATIVE_KEY: char = 'D';
+
 /// What the player asked for with one key press.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
@@ -104,6 +116,9 @@ pub enum VerdictCommand {
 /// - pick up the item underfoot: `g`, as in the mock-up, or `,`, the key
 ///   of other roguelikes; neither is a vi key;
 /// - open the inventory: `i`;
+/// - go down the stairs: `>`, the key of the genre, or
+///   [`DESCEND_ALTERNATIVE_KEY`]; the game refuses it off the stairs, at no
+///   cost;
 /// - quit: `q` or Ctrl+C (raw mode turns Ctrl+C into a plain key).
 ///
 /// Escape is bound to nothing here: it closes the overlays, and a player
@@ -120,6 +135,7 @@ pub fn command_for(key: KeyEvent) -> Option<Command> {
         KeyCode::Char('q') => Some(Command::Quit),
         KeyCode::Char('t') => Some(Command::Trace),
         KeyCode::Char('i') => Some(Command::Inventory),
+        KeyCode::Char('>' | DESCEND_ALTERNATIVE_KEY) => Some(Command::Act(Action::Descend)),
         KeyCode::Char('g' | ',') => Some(Command::Act(Action::PickUp)),
         KeyCode::Char('.' | '5') | KeyCode::KeypadBegin => Some(Command::Act(Action::Wait)),
         code => direction_for(code).map(|direction| Command::Act(Action::Move(direction))),
@@ -370,6 +386,31 @@ mod tests {
             command_for(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::ALT)),
             None
         );
+    }
+
+    #[test]
+    fn greater_than_and_shift_d_descend_but_d_and_less_than_do_nothing() {
+        let descend = Some(Command::Act(Action::Descend));
+        // `>` arrives with Shift on most layouts, `D` always does.
+        for key in [
+            press(KeyCode::Char('>')),
+            KeyEvent::new(KeyCode::Char('>'), KeyModifiers::SHIFT),
+            KeyEvent::new(KeyCode::Char('D'), KeyModifiers::SHIFT),
+        ] {
+            assert_eq!(command_for(key), descend, "{key:?}");
+        }
+        for key in [
+            press(KeyCode::Char('d')),
+            press(KeyCode::Char('<')),
+            KeyEvent::new(KeyCode::Char('>'), KeyModifiers::ALT),
+            KeyEvent::new_with_kind(
+                KeyCode::Char('>'),
+                KeyModifiers::NONE,
+                KeyEventKind::Release,
+            ),
+        ] {
+            assert_eq!(command_for(key), None, "{key:?}");
+        }
     }
 
     #[test]

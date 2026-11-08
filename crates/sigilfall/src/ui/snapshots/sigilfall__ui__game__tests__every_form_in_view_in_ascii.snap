@@ -2,7 +2,7 @@
 source: crates/sigilfall/src/ui/game.rs
 expression: screen_text(&screen)
 ---
-" Turn 15                                               Seed 0000-0000-0000-002A "
+" Depth 1 - Turn 15                                     Seed 0000-0000-0000-002A "
 "                                                          | HP            30/30 "
 "                                                          | ==================  "
 "              ##########################                  | Essence         6/6 "
@@ -25,4 +25,4 @@ expression: screen_text(&screen)
 "                                                                                "
 "                                                                                "
 "                                                                                "
-" <^>v/1-9 move   . wait   t trace   g pick up   i inventory   q quit            "
+" <^>v/1-9 move   . wait   t trace   g pick up   i inventory   > descend   q quit"

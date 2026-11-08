@@ -1,4 +1,5 @@
-//! The main game screen: status line with the turn and the run's seed, map
+//! The main game screen: status line with the depth, the turn and the run's
+//! seed, map
 //! with the monsters in view and the player, side panel, message log, key
 //! help.
 //!
@@ -57,7 +58,7 @@ const STATUS_MARGIN: u16 = 1;
 /// The areas of the game screen, as laid out by [`GameLayout::new`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct GameLayout {
-    /// First row: turn counter on the left, seed on the right.
+    /// First row: depth and turn counter on the left, seed on the right.
     status: Rect,
     /// The map, which takes every row and column the other areas leave.
     map: Rect,
@@ -156,17 +157,26 @@ pub fn render(
     frame.render_widget(key_help(overlay, carries_items, theme), layout.help);
 }
 
-/// Builds the left part of the status line: the player's current turn,
-/// label in the muted style and value in the text style.
+/// Builds the left part of the status line: the depth of the floor, then
+/// the player's current turn, "Depth 2 · Turn 412", labels and separator in
+/// the muted style, values in the text style. The separator is the theme's
+/// (`-` in ASCII).
 ///
-/// The number is the turn the player is about to play, counted from 1:
-/// [`Game::player_turns`] (actions that took time) plus one, so a new game
-/// shows "Turn 1" and each move or wait adds one. Game ticks are not shown:
-/// they also count the time other actors and slower actions take.
+/// The depth is [`Game::depth`], 1 on the first floor. The turn is the one
+/// the player is about to play, counted from 1: [`Game::player_turns`]
+/// (actions that took time) plus one, so a new game shows "Turn 1" and each
+/// move, wait or descent adds one; it runs on across floors. Game ticks are
+/// not shown: they also count the time other actors and slower actions
+/// take.
 fn status_line(game: &Game, theme: &Theme) -> Line<'static> {
     let current_turn = game.player_turns() + 1;
     Line::from(vec![
-        Span::styled(" Turn ", theme.text_muted),
+        Span::styled(" Depth ", theme.text_muted),
+        Span::styled(game.depth().to_string(), theme.text),
+        Span::styled(
+            format!(" {} Turn ", theme.glyphs.separator),
+            theme.text_muted,
+        ),
         Span::styled(current_turn.to_string(), theme.text),
     ])
 }
@@ -189,7 +199,8 @@ fn seed_label(seed: Seed, theme: &Theme) -> Line<'static> {
 /// does in the muted style, so keys stand out from their labels.
 ///
 /// The keys are those of the screen in front of the player: the game's
-/// (move, wait, trace, pick up, inventory, quit); under the sigil overlay,
+/// (move, wait, trace, pick up, inventory, descend, quit), which fill the
+/// 80 columns exactly; under the sigil overlay,
 /// the overlay's (link a node, undo, cast, cancel), the direction prompt's
 /// (aim, back) or the verdict's (continue); in the inventory, its own
 /// (choose, use, drop, close), or only close while the player carries
@@ -207,6 +218,7 @@ fn key_help(overlay: Option<Overlay<'_>>, carries_items: bool, theme: &Theme) ->
                 messages::INVENTORY_KEY.to_owned(),
                 messages::INVENTORY_LABEL,
             ),
+            (messages::DESCEND_KEY.to_owned(), messages::DESCEND_LABEL),
             (messages::QUIT_KEY.to_owned(), messages::QUIT_LABEL),
         ],
         Some(Overlay::Inventory(_)) if carries_items => vec![

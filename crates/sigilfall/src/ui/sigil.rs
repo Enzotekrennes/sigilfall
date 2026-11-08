@@ -134,7 +134,7 @@ pub fn render(buffer: &mut Buffer, area: Rect, casting: &Casting, game: &Game, t
         }
         Casting::Verdict(_) => messages::UNSTABLE_TITLE.to_owned(),
     };
-    draw_frame(buffer, frame, &title, theme);
+    draw_frame(buffer, area, frame, &title, theme);
     let inner = Rect {
         x: frame.x + 1,
         y: frame.y + 1,
@@ -184,11 +184,44 @@ fn sigil_name(game: &Game, index: usize) -> &str {
     known_sigil(game, index).map_or("", SigilDef::name)
 }
 
+/// Blanks to the screen background (`bg`) the cells of the map `area` that
+/// touch `frame`, sides and corners: a one-cell gutter, cut to `area`.
+///
+/// On an 80 × 24 screen the 57 × 15 frame leaves one map column between it
+/// and the side panel's border, and one map row under it. Left as they
+/// were, they showed a sliver of the map, "│▒│ Essence", which reads as a
+/// drawing fault; blank, they match the mock-ups of `docs/design.md`. On a
+/// wider screen the map stays in view beyond this gutter.
+fn clear_gutter(buffer: &mut Buffer, area: Rect, frame: Rect, theme: &Theme) {
+    let (left, top) = (
+        frame.left().saturating_sub(1),
+        frame.top().saturating_sub(1),
+    );
+    let (right, bottom) = (
+        frame.right().saturating_add(1),
+        frame.bottom().saturating_add(1),
+    );
+    let around = Rect::new(left, top, right - left, bottom - top).intersection(area);
+    for position in around.positions() {
+        if frame.contains(position) {
+            continue;
+        }
+        if let Some(cell) = buffer.cell_mut(position) {
+            cell.reset();
+            cell.set_style(theme.bg);
+        }
+    }
+}
+
 /// Clears `frame` to the panel background and draws its rounded border
 /// (`border`), with `title` (`text_title`) on the top edge after one
 /// stroke, as in the mock-up: "╭─ Trace a sigil ──╮". The inventory
 /// (`ui::inventory`) draws its frame the same way.
-pub(super) fn draw_frame(buffer: &mut Buffer, frame: Rect, title: &str, theme: &Theme) {
+///
+/// The cells of the map `area` that touch the frame are blanked first (see
+/// [`clear_gutter`]), so no stray map glyph sits against it.
+pub(super) fn draw_frame(buffer: &mut Buffer, area: Rect, frame: Rect, title: &str, theme: &Theme) {
+    clear_gutter(buffer, area, frame, theme);
     let glyphs = &theme.glyphs;
     for y in frame.top()..frame.bottom() {
         for x in frame.left()..frame.right() {

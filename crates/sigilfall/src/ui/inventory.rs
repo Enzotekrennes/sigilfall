@@ -167,7 +167,7 @@ pub fn render(
         return;
     }
     let items: Vec<(ItemId, &Item)> = game.inventory().collect();
-    draw_frame(buffer, frame, messages::INVENTORY_TITLE, theme);
+    draw_frame(buffer, area, frame, messages::INVENTORY_TITLE, theme);
     draw_capacity(buffer, frame, items.len(), theme);
     let inner = Rect {
         x: frame.x + 1,

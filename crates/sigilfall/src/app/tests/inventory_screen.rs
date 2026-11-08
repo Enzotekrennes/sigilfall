@@ -677,7 +677,7 @@ fn the_key_help_names_the_item_keys_on_every_screen() {
     let mut app = app_on(carrying(&["healing_draught"]), dark());
     let help = |app: &App| row_text(&screen(app), 23);
 
-    assert!(help(&app).contains("g pick up   i inventory   q quit"));
+    assert!(help(&app).contains("g pick up   i inventory   > descend   q quit"));
     app.handle_key(press(KeyCode::Char('i')));
     assert_eq!(
         help(&app).trim_end(),

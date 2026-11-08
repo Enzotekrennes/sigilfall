@@ -2,7 +2,7 @@
 source: crates/sigilfall/src/app.rs
 expression: text(&app)
 ---
-" Turn 4                                                Seed 7F3A-91C2-0B5E-D4A8 "
+" Depth 1 · Turn 4                                      Seed 7F3A-91C2-0B5E-D4A8 "
 "╭─ Unstable trace ──────────────────────────────────────╮ │ HP            30/30 "
 "│                                                       │ │ ██████████████████  "
 "│  ●     ○     ○   UNSTABLE                             │ │ Essence         4/6 "

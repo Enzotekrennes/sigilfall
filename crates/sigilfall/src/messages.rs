@@ -10,9 +10,9 @@
 //! a cast takes ([`cast_time`]), why the game refused an item
 //! ([`item_refusal`]), the notices of the sigil overlay and the inventory,
 //! and the fixed labels of those screens and of the key help. Keeping the words here, away from the drawing code, is what
-//! decision D10 asks: a translation would only touch this file. The turn and
-//! seed labels of the status line predate this module and keep their words
-//! in `ui::game`.
+//! decision D10 asks: a translation would only touch this file. The depth,
+//! turn and seed labels of the status line keep their words in `ui::game`,
+//! beside the turn and seed labels that predate this module.
 //!
 //! The game itself never writes text (decision D4): it reports events, and
 //! this module chooses what the player reads about them.
@@ -62,6 +62,9 @@ pub const UNREAD_GLYPH_IN_VIEW: &str = "carved glyph";
 
 /// Name of an engraved glyph already read, in the "in view" list.
 pub const READ_GLYPH_IN_VIEW: &str = "known glyph";
+
+/// Name of the stairs down in the "in view" list, after their glyph.
+pub const STAIRS_IN_VIEW: &str = "stairs down";
 
 /// Title of the separator above the message log.
 pub const LOG_TITLE: &str = "Log";
@@ -201,6 +204,14 @@ pub const INVENTORY_KEY: &str = "i";
 /// What [`INVENTORY_KEY`] does.
 pub const INVENTORY_LABEL: &str = "inventory";
 
+/// Key that goes down the stairs, in the key help of the game screen; the
+/// alternative `input::DESCEND_ALTERNATIVE_KEY` does the same, but the
+/// 80-column help line has no room left to name it.
+pub const DESCEND_KEY: &str = ">";
+
+/// What [`DESCEND_KEY`] does.
+pub const DESCEND_LABEL: &str = "descend";
+
 /// Title of the inventory's frame.
 pub const INVENTORY_TITLE: &str = "Inventory";
 
@@ -294,6 +305,10 @@ pub fn welcome() -> Message {
 ///   ([`Tone::Info`]): "There is nothing here to pick up.", "Your pack is
 ///   full (10/10): the Healing Draught stays on the floor.", and the
 ///   sentences of [`item_refusal`];
+///   a descent: "You descend to depth 2." ([`Tone::Info`]: the status line
+///   and the new floor already show the change, and the line marks in the
+///   history where the floor above ends); a descent off the stairs, which
+///   took no time: "There are no stairs here." ([`Tone::Info`]);
 /// - nothing for moves and waits, which the map already shows, nor for a
 ///   move refused by a wall: no time passes and the player sees they did not
 ///   move, while a line per bump would push the blows out of the five
@@ -514,14 +529,19 @@ pub fn describe(events: &[Event], game: &Game, content: &Content) -> Vec<Message
             Event::ItemRefused { item, reason } => {
                 Some(Message::new(Tone::Info, item_refusal(game, *item, *reason)))
             }
+            Event::Descended { depth } => Some(Message::new(
+                Tone::Info,
+                format!("You descend to depth {depth}."),
+            )),
+            Event::NoStairsHere { .. } => {
+                Some(Message::new(Tone::Info, "There are no stairs here."))
+            }
             Event::Died { .. }
             | Event::Moved { .. }
             | Event::Waited { .. }
             | Event::MoveBlocked { .. }
             | Event::TurnLost { .. }
-            | Event::Backlash { .. }
-            | Event::Descended { .. }
-            | Event::NoStairsHere { .. } => None,
+            | Event::Backlash { .. } => None,
         };
         messages.extend(message);
     }
@@ -1578,6 +1598,29 @@ mod tests {
                 ),
                 (Tone::Info, "You drop the Essence Phial."),
                 (Tone::Info, "You do not carry that item."),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_descent_names_the_new_depth_and_a_refused_one_says_why() {
+        let (game, _, content) = spell_target();
+        let events = [
+            Event::NoStairsHere {
+                position: Position::new(5, 5),
+            },
+            Event::Descended { depth: 2 },
+            Event::Descended { depth: 10 },
+        ];
+
+        let messages = describe(&events, &game, &content);
+
+        assert_eq!(
+            lines(&messages),
+            [
+                (Tone::Info, "There are no stairs here."),
+                (Tone::Info, "You descend to depth 2."),
+                (Tone::Info, "You descend to depth 10."),
             ]
         );
     }
