@@ -4,9 +4,8 @@
 //! Exposes [`GlyphSet`] and [`Glyphs`]. The values come from section
 //! "Glyphes" of `docs/design.md`; every Unicode glyph there is present in
 //! Cascadia Mono, the default font of Windows Terminal. Only the glyphs of
-//! elements the game already has are listed: the others (arches,
-//! engravings, items, sigil grid, rounded frames) join this table with the
-//! tasks that bring them to the screen.
+//! elements the game already has are listed: the others (arches, items)
+//! join this table with the tasks that bring them to the screen.
 //!
 //! Creatures are drawn with the letter of their family, lower case for the
 //! common form and upper case for the elite one ([`Glyphs::creature`]).
@@ -69,6 +68,41 @@ pub struct Glyphs {
     pub bar_full: char,
     /// Empty cell of the health bar: `░`, or `-` in ASCII.
     pub bar_empty: char,
+    /// Engraved glyph whose sigil is not in the grimoire yet: `§`, or `&`
+    /// in ASCII.
+    pub engraving_unread: char,
+    /// Engraved glyph whose sigil the grimoire knows: `≡`, or `=` in ASCII.
+    pub engraving_read: char,
+    /// Free node of the sigil grid: `○`, or `o` in ASCII.
+    pub sigil_node: char,
+    /// Node the trace links: `●`, or `O` in ASCII.
+    pub sigil_linked: char,
+    /// The pen, last node linked while tracing: `◉`, or `*` in ASCII.
+    pub sigil_pen: char,
+    /// Node where a finished trace went wrong: `×`, or `x` in ASCII.
+    pub sigil_fault: char,
+    /// Horizontal stroke between two nodes of a row: `─`, or `-` in ASCII.
+    pub stroke_horizontal: char,
+    /// Vertical stroke between two nodes of a column: `│`, or `|` in
+    /// ASCII.
+    pub stroke_vertical: char,
+    /// Stroke rising to the right: `╱`, or `/` in ASCII.
+    pub stroke_rising: char,
+    /// Stroke falling to the right: `╲`, or a backslash in ASCII.
+    pub stroke_falling: char,
+    /// Two strokes crossing on one cell: `╳`, or `X` in ASCII.
+    pub stroke_cross: char,
+    /// Top-left corner of an overlay's frame: `╭`, or `+` in ASCII.
+    pub frame_top_left: char,
+    /// Top-right corner of an overlay's frame: `╮`, or `+` in ASCII.
+    pub frame_top_right: char,
+    /// Bottom-left corner of an overlay's frame: `╰`, or `+` in ASCII.
+    pub frame_bottom_left: char,
+    /// Bottom-right corner of an overlay's frame: `╯`, or `+` in ASCII.
+    pub frame_bottom_right: char,
+    /// Separator inside a line of text, as between the nodes of a pattern
+    /// ("7·5·3") or between two facts: `·`, or `-` in ASCII.
+    pub separator: char,
 }
 
 impl Glyphs {
@@ -95,6 +129,22 @@ impl Glyphs {
                 frame_junction_up: '┴',
                 bar_full: '█',
                 bar_empty: '░',
+                engraving_unread: '§',
+                engraving_read: '≡',
+                sigil_node: '○',
+                sigil_linked: '●',
+                sigil_pen: '◉',
+                sigil_fault: '×',
+                stroke_horizontal: '─',
+                stroke_vertical: '│',
+                stroke_rising: '╱',
+                stroke_falling: '╲',
+                stroke_cross: '╳',
+                frame_top_left: '╭',
+                frame_top_right: '╮',
+                frame_bottom_left: '╰',
+                frame_bottom_right: '╯',
+                separator: '·',
             },
             GlyphSet::Ascii => Self {
                 floor: '.',
@@ -116,6 +166,22 @@ impl Glyphs {
                 frame_junction_up: '+',
                 bar_full: '=',
                 bar_empty: '-',
+                engraving_unread: '&',
+                engraving_read: '=',
+                sigil_node: 'o',
+                sigil_linked: 'O',
+                sigil_pen: '*',
+                sigil_fault: 'x',
+                stroke_horizontal: '-',
+                stroke_vertical: '|',
+                stroke_rising: '/',
+                stroke_falling: '\\',
+                stroke_cross: 'X',
+                frame_top_left: '+',
+                frame_top_right: '+',
+                frame_bottom_left: '+',
+                frame_bottom_right: '+',
+                separator: '-',
             },
         }
     }
@@ -157,7 +223,7 @@ mod tests {
     use super::*;
 
     /// Every glyph of `glyphs`, with its field name for failure messages.
-    fn all(glyphs: Glyphs) -> [(&'static str, char); 19] {
+    fn all(glyphs: Glyphs) -> [(&'static str, char); 35] {
         [
             ("floor", glyphs.floor),
             ("wall", glyphs.wall),
@@ -178,6 +244,22 @@ mod tests {
             ("frame_junction_up", glyphs.frame_junction_up),
             ("bar_full", glyphs.bar_full),
             ("bar_empty", glyphs.bar_empty),
+            ("engraving_unread", glyphs.engraving_unread),
+            ("engraving_read", glyphs.engraving_read),
+            ("sigil_node", glyphs.sigil_node),
+            ("sigil_linked", glyphs.sigil_linked),
+            ("sigil_pen", glyphs.sigil_pen),
+            ("sigil_fault", glyphs.sigil_fault),
+            ("stroke_horizontal", glyphs.stroke_horizontal),
+            ("stroke_vertical", glyphs.stroke_vertical),
+            ("stroke_rising", glyphs.stroke_rising),
+            ("stroke_falling", glyphs.stroke_falling),
+            ("stroke_cross", glyphs.stroke_cross),
+            ("frame_top_left", glyphs.frame_top_left),
+            ("frame_top_right", glyphs.frame_top_right),
+            ("frame_bottom_left", glyphs.frame_bottom_left),
+            ("frame_bottom_right", glyphs.frame_bottom_right),
+            ("separator", glyphs.separator),
         ]
     }
 
@@ -205,6 +287,22 @@ mod tests {
             ("frame_junction_up", '\u{2534}'),
             ("bar_full", '\u{2588}'),
             ("bar_empty", '\u{2591}'),
+            ("engraving_unread", '\u{00A7}'),
+            ("engraving_read", '\u{2261}'),
+            ("sigil_node", '\u{25CB}'),
+            ("sigil_linked", '\u{25CF}'),
+            ("sigil_pen", '\u{25C9}'),
+            ("sigil_fault", '\u{00D7}'),
+            ("stroke_horizontal", '\u{2500}'),
+            ("stroke_vertical", '\u{2502}'),
+            ("stroke_rising", '\u{2571}'),
+            ("stroke_falling", '\u{2572}'),
+            ("stroke_cross", '\u{2573}'),
+            ("frame_top_left", '\u{256D}'),
+            ("frame_top_right", '\u{256E}'),
+            ("frame_bottom_left", '\u{2570}'),
+            ("frame_bottom_right", '\u{256F}'),
+            ("separator", '\u{00B7}'),
         ];
         assert_eq!(all(glyphs), expected);
     }
@@ -229,7 +327,14 @@ mod tests {
     fn map_glyphs_are_distinct_in_both_sets() {
         for set in [GlyphSet::Unicode, GlyphSet::Ascii] {
             let glyphs = Glyphs::new(set);
-            let mut map = vec![glyphs.floor, glyphs.wall, glyphs.player, glyphs.stairs];
+            let mut map = vec![
+                glyphs.floor,
+                glyphs.wall,
+                glyphs.player,
+                glyphs.stairs,
+                glyphs.engraving_unread,
+                glyphs.engraving_read,
+            ];
             for family in FAMILIES {
                 map.push(glyphs.creature(family, false));
                 map.push(glyphs.creature(family, true));
@@ -254,6 +359,22 @@ mod tests {
             for (family, common, elite) in expected {
                 assert_eq!(glyphs.creature(family, false), common, "{set:?}");
                 assert_eq!(glyphs.creature(family, true), elite, "{set:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_four_states_of_a_sigil_node_are_distinct_in_both_sets() {
+        for set in [GlyphSet::Unicode, GlyphSet::Ascii] {
+            let glyphs = Glyphs::new(set);
+            let nodes = [
+                glyphs.sigil_node,
+                glyphs.sigil_linked,
+                glyphs.sigil_pen,
+                glyphs.sigil_fault,
+            ];
+            for (i, a) in nodes.iter().enumerate() {
+                assert!(!nodes[i + 1..].contains(a), "{set:?}: {a:?} used twice");
             }
         }
     }

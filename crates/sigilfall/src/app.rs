@@ -12,6 +12,15 @@
 //! turned into English lines by the `messages` module and appended to it.
 //! Once the player has died, the end screen replaces the game and only the
 //! quit keys still work.
+//!
+//! Casting a sigil goes through the overlay ([`State::Casting`]): `t` opens
+//! it, the digits link nodes, Backspace removes the last one, Escape closes
+//! it at no cost and Enter validates. An empty trace is never submitted.
+//! When the trace casts a sigil aimed in a direction, the direction is
+//! asked next. Only then is the whole trace submitted to the game as one
+//! `Action::Cast` (decision D19), so time passes once, for every stroke at
+//! once. A pure cast closes the overlay; an unstable or fizzled one shows
+//! its verdict until the next key.
 
 use std::cell::Cell;
 
@@ -20,11 +29,15 @@ use ratatui::crossterm::event::{self, Event, KeyEvent};
 use ratatui::layout::Size;
 use ratatui::{DefaultTerminal, Frame};
 use sigilfall_core::action::Action;
-use sigilfall_core::content::Content;
+use sigilfall_core::content::{Content, SigilDef, Targeting};
+use sigilfall_core::event::Event as GameEvent;
 use sigilfall_core::game::Game;
+use sigilfall_core::geometry::Direction;
 use sigilfall_core::rng::Seed;
+use sigilfall_core::sigil::{CastQuality, ESSENCE_COST, Recognition, Trace, recognize};
 
-use crate::input::{self, Command};
+use crate::casting::{Casting, Drawing, Verdict};
+use crate::input::{self, AimCommand, Command, TraceCommand, VerdictCommand};
 use crate::message_log::MessageLog;
 use crate::messages;
 use crate::theme::Theme;
@@ -35,6 +48,9 @@ use crate::ui;
 pub enum State {
     /// A game is in progress and keys control the player.
     Playing,
+    /// The sigil overlay is open over the game: the player traces a sigil,
+    /// chooses its direction or reads the verdict of a cast.
+    Casting(Casting),
     /// The player has died: the end screen is shown, the game takes no
     /// more actions and only the quit keys work.
     GameOver,
@@ -121,52 +137,192 @@ impl App {
 
     /// Reacts to one key event.
     ///
-    /// The key is translated by `input::command_for`: releases, repeats and
-    /// unbound keys do nothing. A game action is submitted to the game, which
-    /// may refuse it (a move into a wall) without any time passing, and what
-    /// happened is added to the log (`messages::describe`). If the player
-    /// died, the application moves to [`State::GameOver`], where game
-    /// actions are ignored and only quitting works. Once the application has
-    /// quit, keys are ignored.
+    /// On the game screen, the key is translated by `input::command_for`:
+    /// releases, repeats and unbound keys do nothing. A game action is
+    /// submitted to the game, which may refuse it (a move into a wall)
+    /// without any time passing, and what happened is added to the log
+    /// (`messages::describe`). `t` opens the sigil overlay
+    /// ([`State::Casting`]), whose keys are described at
+    /// [`App::handle_casting_key`]. If the player died, the application
+    /// moves to [`State::GameOver`], where game actions are ignored and only
+    /// quitting works. Once the application has quit, keys are ignored.
     ///
     /// While the last frame drawn was smaller than 80 × 24 (see `ui::fits`),
     /// the screen shows a resize message instead of the game, so game
-    /// actions are ignored and only the quit keys work. Before the first
-    /// frame the size is unknown and actions are accepted: the event loop
-    /// always draws before it reads a key.
+    /// actions and the overlay's keys are ignored and only the quit keys
+    /// work. Before the first frame the size is unknown and actions are
+    /// accepted: the event loop always draws before it reads a key.
     pub fn handle_key(&mut self, key: KeyEvent) {
-        if self.state == State::Quit {
-            return;
+        match self.state {
+            State::Quit => {}
+            State::Casting(casting) => self.handle_casting_key(casting, key),
+            State::Playing | State::GameOver => self.handle_game_key(key),
         }
+    }
+
+    /// Reacts to `key` on the game screen or the end screen (see
+    /// [`App::handle_key`]).
+    fn handle_game_key(&mut self, key: KeyEvent) {
         match input::command_for(key) {
             None => {}
             Some(Command::Quit) => self.state = State::Quit,
-            Some(Command::Act(_)) if self.state == State::GameOver || !self.game_is_visible() => {}
-            Some(Command::Act(action)) => self.play(action),
+            Some(Command::Act(_) | Command::Trace)
+                if self.state == State::GameOver || !self.game_is_visible() => {}
+            Some(Command::Act(action)) => {
+                self.play(action);
+            }
+            Some(Command::Trace) => self.state = State::Casting(Casting::start()),
+        }
+    }
+
+    /// Reacts to `key` while the sigil overlay shows `casting`.
+    ///
+    /// - Drawing (`input::trace_command_for`): a digit links its node, or is
+    ///   refused with a notice if the node is already linked; Backspace
+    ///   removes the last node; Escape closes the overlay, and no time
+    ///   passes; Enter validates (see [`App::validate`]).
+    /// - Direction prompt (`input::aim_command_for`): a movement key casts
+    ///   in its direction; Escape goes back to the trace, kept as it was.
+    /// - Verdict (`input::verdict_command_for`): any key closes it and does
+    ///   nothing else.
+    ///
+    /// Ctrl+C quits from every step. Below 80 × 24 nothing else works.
+    fn handle_casting_key(&mut self, casting: Casting, key: KeyEvent) {
+        let visible = self.game_is_visible();
+        match casting {
+            Casting::Drawing(mut drawing) => match input::trace_command_for(key) {
+                None => {}
+                Some(TraceCommand::Quit) => self.state = State::Quit,
+                Some(_) if !visible => {}
+                Some(TraceCommand::Cancel) => self.state = State::Playing,
+                Some(TraceCommand::Link(node)) => {
+                    drawing.link(node);
+                    self.state = State::Casting(Casting::Drawing(drawing));
+                }
+                Some(TraceCommand::Undo) => {
+                    drawing.undo();
+                    self.state = State::Casting(Casting::Drawing(drawing));
+                }
+                Some(TraceCommand::Cast) => self.validate(drawing),
+            },
+            Casting::Aiming { trace, .. } => match input::aim_command_for(key) {
+                None => {}
+                Some(AimCommand::Quit) => self.state = State::Quit,
+                Some(_) if !visible => {}
+                Some(AimCommand::Back) => {
+                    self.state = State::Casting(Casting::Drawing(Drawing::of(trace)));
+                }
+                Some(AimCommand::Aim(direction)) => self.cast(trace, Some(direction)),
+            },
+            Casting::Verdict(_) => match input::verdict_command_for(key) {
+                None => {}
+                Some(VerdictCommand::Quit) => self.state = State::Quit,
+                Some(_) if !visible => {}
+                Some(VerdictCommand::Continue) => self.state = State::Playing,
+            },
+        }
+    }
+
+    /// Validates the trace of `drawing`, as Enter does on the overlay.
+    ///
+    /// An empty trace is never submitted: the overlay stays open and says
+    /// so. A trace that casts a sigil of the grimoire aimed in a direction
+    /// (exactly or unstably, see `sigil::recognize`) asks for the direction
+    /// first, unless the player lacks the essence of a cast: then the game
+    /// refuses the cast whatever the direction, so it is submitted at once
+    /// and the refusal is logged. Any other trace is cast right away.
+    fn validate(&mut self, mut drawing: Drawing) {
+        let trace = drawing.trace();
+        if trace.is_empty() {
+            drawing.refuse_empty();
+            self.state = State::Casting(Casting::Drawing(drawing));
+            return;
+        }
+        let can_pay = self.game.player_actor().essence() >= ESSENCE_COST;
+        match self.aimed_sigil(&trace) {
+            Some(sigil) if can_pay => self.state = State::Casting(Casting::Aiming { trace, sigil }),
+            _ => self.cast(trace, None),
+        }
+    }
+
+    /// Returns the position in the sigil file (`SigilDef::index`) of the
+    /// sigil `trace` casts if that sigil is aimed in a direction, or `None`
+    /// when it casts no sigil or one that needs no direction.
+    ///
+    /// The trace is recognised as the game will recognise it: against the
+    /// player's grimoire, with `sigil::recognize`.
+    fn aimed_sigil(&self, trace: &Trace) -> Option<usize> {
+        match recognize(trace, self.game.grimoire().sigils()) {
+            Recognition::Success(sigil) | Recognition::Unstable(sigil)
+                if sigil.targeting() == Targeting::Direction =>
+            {
+                Some(sigil.index())
+            }
+            _ => None,
+        }
+    }
+
+    /// Submits `trace` as `Action::Cast`, aimed in `direction` if given,
+    /// logs what happened and leaves the overlay: for the game screen after
+    /// a pure cast or a cast the game refused (no time passed), for the
+    /// verdict after an unstable or fizzled one, for the end screen if the
+    /// player died while the monsters acted.
+    fn cast(&mut self, trace: Trace, direction: Option<Direction>) {
+        let events = self.play(Action::Cast { trace, direction });
+        if self.state == State::GameOver {
+            return;
+        }
+        self.state = State::Playing;
+        let cast = events.iter().find_map(|event| match event {
+            GameEvent::SigilCast { sigil, quality } => Some((sigil.as_deref(), *quality)),
+            _ => None,
+        });
+        if let Some((sigil, quality @ (CastQuality::Unstable | CastQuality::Fizzled))) = cast {
+            let known = self.game.grimoire().sigils();
+            let sigil = sigil.and_then(|id| known.iter().find(|known| known.id() == id));
+            let sigil = sigil.map(SigilDef::index);
+            self.state = State::Casting(Casting::Verdict(Verdict {
+                trace,
+                quality,
+                sigil,
+            }));
         }
     }
 
     /// Submits the player's `action` to the game, adds what happened to the
-    /// log and moves to [`State::GameOver`] if the player died.
-    fn play(&mut self, action: Action) {
+    /// log, moves to [`State::GameOver`] if the player died, and returns the
+    /// events.
+    fn play(&mut self, action: Action) -> Vec<GameEvent> {
         let events = self.game.submit(action);
         self.log
             .extend(messages::describe(&events, &self.game, &self.content));
         if self.game.is_over() {
             self.state = State::GameOver;
         }
+        events
     }
 
     /// Draws the active screen over the whole frame, with the application's
-    /// theme: the game screen with its log, or the end screen once the game
-    /// is over.
+    /// theme: the game screen with its log, under the sigil overlay while
+    /// the player casts, or the end screen once the game is over.
     ///
     /// Any frame size is accepted: below 80 × 24 a message asks for a larger
     /// terminal instead (see `ui::render`). The frame's size is recorded, and
     /// decides whether [`App::handle_key`] plays game actions.
     pub fn render(&self, frame: &mut Frame) {
         self.screen_size.set(Some(frame.area().as_size()));
-        ui::render(frame, &self.game, &self.log, &self.content, &self.theme);
+        let casting = match &self.state {
+            State::Casting(casting) => Some(casting),
+            State::Playing | State::GameOver | State::Quit => None,
+        };
+        ui::render(
+            frame,
+            &self.game,
+            &self.log,
+            &self.content,
+            casting,
+            &self.theme,
+        );
     }
 
     /// Returns whether the game screen is shown: `true` when the last frame
@@ -567,8 +723,9 @@ mod tests {
         const HP_ROW: u16 = 1;
         /// Row of the health bar.
         const BAR_ROW: u16 = 2;
-        /// Row of the "IN VIEW" title.
-        const IN_VIEW_ROW: u16 = 4;
+        /// Row of the "IN VIEW" title, under the essence and the sigils
+        /// block of an empty grimoire ("SIGILS" and "none yet").
+        const IN_VIEW_ROW: u16 = 8;
         /// Row of the log's separator.
         const LOG_SEPARATOR_ROW: u16 = 17;
         /// First and last rows of the log's messages.
@@ -1840,6 +1997,7 @@ mod tests {
                 Tone::Info => ' ',
                 Tone::Success => '+',
                 Tone::Danger => '!',
+                Tone::Sigil => '~',
             }
         }
 
@@ -1999,7 +2157,13 @@ mod tests {
             let mut fight = Fight::new(Seed::new(42), dark(), &[("brute", east())]);
             fight.hit_east();
             let screen = fight.screen();
-            let panel: Vec<String> = (3..=16).map(|y| panel_text(&screen, y)).collect();
+            // The "in view" list, from its title down: the essence and the
+            // sigils count above it are figures of the player.
+            let panel: Vec<String> = (3..=16)
+                .map(|y| panel_text(&screen, y))
+                .skip_while(|line| line != "IN VIEW")
+                .collect();
+            assert!(!panel.is_empty(), "the panel lists what is in view");
 
             assert!(panel.iter().any(|l| l == "a brute"), "{panel:#?}");
             assert!(
@@ -2477,6 +2641,777 @@ mod tests {
             assert_eq!(fight.screen(), first);
             assert_eq!(*fight.app.log(), log);
             assert_eq!(fight.app.game().player_turns(), turns);
+        }
+    }
+
+    mod sigil_overlay {
+        //! The sigil overlay driven by simulated keys (T19): opening,
+        //! linking, undoing, cancelling, casting with and without a
+        //! direction, verdicts, essence, glyphs on the map, and the styles
+        //! of all of it in the four rendering modes.
+
+        use ratatui::style::{Color, Modifier, Style};
+        use sigilfall_core::sigil::{CastQuality, ESSENCE_COST, Node};
+
+        use super::*;
+        use crate::message_log::Tone;
+
+        /// A monster that never threatens the tests: the cave gnat has
+        /// 999 hit points and deals 1 damage per blow.
+        const GNAT: &str = r#"[
+            Monster(id: "gnat", name: "cave gnat", family: Vermin, elite: false,
+                speed: 100, hp: 999, attack: 0, defense: 0, min_depth: 1),
+        ]"#;
+
+        /// Where the gnat stands when a test wants a target in sight, four
+        /// cells east and two up from the start: in view, not adjacent.
+        const GNAT_CELL: Position = Position::new(9, 3);
+
+        /// The four rendering modes of `docs/design.md`.
+        const MODES: [ColorMode; 4] = [
+            ColorMode::TrueColorDark,
+            ColorMode::TrueColorLight,
+            ColorMode::Ansi16,
+            ColorMode::Monochrome,
+        ];
+
+        /// Screen column and row of the top-left node (7) on an 80 × 24
+        /// screen: the overlay fills the map's 58 columns from row 1, its
+        /// frame takes one cell, and the grid starts 2 columns and 1 row
+        /// inside it.
+        const GRID_ORIGIN: (u16, u16) = (3, 3);
+
+        /// The test content: the gnat and the shipped sigils.
+        fn content() -> Content {
+            Content::parse(GNAT).expect("valid test monsters")
+        }
+
+        /// A fixed-room game of [`SEED`] where the player has learnt the
+        /// shipped sigils `ids` by stepping on their glyphs, engraved in a
+        /// row east of the start, and walked back to the start; with the
+        /// gnat at [`GNAT_CELL`] if `gnat` is set.
+        fn game_knowing(ids: &[&str], gnat: bool) -> Game {
+            let content = content();
+            let mut game = Game::in_fixed_room(SEED);
+            let mut cell = PLAYER_START;
+            for id in ids {
+                cell = cell.step(Direction::East);
+                game.engrave(cell, content.sigil(id).expect("a shipped sigil"));
+            }
+            for _ in ids {
+                game.submit(Action::Move(Direction::East));
+            }
+            for _ in ids {
+                game.submit(Action::Move(Direction::West));
+            }
+            assert_eq!(game.grimoire().len(), ids.len(), "every glyph was read");
+            assert_eq!(game.player_actor().position(), PLAYER_START);
+            if gnat {
+                game.spawn_monster(GNAT_CELL, content.monster("gnat").unwrap());
+            }
+            game
+        }
+
+        /// An application on [`game_knowing`] drawn with `theme`.
+        fn app_knowing(theme: Theme, ids: &[&str], gnat: bool) -> App {
+            App::with_game(theme, game_knowing(ids, gnat), content())
+        }
+
+        /// The default theme of Windows Terminal (see [`new_app`]).
+        fn dark() -> Theme {
+            Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode)
+        }
+
+        /// The key of a digit.
+        const fn digit(d: char) -> KeyCode {
+            KeyCode::Char(d)
+        }
+
+        /// Opens the overlay and presses each digit of `digits`.
+        fn trace(app: &mut App, digits: &str) {
+            app.handle_key(press(KeyCode::Char('t')));
+            for d in digits.chars() {
+                app.handle_key(press(digit(d)));
+            }
+        }
+
+        /// The digits of the trace being drawn, or `None` when the overlay
+        /// is not on the drawing step.
+        fn drawn(app: &App) -> Option<Vec<u8>> {
+            match app.state() {
+                State::Casting(Casting::Drawing(drawing)) => {
+                    Some(drawing.trace().nodes().iter().map(|n| n.digit()).collect())
+                }
+                _ => None,
+            }
+        }
+
+        /// The whole screen of `app` at 80 × 24.
+        fn screen(app: &App) -> Buffer {
+            render(app, 80, 24).backend().buffer().clone()
+        }
+
+        /// The screen of `app` at 80 × 24, as lines of text.
+        fn text(app: &App) -> String {
+            render(app, 80, 24).backend().to_string()
+        }
+
+        /// The texts of the log, oldest first.
+        fn log_texts(app: &App) -> Vec<String> {
+            let mut texts: Vec<String> = app.log().newest_first().map(|m| m.text.clone()).collect();
+            texts.reverse();
+            texts
+        }
+
+        /// What the game shows of the player and the clock, to check that
+        /// nothing happened.
+        fn clock(app: &App) -> (u64, u64, i32, Position) {
+            let game = app.game();
+            (
+                game.ticks(),
+                game.player_turns(),
+                game.player_actor().essence(),
+                game.player_actor().position(),
+            )
+        }
+
+        /// Screen cell of the grid node `digit` on an 80 × 24 screen.
+        fn node_cell(digit: u8) -> (u16, u16) {
+            let node = Node::new(digit).unwrap();
+            let column = u16::from(node.column());
+            let row_from_top = 2 - u16::from(node.row());
+            (GRID_ORIGIN.0 + column * 6, GRID_ORIGIN.1 + row_from_top * 3)
+        }
+
+        /// Asserts that the cell `(x, y)` of `buffer` shows `glyph` with
+        /// exactly the colour and emphasis of `style`.
+        fn assert_cell(buffer: &Buffer, (x, y): (u16, u16), glyph: char, style: Style, what: &str) {
+            let cell = &buffer[(x, y)];
+            assert_eq!(cell.symbol(), glyph.to_string(), "{what}");
+            assert_eq!(cell.fg, style.fg.unwrap_or(Color::Reset), "{what}");
+            assert_eq!(cell.modifier, style.add_modifier, "{what}");
+        }
+
+        /// The gnat's hit points.
+        fn gnat_hp(app: &App) -> i32 {
+            app.game()
+                .actors()
+                .find(|(_, actor)| !actor.is_player())
+                .map(|(_, actor)| actor.hp())
+                .expect("the gnat is alive")
+        }
+
+        #[test]
+        fn t_opens_an_empty_overlay_that_explains_how_to_learn_sigils() {
+            let mut app = new_app();
+
+            app.handle_key(press(KeyCode::Char('t')));
+
+            assert_eq!(drawn(&app), Some(vec![]));
+            assert_snapshot!(text(&app));
+        }
+
+        #[test]
+        fn the_trace_is_drawn_stroke_by_stroke_beside_the_grimoire() {
+            let mut app = app_knowing(
+                dark(),
+                &["ember", "recall", "veil", "passage", "lance"],
+                false,
+            );
+
+            trace(&mut app, "785");
+
+            assert_eq!(drawn(&app), Some(vec![7, 8, 5]));
+            let text = text(&app);
+            assert!(text.contains("Trace    7·8·5"), "{text}");
+            assert!(
+                text.contains("Time     1.25 turns · +0.25 a node"),
+                "{text}"
+            );
+            assert_snapshot!(text);
+        }
+
+        #[test]
+        fn the_time_shown_grows_by_a_quarter_turn_per_node() {
+            let mut app = new_app();
+            app.handle_key(press(KeyCode::Char('t')));
+            let mut shown = vec![];
+            for d in ['1', '2', '3', '6'] {
+                app.handle_key(press(digit(d)));
+                let line = text(&app)
+                    .lines()
+                    .find(|line| line.contains("Time "))
+                    .map(str::to_owned)
+                    .unwrap();
+                shown.push(line.split_whitespace().nth(2).unwrap().to_owned());
+            }
+
+            assert_eq!(shown, ["0.75", "1.00", "1.25", "1.50"]);
+        }
+
+        #[test]
+        fn an_exact_trace_casts_the_spell_and_time_passes() {
+            let mut app = app_knowing(dark(), &["ember"], true);
+            let (ticks, turns, essence, _) = clock(&app);
+            let hp = gnat_hp(&app);
+
+            trace(&mut app, "753");
+            assert_eq!(clock(&app).0, ticks, "no time passes while tracing");
+            app.handle_key(press(KeyCode::Enter));
+
+            assert_eq!(
+                app.state(),
+                State::Playing,
+                "a pure cast closes the overlay"
+            );
+            let (after_ticks, after_turns, after_essence, _) = clock(&app);
+            // 3 strokes and the validation cost 125 energy: at speed 100,
+            // two ticks pass before the player's next turn, against one for
+            // a step.
+            assert_eq!(after_ticks, ticks + 2);
+            assert_eq!(after_turns, turns + 1);
+            assert_eq!(after_essence, essence - ESSENCE_COST);
+            assert_eq!(gnat_hp(&app), hp - 6, "Ember harms for 6");
+            let cast = app
+                .log()
+                .newest_first()
+                .find(|m| m.tone == Tone::Sigil)
+                .expect("the cast is logged");
+            assert_eq!(cast.text, "Ember, pure trace: the cave gnat is seared (6).");
+        }
+
+        #[test]
+        fn escape_closes_the_overlay_at_no_cost() {
+            let mut app = app_knowing(dark(), &["ember"], true);
+            let before = clock(&app);
+            let log = app.log().clone();
+
+            trace(&mut app, "75");
+            app.handle_key(press(KeyCode::Esc));
+
+            assert_eq!(app.state(), State::Playing);
+            assert_eq!(clock(&app), before, "no time, essence or move spent");
+            assert_eq!(*app.log(), log);
+            app.handle_key(press(KeyCode::Char('t')));
+            assert_eq!(drawn(&app), Some(vec![]), "a new trace starts empty");
+        }
+
+        #[test]
+        fn backspace_removes_the_last_node_only() {
+            let mut app = new_app();
+
+            trace(&mut app, "73");
+            assert_eq!(drawn(&app), Some(vec![7, 5, 3]), "7 to 3 links 5");
+            app.handle_key(press(KeyCode::Backspace));
+            assert_eq!(drawn(&app), Some(vec![7, 5]));
+            assert!(text(&app).contains("Trace    7·5 "));
+            for _ in 0..3 {
+                app.handle_key(press(KeyCode::Backspace));
+            }
+            assert_eq!(drawn(&app), Some(vec![]), "undo stops at an empty trace");
+            app.handle_key(press(digit('9')));
+            assert_eq!(drawn(&app), Some(vec![9]));
+        }
+
+        #[test]
+        fn a_node_already_linked_is_refused_and_the_overlay_says_so() {
+            let mut app = new_app();
+            let before = clock(&app);
+
+            trace(&mut app, "755");
+
+            assert_eq!(drawn(&app), Some(vec![7, 5]), "the trace is unchanged");
+            assert!(text(&app).contains("! Node 5 is already linked."));
+            app.handle_key(press(digit('3')));
+            assert_eq!(drawn(&app), Some(vec![7, 5, 3]));
+            assert!(!text(&app).contains("already linked"), "the notice goes");
+            assert_eq!(clock(&app), before);
+        }
+
+        #[test]
+        fn an_empty_trace_is_never_submitted() {
+            let mut app = new_app();
+            let before = clock(&app);
+            let log = app.log().clone();
+
+            app.handle_key(press(KeyCode::Char('t')));
+            app.handle_key(press(KeyCode::Enter));
+            app.handle_key(press(KeyCode::Enter));
+
+            assert_eq!(drawn(&app), Some(vec![]), "the overlay stays open");
+            assert!(text(&app).contains("! Link at least one node first."));
+            assert_eq!(clock(&app), before);
+            assert_eq!(*app.log(), log, "nothing reached the game");
+        }
+
+        #[test]
+        fn an_aimed_sigil_asks_for_a_direction_before_it_is_cast() {
+            let mut app = app_knowing(dark(), &["passage"], false);
+            let before = clock(&app);
+
+            trace(&mut app, "74123");
+            app.handle_key(press(KeyCode::Enter));
+
+            assert!(
+                matches!(app.state(), State::Casting(Casting::Aiming { .. })),
+                "{:?}",
+                app.state()
+            );
+            assert_eq!(clock(&app), before, "nothing is cast yet");
+            let text = text(&app);
+            assert!(text.contains("Aim Passage"), "{text}");
+            assert!(
+                text.contains("Passage is aimed: choose a direction."),
+                "{text}"
+            );
+            assert!(
+                text.contains("←↑→↓/1-9 aim   Esc back to the trace"),
+                "{text}"
+            );
+
+            // Escape goes back to the trace, kept; Enter asks again.
+            app.handle_key(press(KeyCode::Esc));
+            assert_eq!(drawn(&app), Some(vec![7, 4, 1, 2, 3]));
+            app.handle_key(press(KeyCode::Enter));
+            app.handle_key(press(KeyCode::Char('5')));
+            assert!(matches!(
+                app.state(),
+                State::Casting(Casting::Aiming { .. })
+            ));
+
+            app.handle_key(press(KeyCode::Right));
+
+            assert_eq!(app.state(), State::Playing);
+            let (_, turns, essence, position) = clock(&app);
+            assert_eq!(turns, before.1 + 1);
+            assert_eq!(essence, before.2 - ESSENCE_COST);
+            assert_eq!(position, Position::new(PLAYER_START.x + 4, PLAYER_START.y));
+            assert_eq!(
+                log_texts(&app).last().unwrap(),
+                "Passage, pure trace: you blink 4 cells."
+            );
+        }
+
+        #[test]
+        fn an_unstable_trace_shows_its_verdict_until_the_next_key() {
+            let mut app = app_knowing(dark(), &["ember"], true);
+            let hp = gnat_hp(&app);
+
+            trace(&mut app, "752");
+            app.handle_key(press(KeyCode::Enter));
+
+            let State::Casting(Casting::Verdict(verdict)) = app.state() else {
+                panic!("{:?}", app.state());
+            };
+            assert_eq!(verdict.quality, CastQuality::Unstable);
+            assert_eq!(gnat_hp(&app), hp - 6, "the effect still applies");
+            let log = log_texts(&app);
+            assert!(
+                log.iter()
+                    .any(|t| t == "Ember, unstable trace: the cave gnat is seared (6)."),
+                "{log:#?}"
+            );
+            assert!(
+                log.iter().any(|t| t.starts_with("The backlash")),
+                "{log:#?}"
+            );
+            assert_snapshot!(text(&app));
+
+            let after = clock(&app);
+            app.handle_key(press(KeyCode::Right));
+            assert_eq!(app.state(), State::Playing);
+            assert_eq!(clock(&app), after, "the key only closed the verdict");
+        }
+
+        #[test]
+        fn an_unknown_trace_fizzles_spends_essence_and_shows_its_verdict() {
+            let mut app = new_app();
+            let before = clock(&app);
+
+            trace(&mut app, "486");
+            app.handle_key(press(KeyCode::Enter));
+
+            let State::Casting(Casting::Verdict(verdict)) = app.state() else {
+                panic!("{:?}", app.state());
+            };
+            assert_eq!(verdict.quality, CastQuality::Fizzled);
+            let (ticks, turns, essence, _) = clock(&app);
+            assert!(ticks > before.0, "the strokes took time");
+            assert_eq!(turns, before.1 + 1);
+            assert_eq!(essence, before.2 - ESSENCE_COST, "the essence is lost");
+            assert_eq!(
+                log_texts(&app).last().unwrap(),
+                "The trace matches no sigil you know and fizzles."
+            );
+            let text = text(&app);
+            assert!(text.contains(" Enter continue"), "{text}");
+            assert_snapshot!(text);
+
+            app.handle_key(press(KeyCode::Enter));
+            assert_eq!(app.state(), State::Playing);
+        }
+
+        /// Fizzles until the player has less essence than a cast costs,
+        /// closing each verdict; bounded by the casts a full reserve pays.
+        fn drain_essence(app: &mut App) {
+            for _ in 0..sigilfall_core::sigil::MAX_ESSENCE {
+                if app.game().player_actor().essence() < ESSENCE_COST {
+                    return;
+                }
+                trace(app, "123");
+                app.handle_key(press(KeyCode::Enter));
+                app.handle_key(press(KeyCode::Enter));
+            }
+            panic!("the essence never ran out");
+        }
+
+        #[test]
+        fn without_essence_a_cast_is_refused_and_takes_no_time() {
+            let mut app = app_knowing(dark(), &["ember", "passage"], true);
+            drain_essence(&mut app);
+            let before = clock(&app);
+            let essence = before.2;
+
+            // The overlay warns before the player even validates.
+            trace(&mut app, "753");
+            let warning = format!("! Not enough essence: {essence} of {ESSENCE_COST}.");
+            assert!(text(&app).contains(&warning), "{}", text(&app));
+            app.handle_key(press(KeyCode::Enter));
+
+            assert_eq!(app.state(), State::Playing);
+            assert_eq!(clock(&app), before, "no time and no essence spent");
+            assert_eq!(
+                log_texts(&app).last().unwrap(),
+                &format!("Not enough essence to cast: {essence} of {ESSENCE_COST}.")
+            );
+            let panel = text(&app);
+            assert!(
+                panel.contains(&format!("Essence       ! {essence}/6")),
+                "{panel}"
+            );
+
+            // An aimed sigil does not ask for a direction it cannot use.
+            trace(&mut app, "74123");
+            app.handle_key(press(KeyCode::Enter));
+            assert_eq!(app.state(), State::Playing);
+            assert_eq!(clock(&app), before);
+        }
+
+        #[test]
+        fn a_glyph_is_drawn_unread_then_read_once_stepped_on() {
+            let content = content();
+            let mut game = Game::in_fixed_room(SEED);
+            let glyph = PLAYER_START.step(Direction::East);
+            game.engrave(glyph, content.sigil("recall").unwrap());
+            let mut app = App::with_game(dark(), game, content);
+            let theme = dark();
+            let cell = |app: &App| {
+                let at = camera(app, 80, 24).screen_position(glyph).unwrap();
+                (at.x, at.y)
+            };
+
+            let before = screen(&app);
+            assert_cell(&before, cell(&app), '§', theme.engraving_unread, "unread");
+            assert!(text(&app).contains("§ carved glyph"));
+
+            press_all(&mut app, &[KeyCode::Right, KeyCode::Left]);
+
+            let after = screen(&app);
+            assert_cell(&after, cell(&app), '≡', theme.engraving_read, "read");
+            let log = log_texts(&app);
+            assert!(
+                log.contains(
+                    &"You decipher a carved glyph: Recall joins your grimoire.".to_owned()
+                ),
+                "{log:#?}"
+            );
+            let text = text(&app);
+            assert!(text.contains("≡ known glyph"), "{text}");
+            assert!(text.contains("SIGILS          1/5"), "{text}");
+            assert!(text.contains("│ Recall"), "{text}");
+        }
+
+        /// A game where the player knows Ember, has seen the glyph of Veil
+        /// without reading it, and stands where both glyphs, and the one of
+        /// Lance further east, are in view.
+        fn glyph_room() -> Game {
+            let content = content();
+            let mut game = Game::in_fixed_room(SEED);
+            game.engrave(Position::new(6, 5), content.sigil("ember").unwrap());
+            game.engrave(Position::new(8, 3), content.sigil("veil").unwrap());
+            game.engrave(Position::new(12, 8), content.sigil("lance").unwrap());
+            // Two steps: the first reads Ember, the second leaves its glyph
+            // in view beside the player.
+            game.submit(Action::Move(Direction::East));
+            game.submit(Action::Move(Direction::East));
+            game
+        }
+
+        #[test]
+        fn read_and_unread_glyphs_on_the_map() {
+            let app = App::with_game(dark(), glyph_room(), content());
+
+            assert_snapshot!(text(&app));
+            let ascii = App::with_game(
+                Theme::new(ColorMode::TrueColorDark, GlyphSet::Ascii),
+                glyph_room(),
+                content(),
+            );
+            let ascii = text(&ascii);
+            assert!(ascii.is_ascii(), "{ascii}");
+            assert!(ascii.contains("& carved glyph x2") && ascii.contains("= known glyph"));
+        }
+
+        #[test]
+        fn glyphs_keep_their_glyph_and_dim_out_of_view_in_every_mode() {
+            for mode in MODES {
+                for set in [GlyphSet::Unicode, GlyphSet::Ascii] {
+                    let theme = Theme::new(mode, set);
+                    let glyphs = theme.glyphs;
+                    let mut game = glyph_room();
+                    let read = Position::new(6, 5);
+                    let unread = Position::new(8, 3);
+                    let mut app = App::with_game(Theme::new(mode, set), game.clone(), content());
+                    let at = |app: &App, cell| {
+                        let at = camera(app, 80, 24).screen_position(cell).unwrap();
+                        (at.x, at.y)
+                    };
+                    let what = format!("{mode:?} {set:?}");
+
+                    let shown = screen(&app);
+                    assert_cell(
+                        &shown,
+                        at(&app, read),
+                        glyphs.engraving_read,
+                        theme.engraving_read,
+                        &what,
+                    );
+                    assert_cell(
+                        &shown,
+                        at(&app, unread),
+                        glyphs.engraving_unread,
+                        theme.engraving_unread,
+                        &what,
+                    );
+
+                    // Walk far east along the clear row 5: both glyphs drop
+                    // out of the 8-cell sight.
+                    for _ in 0..14 {
+                        game.submit(Action::Move(Direction::East));
+                    }
+                    assert!(!game.is_visible(read) && game.is_remembered(read));
+                    assert!(!game.is_visible(unread) && game.is_remembered(unread));
+                    app = App::with_game(Theme::new(mode, set), game, content());
+
+                    let remembered = screen(&app);
+                    assert_cell(
+                        &remembered,
+                        at(&app, read),
+                        glyphs.engraving_read,
+                        theme.engraving_read_remembered,
+                        &what,
+                    );
+                    assert_cell(
+                        &remembered,
+                        at(&app, unread),
+                        glyphs.engraving_unread,
+                        theme.engraving_unread_remembered,
+                        &what,
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn the_overlay_draws_with_its_tokens_in_every_mode() {
+            for mode in MODES {
+                for set in [GlyphSet::Unicode, GlyphSet::Ascii] {
+                    let theme = Theme::new(mode, set);
+                    let glyphs = theme.glyphs;
+                    let mut app =
+                        App::with_game(Theme::new(mode, set), Game::in_fixed_room(SEED), content());
+                    let what = format!("{mode:?} {set:?}");
+
+                    trace(&mut app, "785");
+                    let drawing = screen(&app);
+                    assert_cell(
+                        &drawing,
+                        node_cell(7),
+                        glyphs.sigil_linked,
+                        theme.sigil_stroke,
+                        &what,
+                    );
+                    assert_cell(
+                        &drawing,
+                        node_cell(5),
+                        glyphs.sigil_pen,
+                        theme.sigil_cursor,
+                        &what,
+                    );
+                    assert_cell(
+                        &drawing,
+                        node_cell(9),
+                        glyphs.sigil_node,
+                        theme.sigil_node,
+                        &what,
+                    );
+                    let (x, y) = node_cell(7);
+                    assert_cell(
+                        &drawing,
+                        (x + 3, y),
+                        glyphs.stroke_horizontal,
+                        theme.sigil_stroke,
+                        &what,
+                    );
+                    let (x, y) = node_cell(8);
+                    assert_cell(
+                        &drawing,
+                        (x, y + 1),
+                        glyphs.stroke_vertical,
+                        theme.sigil_stroke,
+                        &what,
+                    );
+                    assert_eq!(Some(drawing[(x, y + 1)].bg), theme.bg_panel.bg, "{what}");
+                    assert_cell(&drawing, (0, 1), glyphs.frame_top_left, theme.border, &what);
+                    assert!(
+                        theme.sigil_cursor.add_modifier.contains(Modifier::BOLD),
+                        "{what}"
+                    );
+
+                    app.handle_key(press(KeyCode::Enter));
+                    let fizzled = screen(&app);
+                    assert_cell(
+                        &fizzled,
+                        node_cell(5),
+                        glyphs.sigil_fault,
+                        theme.sigil_failed,
+                        &what,
+                    );
+                    assert_cell(
+                        &fizzled,
+                        node_cell(7),
+                        glyphs.sigil_linked,
+                        theme.sigil_failed,
+                        &what,
+                    );
+                    let (x, y) = node_cell(7);
+                    assert_cell(
+                        &fizzled,
+                        (x + 3, y),
+                        glyphs.stroke_horizontal,
+                        theme.sigil_failed,
+                        &what,
+                    );
+                    app.handle_key(press(KeyCode::Enter));
+
+                    let mut app = App::with_game(
+                        Theme::new(mode, set),
+                        game_knowing(&["ember"], true),
+                        content(),
+                    );
+                    trace(&mut app, "752");
+                    app.handle_key(press(KeyCode::Enter));
+                    let unstable = screen(&app);
+                    assert_cell(
+                        &unstable,
+                        node_cell(2),
+                        glyphs.sigil_fault,
+                        theme.sigil_unstable,
+                        &what,
+                    );
+                    assert_cell(
+                        &unstable,
+                        node_cell(5),
+                        glyphs.sigil_linked,
+                        theme.sigil_unstable,
+                        &what,
+                    );
+                    assert_cell(
+                        &unstable,
+                        node_cell(9),
+                        glyphs.sigil_node,
+                        theme.sigil_node,
+                        &what,
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn the_overlay_is_plain_ascii_with_ascii_glyphs() {
+            let ascii = || Theme::new(ColorMode::TrueColorDark, GlyphSet::Ascii);
+            let mut app =
+                App::with_game(ascii(), game_knowing(&["ember", "recall"], true), content());
+
+            trace(&mut app, "7859");
+            let drawing = text(&app);
+            app.handle_key(press(KeyCode::Enter));
+            let verdict = text(&app);
+
+            for screen in [drawing, verdict] {
+                assert!(screen.is_ascii(), "{screen}");
+            }
+        }
+
+        #[test]
+        fn the_overlay_keys_do_nothing_on_a_too_small_screen_but_ctrl_c_quits() {
+            let mut app = new_app();
+            app.handle_key(press(KeyCode::Char('t')));
+            render(&app, 79, 24);
+
+            for code in [KeyCode::Char('7'), KeyCode::Enter, KeyCode::Esc] {
+                app.handle_key(press(code));
+            }
+            assert_eq!(drawn(&app), Some(vec![]));
+
+            app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+            assert_eq!(app.state(), State::Quit);
+        }
+
+        #[test]
+        fn q_does_not_quit_while_tracing() {
+            let mut app = new_app();
+
+            trace(&mut app, "7");
+            app.handle_key(press(KeyCode::Char('q')));
+
+            assert_eq!(drawn(&app), Some(vec![7]));
+        }
+
+        #[test]
+        fn the_side_panel_shows_the_essence_and_the_sigils_known() {
+            let app = app_knowing(
+                dark(),
+                &["ember", "recall", "veil", "passage", "lance"],
+                false,
+            );
+            let screen = screen(&app);
+            let panel: Vec<String> = (1..=10)
+                .map(|y| {
+                    (60..=78)
+                        .map(|x| screen[(x, y)].symbol())
+                        .collect::<String>()
+                        .trim_end()
+                        .to_owned()
+                })
+                .collect();
+
+            assert_eq!(
+                panel,
+                [
+                    "HP            30/30",
+                    "██████████████████",
+                    "Essence         6/6",
+                    "",
+                    "SIGILS          5/5",
+                    "Ember",
+                    "Recall",
+                    "Veil",
+                    "and 2 more",
+                    "",
+                ]
+            );
+            assert_eq!(screen[(76, 3)].fg, dark().sigil_stroke.fg.unwrap());
         }
     }
 }

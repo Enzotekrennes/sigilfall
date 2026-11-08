@@ -13,11 +13,12 @@ const TEXT_CONTRAST: f64 = 4.5;
 const GRAPHIC_CONTRAST: f64 = 3.0;
 
 /// Tokens held to [`GRAPHIC_CONTRAST`] only (marked ³ in `docs/design.md`).
-const AMBIENT_TOKENS: [&str; 5] = [
+const AMBIENT_TOKENS: [&str; 6] = [
     "border",
     "floor",
     "wall_remembered",
     "engraving_read",
+    "engraving_read_remembered",
     "sigil_node",
 ];
 
@@ -35,7 +36,7 @@ const PANEL_TOKENS: [&str; 9] = [
 ];
 
 /// Every foreground token of `theme`, with its name.
-fn foreground_tokens(theme: &Theme) -> [(&'static str, Style); 28] {
+fn foreground_tokens(theme: &Theme) -> [(&'static str, Style); 30] {
     [
         ("text", theme.text),
         ("text_muted", theme.text_muted),
@@ -49,6 +50,11 @@ fn foreground_tokens(theme: &Theme) -> [(&'static str, Style); 28] {
         ("stairs_remembered", theme.stairs_remembered),
         ("engraving_unread", theme.engraving_unread),
         ("engraving_read", theme.engraving_read),
+        (
+            "engraving_unread_remembered",
+            theme.engraving_unread_remembered,
+        ),
+        ("engraving_read_remembered", theme.engraving_read_remembered),
         ("player", theme.player),
         ("monster_hostile", theme.monster_hostile),
         ("monster_arcane", theme.monster_arcane),
@@ -292,6 +298,18 @@ fn monochrome_uses_the_terminal_colours_only() {
     assert!(theme.wall_remembered.add_modifier.contains(Modifier::DIM));
     assert!(!theme.wall_seen.add_modifier.contains(Modifier::DIM));
     assert!(!theme.stairs_remembered.add_modifier.contains(Modifier::DIM));
+    assert!(
+        !theme
+            .engraving_unread_remembered
+            .add_modifier
+            .contains(Modifier::DIM)
+    );
+    assert!(
+        theme
+            .engraving_read_remembered
+            .add_modifier
+            .contains(Modifier::DIM)
+    );
 }
 
 #[test]

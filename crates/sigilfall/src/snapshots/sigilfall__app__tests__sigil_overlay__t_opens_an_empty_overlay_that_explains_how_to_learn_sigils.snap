@@ -1,0 +1,28 @@
+---
+source: crates/sigilfall/src/app.rs
+expression: text(&app)
+---
+" Turn 1                                                Seed 7F3A-91C2-0B5E-D4A8 "
+"╭─ Trace a sigil ───────────────────────────────────────╮ │ HP            30/30 "
+"│                                                       │ │ ██████████████████  "
+"│  ○     ○     ○   GRIMOIRE                             │ │ Essence         6/6 "
+"│                  No sigil known yet.                  │ │                     "
+"│                  Step on a glyph carved               │ │ SIGILS          0/5 "
+"│  ○     ○     ○   in the floor, § on the               │ │ none yet            "
+"│                  map, to learn its sigil.             │ │                     "
+"│                                                       │ │ IN VIEW             "
+"│  ○     ○     ○                                        │ │ @ you               "
+"│                                                       │ │                     "
+"│  Trace                                                │ │                     "
+"│  Time     0.50 turns · +0.25 a node                   │ │                     "
+"│  Essence  6/6 · 2 a cast                              │ │                     "
+"│                                                       │ │                     "
+"╰───────────────────────────────────────────────────────╯ │                     "
+"                                                          │                     "
+"─ Log ────────────────────────────────────────────────────┴─────────────────────"
+"   You enter the dungeon.                                                       "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+" 1-9 link a node   Backspace undo   Enter cast   Esc cancel                     "

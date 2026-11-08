@@ -136,6 +136,7 @@ const fn tone_look(tone: Tone, theme: &Theme) -> (char, Style) {
         Tone::Info => (' ', theme.log_info),
         Tone::Success => ('+', theme.log_success),
         Tone::Danger => ('!', theme.log_danger),
+        Tone::Sigil => ('~', theme.log_sigil),
     }
 }
 

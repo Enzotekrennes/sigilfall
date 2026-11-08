@@ -10,8 +10,12 @@
 //! [`Camera`] that follows the player, and each map cell is drawn according
 //! to what the player knows of it ([`Sight`]): in full when in view, only
 //! its landmarks when explored but out of view, not at all when never seen.
-//! Monsters are drawn only on cells in view, with their family's letter and
-//! colour, and the player is drawn over everything else.
+//! Engraved glyphs are landmarks: `§` until the player knows their sigil,
+//! `≡` after, dimmer once out of view. Monsters are drawn only on cells in
+//! view, with their family's letter and colour, and the player is drawn
+//! over everything else. While the player casts, the sigil overlay
+//! (`ui::sigil`) covers the map, and the key help names the keys of the
+//! overlay instead of those of the game.
 
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
@@ -20,13 +24,16 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use sigilfall_core::content::Content;
 use sigilfall_core::game::{Game, VisibleMonster};
+use sigilfall_core::generation::Engraving;
 use sigilfall_core::geometry::Position;
 use sigilfall_core::map::Tile;
 use sigilfall_core::rng::Seed;
 
 use super::camera::Camera;
-use super::{hud, log};
+use super::{hud, log, sigil};
+use crate::casting::Casting;
 use crate::message_log::MessageLog;
+use crate::messages;
 use crate::theme::Theme;
 
 /// Width of the side panel, in columns, its left border included.
@@ -102,7 +109,9 @@ pub fn log_area(screen: Rect) -> Rect {
 }
 
 /// Draws the game screen for `game` inside `area`, with the messages of
-/// `log`, monster names from `content` and `theme`.
+/// `log`, monster names from `content` and `theme`; while the player casts,
+/// the overlay of `casting` covers the map and the key help is the
+/// overlay's.
 ///
 /// `area` is expected to be at least 80 × 24 (checked by the caller); a
 /// smaller area is still drawn without panicking, only clipped. The
@@ -113,6 +122,7 @@ pub fn render(
     game: &Game,
     log: &MessageLog,
     content: &Content,
+    casting: Option<&Casting>,
     theme: &Theme,
 ) {
     let layout = GameLayout::new(area);
@@ -131,7 +141,10 @@ pub fn render(
         log,
         theme,
     );
-    frame.render_widget(key_help(theme), layout.help);
+    if let Some(casting) = casting {
+        sigil::render(frame.buffer_mut(), layout.map, casting, game, theme);
+    }
+    frame.render_widget(key_help(casting, theme), layout.help);
 }
 
 /// Builds the left part of the status line: the player's current turn,
@@ -165,13 +178,34 @@ fn seed_label(seed: Seed, theme: &Theme) -> Line<'static> {
 
 /// Builds the key help: each key in the text style, followed by what it
 /// does in the muted style, so keys stand out from their labels.
-fn key_help(theme: &Theme) -> Line<'static> {
-    let movement = format!("{}/1-9", theme.glyphs.arrows());
-    let bindings = [
-        (movement, "move"),
-        (".".to_owned(), "wait"),
-        ("q".to_owned(), "quit"),
-    ];
+///
+/// The keys are those of the screen in front of the player: the game's
+/// (move, wait, trace, quit), or, while `casting`, the overlay's (link a
+/// node, undo, cast, cancel), the direction prompt's (aim, back) or the
+/// verdict's (continue).
+fn key_help(casting: Option<&Casting>, theme: &Theme) -> Line<'static> {
+    let directions = format!("{}/1-9", theme.glyphs.arrows());
+    let bindings: Vec<(String, &str)> = match casting {
+        None => vec![
+            (directions, messages::MOVE_LABEL),
+            (messages::WAIT_KEY.to_owned(), messages::WAIT_LABEL),
+            (messages::TRACE_KEY.to_owned(), messages::TRACE_KEY_LABEL),
+            (messages::QUIT_KEY.to_owned(), messages::QUIT_LABEL),
+        ],
+        Some(Casting::Drawing(_)) => vec![
+            (messages::LINK_KEYS.to_owned(), messages::LINK_LABEL),
+            (messages::UNDO_KEY.to_owned(), messages::UNDO_LABEL),
+            (messages::CAST_KEY.to_owned(), messages::CAST_LABEL),
+            (messages::CANCEL_KEY.to_owned(), messages::CANCEL_LABEL),
+        ],
+        Some(Casting::Aiming { .. }) => vec![
+            (directions, messages::AIM_LABEL),
+            (messages::CANCEL_KEY.to_owned(), messages::BACK_LABEL),
+        ],
+        Some(Casting::Verdict(_)) => {
+            vec![(messages::CAST_KEY.to_owned(), messages::CONTINUE_LABEL)]
+        }
+    };
     let mut spans = vec![Span::raw(" ")];
     for (index, (key, label)) in bindings.into_iter().enumerate() {
         if index > 0 {
@@ -243,10 +277,40 @@ const fn monster_look(monster: &VisibleMonster<'_>, theme: &Theme) -> (char, Sty
     (glyph, theme.creature(monster.family))
 }
 
-/// Draws the part of the map the camera shows in `area`, then the monsters
-/// in view, then the player on top of everything, into `buffer`.
+/// Returns the character and style an engraved glyph is drawn with, given
+/// whether the player of `game` knows its sigil and what the player knows
+/// of its cell, or `None` on a cell never seen.
 ///
-/// Each cell is drawn by [`cell_look`] from what the player knows of it.
+/// The rule of T12 for landmarks: a glyph in view is drawn in full (`§` in
+/// `engraving_unread`, `≡` in `engraving_read`); an explored glyph out of
+/// view keeps its glyph in the dimmer `*_remembered` token, and its floor
+/// disappears around it. `§` and `≡` tell read from unread without colour,
+/// in both glyph sets (`&` and `=` in ASCII).
+fn engraving_look(
+    engraving: &Engraving,
+    game: &Game,
+    sight: Sight,
+    theme: &Theme,
+) -> Option<(char, Style)> {
+    let glyphs = &theme.glyphs;
+    let read = game.grimoire().knows(engraving.sigil().id());
+    match (sight, read) {
+        (Sight::Unknown, _) => None,
+        (Sight::Visible, false) => Some((glyphs.engraving_unread, theme.engraving_unread)),
+        (Sight::Visible, true) => Some((glyphs.engraving_read, theme.engraving_read)),
+        (Sight::Remembered, false) => {
+            Some((glyphs.engraving_unread, theme.engraving_unread_remembered))
+        }
+        (Sight::Remembered, true) => Some((glyphs.engraving_read, theme.engraving_read_remembered)),
+    }
+}
+
+/// Draws the part of the map the camera shows in `area`, then the engraved
+/// glyphs, then the monsters in view, then the player on top of everything,
+/// into `buffer`.
+///
+/// Each cell is drawn by [`cell_look`] from what the player knows of it,
+/// and each engraved glyph by [`engraving_look`].
 /// Monsters come from [`Game::visible_monsters`], which only lists those on
 /// a cell in view: a monster out of view is never drawn, not even on a
 /// remembered cell, where only the landmarks show. Each one replaces the
@@ -264,6 +328,13 @@ fn render_map(buffer: &mut Buffer, area: Rect, game: &Game, theme: &Theme) {
             .tile(position)
             .and_then(|tile| cell_look(tile, Sight::of(game, position), theme));
         if let Some(look) = look {
+            draw_cell(buffer, screen, look);
+        }
+    }
+    for engraving in game.engravings() {
+        let position = engraving.position();
+        let look = engraving_look(engraving, game, Sight::of(game, position), theme);
+        if let Some((screen, look)) = camera.screen_position(position).zip(look) {
             draw_cell(buffer, screen, look);
         }
     }
@@ -370,7 +441,9 @@ mod tests {
     fn draw_with(game: &Game, theme: &Theme, content: &Content) -> Buffer {
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         terminal
-            .draw(|frame| crate::ui::render(frame, game, &MessageLog::default(), content, theme))
+            .draw(|frame| {
+                crate::ui::render(frame, game, &MessageLog::default(), content, None, theme)
+            })
             .unwrap();
         terminal.backend().buffer().clone()
     }

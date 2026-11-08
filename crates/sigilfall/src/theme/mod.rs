@@ -137,7 +137,7 @@ impl ColorMode {
     expect(
         dead_code,
         reason = "the full token set of docs/design.md; the remaining tokens are drawn by the \
-                  screens of T16, T19, T21, T25 and T26"
+                  screens of T21, T25 and T26"
     )
 )]
 pub struct Theme {
@@ -174,6 +174,13 @@ pub struct Theme {
     pub engraving_unread: Style,
     /// Engraved glyph already deciphered.
     pub engraving_read: Style,
+    /// Explored glyph not read yet, out of view: dimmer than
+    /// [`Theme::engraving_unread`], yet still at text contrast, since it
+    /// marks a sigil left to learn.
+    pub engraving_unread_remembered: Style,
+    /// Explored glyph already deciphered, out of view: dimmer than
+    /// [`Theme::engraving_read`], an ambient landmark only.
+    pub engraving_read_remembered: Style,
     /// The player.
     pub player: Style,
     /// Creatures of flesh (vermin, acolytes, homunculi).
@@ -257,6 +264,8 @@ impl Theme {
             stairs_remembered: fg(0x968F84),
             engraving_unread: fg(0x5ED6B8),
             engraving_read: fg(0x4F8F82),
+            engraving_unread_remembered: fg(0x3A9682),
+            engraving_read_remembered: fg(0x417167),
             player: fg(0xF5C451).add_modifier(Modifier::BOLD),
             monster_hostile: fg(0xEC6A50),
             monster_arcane: fg(0xB794F0),
@@ -296,6 +305,8 @@ impl Theme {
             stairs_remembered: fg(0x6B6258),
             engraving_unread: fg(0x0B6E58),
             engraving_read: fg(0x4F7D73),
+            engraving_unread_remembered: fg(0x3A6E63),
+            engraving_read_remembered: fg(0x6F8C85),
             player: fg(0x7A4E00).add_modifier(Modifier::BOLD),
             monster_hostile: fg(0xA82C1A),
             monster_arcane: fg(0x6A3FB0),
@@ -338,6 +349,8 @@ impl Theme {
             stairs_remembered: named(Color::Gray),
             engraving_unread: named(Color::LightCyan),
             engraving_read: named(Color::Cyan),
+            engraving_unread_remembered: named(Color::Cyan),
+            engraving_read_remembered: named(Color::DarkGray),
             player: named(Color::LightYellow).add_modifier(Modifier::BOLD),
             monster_hostile: named(Color::LightRed),
             monster_arcane: named(Color::LightRed),
@@ -365,7 +378,9 @@ impl Theme {
     /// stairs in view, titles, the sigil pen); dim fades the floor and
     /// remembered walls, never text; the selection is reversed. Remembered
     /// stairs lose the bold of stairs in view but are not dimmed: they still
-    /// mark the way down. Every piece of
+    /// mark the way down; likewise a remembered unread glyph, a sigil left
+    /// to learn, is not dimmed, while a remembered read glyph is. Every
+    /// piece of
     /// information is also carried by a glyph, a word or a prefix, so
     /// nothing is lost.
     fn monochrome(glyphs: Glyphs) -> Self {
@@ -388,6 +403,8 @@ impl Theme {
             stairs_remembered: plain,
             engraving_unread: plain,
             engraving_read: plain,
+            engraving_unread_remembered: plain,
+            engraving_read_remembered: dim,
             player: bold,
             monster_hostile: plain,
             monster_arcane: plain,

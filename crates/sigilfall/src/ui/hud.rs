@@ -1,17 +1,20 @@
 //! The side panel right of the map: the player's health, in figures and as
-//! a bar, then the list of what the player sees.
+//! a bar, the essence, the sigils known, then the list of what the player
+//! sees.
 //!
 //! Exposes [`render`], the health thresholds ([`HP_HIGH_ABOVE_PERCENT`],
-//! [`HP_LOW_BELOW_PERCENT`]), the bar's width ([`HP_BAR_WIDTH`]) and the
-//! [`HealthLevel`] they decide. The layout follows the game screen of
+//! [`HP_LOW_BELOW_PERCENT`]), the bar's width ([`HP_BAR_WIDTH`]), the
+//! [`HealthLevel`] they decide and the most sigil names listed
+//! ([`SIGIL_ROWS`]). The layout follows the game screen of
 //! `docs/design.md`: a border down the left, "HP" with its value, the bar,
-//! a blank row, then "IN VIEW" with the player and one line per kind of
-//! monster in view. The sigils block of the mock-up arrives with the sigils
-//! (T19), between the two.
+//! "Essence" with its value, a blank row, "SIGILS" with the count known out
+//! of those that exist and their names, a blank row, then "IN VIEW" with
+//! the player, one line per kind of monster and one per kind of engraved
+//! glyph in view.
 //!
 //! Health is never told by colour alone: the value is written out, the bar
 //! is drawn with two glyphs, and below a quarter the value is preceded by
-//! `!`.
+//! `!`. Essence below the cost of a cast is marked `!` as well.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -20,6 +23,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Widget as _;
 use sigilfall_core::content::Content;
 use sigilfall_core::game::Game;
+use sigilfall_core::sigil::ESSENCE_COST;
 
 use crate::messages;
 use crate::theme::Theme;
@@ -36,6 +40,15 @@ pub const HP_LOW_BELOW_PERCENT: i32 = 25;
 /// Cells of the health bar, as `docs/design.md` sets it: 18 of the panel's
 /// 19 content columns, each worth one eighteenth of the maximum.
 pub const HP_BAR_WIDTH: u16 = 18;
+
+/// Most rows the names of the sigils known take in the panel.
+///
+/// Four keep, on a 24-row screen, room for the "in view" list under them:
+/// the panel's 16 rows hold the health (2), the essence, the sigils' title
+/// and names (5), the "in view" title, the player and four more entries,
+/// with two blank rows. With more sigils, the last of these rows counts the
+/// others; the overlay's grimoire lists them all.
+pub const SIGIL_ROWS: usize = 4;
 
 /// Columns between the panel's left edge and its content: the border and
 /// one blank column.
@@ -107,12 +120,13 @@ pub fn filled_cells(hp: i32, max_hp: i32, width: u16) -> u16 {
 }
 
 /// Draws the side panel in `area` of `buffer`: the border on its left
-/// column, then the health block and the "in view" list for `game`, with
-/// monster names from `content`.
+/// column, then the health block, the essence, the sigils block and the
+/// "in view" list for `game`, with monster names and the number of sigils
+/// from `content`.
 ///
-/// The list takes every row left under the health block. When more kinds
-/// of monsters are in view than rows, the last row says how many more there
-/// are. Text wider than the panel is cut. An empty `area` draws nothing.
+/// The list takes every row left under the sigils block. When more things
+/// are in view than rows, the last row says how many more there are. Text
+/// wider than the panel is cut. An empty `area` draws nothing.
 pub fn render(buffer: &mut Buffer, area: Rect, game: &Game, content: &Content, theme: &Theme) {
     if area.is_empty() {
         return;
@@ -131,6 +145,9 @@ pub fn render(buffer: &mut Buffer, area: Rect, game: &Game, content: &Content, t
         ..area
     };
     let mut lines = health_block(game, content_area.width, theme);
+    lines.push(essence_line(game, content_area.width, theme));
+    lines.push(Line::default());
+    lines.extend(sigils_block(game, content, content_area.width, theme));
     lines.push(Line::default());
     let list_rows = usize::from(content_area.height).saturating_sub(lines.len());
     lines.extend(in_view_block(
@@ -160,7 +177,7 @@ fn health_block(game: &Game, width: u16, theme: &Theme) -> Vec<Line<'static>> {
     let level = HealthLevel::of(hp, max_hp);
     let style = level.style(theme);
     let value = if level == HealthLevel::Low {
-        format!("{} {hp}/{max_hp}", messages::LOW_HP_MARK)
+        format!("{} {hp}/{max_hp}", messages::WARNING_MARK)
     } else {
         format!("{hp}/{max_hp}")
     };
@@ -190,6 +207,79 @@ fn health_block(game: &Game, width: u16, theme: &Theme) -> Vec<Line<'static>> {
     vec![figures, bar]
 }
 
+/// A line of `width` columns with `label` on the left in `text_muted` and
+/// `value` right-aligned in `style`.
+fn label_and_value(
+    label: &str,
+    value: String,
+    style: Style,
+    width: u16,
+    theme: &Theme,
+) -> Line<'static> {
+    let gap = usize::from(width).saturating_sub(label.chars().count() + value.chars().count());
+    Line::from(vec![
+        Span::styled(label.to_owned(), theme.text_muted),
+        Span::raw(" ".repeat(gap)),
+        Span::styled(value, style),
+    ])
+}
+
+/// The essence line, `width` columns wide: "Essence" and the value
+/// right-aligned in `sigil_stroke`, or "! 1/6" in `sigil_failed` while the
+/// player has less than a cast costs (`sigil::ESSENCE_COST`).
+fn essence_line(game: &Game, width: u16, theme: &Theme) -> Line<'static> {
+    let player = game.player_actor();
+    let (essence, max) = (player.essence(), player.max_essence());
+    let (value, style) = if essence < ESSENCE_COST {
+        (
+            format!("{} {essence}/{max}", messages::WARNING_MARK),
+            theme.sigil_failed,
+        )
+    } else {
+        (format!("{essence}/{max}"), theme.sigil_stroke)
+    };
+    label_and_value(messages::ESSENCE_LABEL, value, style, width, theme)
+}
+
+/// The sigils block, `width` columns wide: "SIGILS" with the count known
+/// out of the sigils of `content`, then the names in grimoire order, at
+/// most [`SIGIL_ROWS`] rows of them, the last one counting the others when
+/// they do not fit; "none yet" while the grimoire is empty.
+fn sigils_block(game: &Game, content: &Content, width: u16, theme: &Theme) -> Vec<Line<'static>> {
+    let known = game.grimoire().sigils();
+    let count = format!("{}/{}", known.len(), content.sigils().len());
+    let mut lines = vec![label_and_value(
+        messages::SIGILS_TITLE,
+        count,
+        theme.text,
+        width,
+        theme,
+    )];
+    if known.is_empty() {
+        lines.push(Line::styled(messages::NO_SIGIL_YET, theme.text_muted));
+        return lines;
+    }
+    let overflows = known.len() > SIGIL_ROWS;
+    let shown = if overflows {
+        SIGIL_ROWS - 1
+    } else {
+        known.len()
+    };
+    lines.extend(
+        known
+            .iter()
+            .take(shown)
+            .map(|sigil| Line::styled(sigil.name().to_owned(), theme.text)),
+    );
+    if overflows {
+        lines.push(Line::styled(
+            messages::more_in_view(known.len() - shown),
+            theme.text_muted,
+        ));
+    }
+    lines
+}
+
 /// One line of the "in view" list: a glyph in its own style, then a name.
 struct Entry {
     /// The glyph the thing is drawn with on the map.
@@ -202,8 +292,9 @@ struct Entry {
 
 /// The "in view" block in at most `rows` rows of `width` columns: its
 /// title, the player, then one entry per kind of monster in view, in the
-/// order of `Game::visible_monsters`, with "×2" after the name when several
-/// of a kind are in view.
+/// order of `Game::visible_monsters`, then the engraved glyphs in view,
+/// unread ones first, with "×2" after the name when several of a kind are
+/// in view.
 fn in_view_block(
     game: &Game,
     content: &Content,
@@ -237,6 +328,32 @@ fn in_view_block(
             name: counted_name(name, count, name_width, theme.glyphs.dimension),
         }
     }));
+    let (read, unread): (Vec<_>, Vec<_>) = game
+        .engravings()
+        .iter()
+        .filter(|engraving| game.is_visible(engraving.position()))
+        .partition(|engraving| game.grimoire().knows(engraving.sigil().id()));
+    let glyphs = [
+        (
+            unread.len(),
+            theme.glyphs.engraving_unread,
+            theme.engraving_unread,
+            messages::UNREAD_GLYPH_IN_VIEW,
+        ),
+        (
+            read.len(),
+            theme.glyphs.engraving_read,
+            theme.engraving_read,
+            messages::READ_GLYPH_IN_VIEW,
+        ),
+    ];
+    entries.extend(glyphs.into_iter().filter(|(count, ..)| *count > 0).map(
+        |(count, glyph, glyph_style, name)| Entry {
+            glyph,
+            glyph_style,
+            name: counted_name(name, count, name_width, theme.glyphs.dimension),
+        },
+    ));
 
     let mut lines = vec![Line::styled(messages::IN_VIEW_TITLE, theme.text_muted)];
     // Rows under the title; when the entries overflow them, the last one

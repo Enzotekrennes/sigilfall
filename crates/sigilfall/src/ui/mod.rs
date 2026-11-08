@@ -3,8 +3,9 @@
 //! Exposes [`render`], which picks what to draw for the current terminal
 //! size and the state of the game, one module per screen ([`game`] while
 //! playing, [`death`] once the player has died), the parts of the game
-//! screen ([`hud`], the side panel, and [`log`], the message log) and the
-//! [`camera`] that decides which part of the map is seen. Drawing never
+//! screen ([`hud`], the side panel, [`log`], the message log, and
+//! [`sigil`], the overlay where sigils are traced, with its [`grimoire`])
+//! and the [`camera`] that decides which part of the map is seen. Drawing never
 //! changes the game and never touches the real terminal: it fills a
 //! [`Frame`], so every screen can be rendered into a test backend. Every
 //! colour and glyph comes from the [`Theme`] passed in.
@@ -12,8 +13,10 @@
 pub mod camera;
 pub mod death;
 pub mod game;
+pub mod grimoire;
 pub mod hud;
 pub mod log;
+pub mod sigil;
 
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect, Size};
@@ -21,6 +24,7 @@ use ratatui::widgets::{Paragraph, Wrap};
 use sigilfall_core::content::Content;
 use sigilfall_core::game::Game;
 
+use crate::casting::Casting;
 use crate::message_log::MessageLog;
 use crate::theme::Theme;
 
@@ -44,15 +48,23 @@ pub const fn fits(size: Size) -> bool {
 }
 
 /// Draws the screen for `game` over the whole frame, with `theme`: the game
-/// screen with the messages of `log` while the game is played, the end
-/// screen once it is over. Monster names come from `content`.
+/// screen with the messages of `log` while the game is played, with the
+/// sigil overlay of `casting` over its map while the player casts, and the
+/// end screen once the game is over. Monster names come from `content`.
 ///
 /// The theme's background is painted on every cell first. When the frame
 /// is smaller than [`MIN_WIDTH`] × [`MIN_HEIGHT`], a message asking for a
 /// larger terminal is drawn instead of either screen.
 /// Any frame size is accepted, down to zero, without panicking; the check is
 /// made on every frame, so resizing the terminal switches between the two.
-pub fn render(frame: &mut Frame, game: &Game, log: &MessageLog, content: &Content, theme: &Theme) {
+pub fn render(
+    frame: &mut Frame,
+    game: &Game,
+    log: &MessageLog,
+    content: &Content,
+    casting: Option<&Casting>,
+    theme: &Theme,
+) {
     let area = frame.area();
     frame.buffer_mut().set_style(area, theme.bg);
     if !fits(area.as_size()) {
@@ -60,7 +72,7 @@ pub fn render(frame: &mut Frame, game: &Game, log: &MessageLog, content: &Conten
     } else if game.is_over() {
         death::render(frame, area, game, log, content, theme);
     } else {
-        game::render(frame, area, game, log, content, theme);
+        game::render(frame, area, game, log, content, casting, theme);
     }
 }
 
@@ -139,7 +151,16 @@ mod tests {
         let game = Game::in_fixed_room(SEED);
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         terminal
-            .draw(|frame| render(frame, &game, &MessageLog::default(), &content(), &theme))
+            .draw(|frame| {
+                render(
+                    frame,
+                    &game,
+                    &MessageLog::default(),
+                    &content(),
+                    None,
+                    &theme,
+                )
+            })
             .unwrap();
         (terminal.backend().buffer().clone(), theme)
     }
@@ -255,7 +276,16 @@ mod tests {
         let game = Game::in_fixed_room(SEED);
         let mut terminal = Terminal::new(TestBackend::new(60, 20)).unwrap();
         terminal
-            .draw(|frame| render(frame, &game, &MessageLog::default(), &content(), &theme))
+            .draw(|frame| {
+                render(
+                    frame,
+                    &game,
+                    &MessageLog::default(),
+                    &content(),
+                    None,
+                    &theme,
+                )
+            })
             .unwrap();
         let screen = terminal.backend().buffer();
 

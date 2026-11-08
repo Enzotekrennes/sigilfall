@@ -23,8 +23,10 @@ pub enum Tone {
     Info,
     /// A gain, such as a foe killed (prefix `+`).
     Success,
-    /// A danger: damage taken, death (prefix `!`).
+    /// A danger: damage taken, death, a backlash (prefix `!`).
     Danger,
+    /// A spell cast and what it did (prefix `~`).
+    Sigil,
 }
 
 /// One line of news, in English, as the player reads it.

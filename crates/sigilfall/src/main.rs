@@ -9,6 +9,7 @@
 //! and when it panics, so the player's shell is never left unusable.
 
 mod app;
+mod casting;
 mod cli;
 mod input;
 mod message_log;
