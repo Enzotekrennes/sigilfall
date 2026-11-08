@@ -25,4 +25,4 @@ expression: screen_text(&screen)
 "                                                                                "
 "                                                                                "
 "                                                                                "
-" <^>v/1-9 move   . wait   t trace   q quit                                      "
+" <^>v/1-9 move   . wait   t trace   g pick up   i inventory   q quit            "

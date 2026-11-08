@@ -1,14 +1,15 @@
 //! Every English sentence and label of the message log, the side panel, the
-//! sigil overlay and the end screen, and the translation of game events into
-//! log messages.
+//! sigil overlay, the inventory and the end screen, and the translation of
+//! game events into log messages.
 //!
 //! Exposes [`describe`], which turns the events of one `Game::submit` into
 //! [`Message`]s, the opening message ([`welcome`]), the cause of death of
-//! the end screen ([`cause_of_death`]), monster and sigil names
-//! ([`monster_name`], [`sigil_name`]), what a sigil does in a few words
-//! ([`effect_summary`]), the time a cast takes ([`cast_time`]), the notices
-//! of the sigil overlay and the fixed labels of those screens and of the key
-//! help. Keeping the words here, away from the drawing code, is what
+//! the end screen ([`cause_of_death`]), monster, sigil and item names
+//! ([`monster_name`], [`sigil_name`], [`item_name`]), what a sigil or an
+//! item does in a few words ([`effect_summary`], [`item_summary`]), the time
+//! a cast takes ([`cast_time`]), why the game refused an item
+//! ([`item_refusal`]), the notices of the sigil overlay and the inventory,
+//! and the fixed labels of those screens and of the key help. Keeping the words here, away from the drawing code, is what
 //! decision D10 asks: a translation would only touch this file. The turn and
 //! seed labels of the status line predate this module and keep their words
 //! in `ui::game`.
@@ -20,9 +21,12 @@ use std::collections::HashSet;
 
 use sigilfall_core::actor::ActorId;
 use sigilfall_core::combat::Combatant;
-use sigilfall_core::content::{Content, Effect, SigilDef, Targeting};
+use sigilfall_core::content::{
+    Content, Effect, ItemDef, ItemEffect, ItemFamily, SigilDef, Targeting,
+};
 use sigilfall_core::event::Event;
 use sigilfall_core::game::Game;
+use sigilfall_core::item::{INVENTORY_CAPACITY, ItemId, ItemRefusal};
 use sigilfall_core::rng::Seed;
 use sigilfall_core::schedule::{MOVE_COST, STROKE_COST, cast_cost};
 use sigilfall_core::sigil::{CastQuality, Node};
@@ -184,6 +188,55 @@ pub const BACK_LABEL: &str = "back to the trace";
 /// What the direction keys do while a direction is asked.
 pub const AIM_LABEL: &str = "aim";
 
+/// Key that picks up the item underfoot, in the key help of the game
+/// screen; `,` does the same, as in other roguelikes.
+pub const PICK_UP_KEY: &str = "g";
+
+/// What [`PICK_UP_KEY`] does.
+pub const PICK_UP_LABEL: &str = "pick up";
+
+/// Key that opens the inventory, in the key help of the game screen.
+pub const INVENTORY_KEY: &str = "i";
+
+/// What [`INVENTORY_KEY`] does.
+pub const INVENTORY_LABEL: &str = "inventory";
+
+/// Title of the inventory's frame.
+pub const INVENTORY_TITLE: &str = "Inventory";
+
+/// Keys that choose an item after the arrows, in the key help of the
+/// inventory: the digits of the slots, `0` being the tenth.
+pub const SLOT_KEYS: &str = "1-0";
+
+/// What the arrows and [`SLOT_KEYS`] do in the inventory.
+pub const CHOOSE_LABEL: &str = "choose";
+
+/// Keys that use the chosen item, in the key help of the inventory.
+pub const USE_KEYS: &str = "Enter/u";
+
+/// What [`USE_KEYS`] do.
+pub const USE_LABEL: &str = "use";
+
+/// Key that drops the chosen item, in the key help of the inventory.
+pub const DROP_KEY: &str = "d";
+
+/// What [`DROP_KEY`] does.
+pub const DROP_LABEL: &str = "drop";
+
+/// What [`CANCEL_KEY`] does in the inventory.
+pub const CLOSE_LABEL: &str = "close";
+
+/// The lines the inventory shows while the player carries nothing: that
+/// the pack is empty and how to pick an item up. `{glyph}` stands for the
+/// map glyph of a vial, the most common item.
+pub fn empty_inventory() -> [String; 3] {
+    [
+        "You carry nothing yet.".to_owned(),
+        "Stand on an item, {glyph} on the map, and press".to_owned(),
+        format!("{PICK_UP_KEY} to pick it up."),
+    ]
+}
+
 /// The first message of every run, so the log is never empty and tells
 /// where the player stands.
 pub fn welcome() -> Message {
@@ -219,6 +272,22 @@ pub fn welcome() -> Message {
 ///   grimoire." ([`Tone::Success`]);
 /// - a refused cast, which took no time: "Not enough essence to cast: 1 of
 ///   2." or "Passage needs a direction." ([`Tone::Info`]);
+/// - a cast an item steadied: the cast's line says so, with the steadied
+///   casts left, "Ember, steadied trace (1 left): the shade is seared (6).";
+/// - an item picked up: "You pick up the Healing Draught." ([`Tone::Success`]);
+///   one dropped: "You drop the Healing Draught." ([`Tone::Info`]);
+/// - an item used and its effect, on one [`Tone::Success`] line with the
+///   verb of its family (drink a vial, read a page, use a catalyst) and,
+///   for a restoration, the value reached out of its maximum, so a capped
+///   heal reads as such: "You drink the Healing Draught and recover 8 HP
+///   (30/30).", "You drink the Healing Draught, but you were not hurt
+///   (30/30).", "You drink the Essence Phial and recover 4 essence (6/6).",
+///   "You read the Page of the Veil: Veil joins your grimoire.", "You use
+///   the Steadying Ink: your next 2 unstable casts will be cast pure.";
+/// - an action on an item that the game refused, which took no time
+///   ([`Tone::Info`]): "There is nothing here to pick up.", "Your pack is
+///   full (10/10): the Healing Draught stays on the floor.", and the
+///   sentences of [`item_refusal`];
 /// - nothing for moves and waits, which the map already shows, nor for a
 ///   move refused by a wall: no time passes and the player sees they did not
 ///   move, while a line per bump would push the blows out of the five
@@ -230,11 +299,20 @@ pub fn describe(events: &[Event], game: &Game, content: &Content) -> Vec<Message
     // Opening of the line of the cast in progress, "Ember, pure trace",
     // written once the event of its effect follows.
     let mut cast_lead: Option<String> = None;
+    // Opening of the line of the item being used, "You drink the Healing
+    // Draught", likewise completed by the event of its effect.
+    let mut use_lead: Option<String> = None;
     for event in events {
         if !is_spell_effect(event, game)
+            && !matches!(event, Event::CastSteadied { .. })
             && let Some(lead) = cast_lead.take()
         {
             messages.push(Message::new(Tone::Sigil, format!("{lead}.")));
+        }
+        if !is_item_effect(event)
+            && let Some(lead) = use_lead.take()
+        {
+            messages.push(Message::new(Tone::Success, format!("{lead}.")));
         }
         let message = match event {
             Event::Attacked {
@@ -291,6 +369,14 @@ pub fn describe(events: &[Event], game: &Game, content: &Content) -> Vec<Message
                     })
                 }
             }
+            Event::Healed { actor, amount, hp } if use_lead.is_some() => {
+                let max = game.actor(*actor).map_or(*hp, |actor| actor.max_hp());
+                let lead = use_lead.take().unwrap_or_default();
+                Some(Message::new(
+                    Tone::Success,
+                    restored_line(&lead, *amount, Restored::Health, *hp, max),
+                ))
+            }
             Event::Healed { amount, .. } => {
                 let effect = if *amount > 0 {
                     format!("you mend ({amount})")
@@ -340,29 +426,156 @@ pub fn describe(events: &[Event], game: &Game, content: &Content) -> Vec<Message
                     sigil_name(content, sigil)
                 ),
             )),
+            Event::CastSteadied { casts_left, .. } => {
+                if let Some(lead) = cast_lead.as_mut() {
+                    // The game reports a steadied cast as pure: the line
+                    // says what made it so instead.
+                    let pure = quality_words(CastQuality::Pure);
+                    *lead = lead.replace(pure, &format!("steadied trace ({casts_left} left)"));
+                }
+                None
+            }
+            Event::PickedUp { definition, .. } => Some(Message::new(
+                Tone::Success,
+                format!("You pick up the {}.", item_name(content, definition)),
+            )),
+            Event::InventoryFull { definition, .. } => Some(Message::new(
+                Tone::Info,
+                format!(
+                    "Your pack is full ({}): the {} stays on the floor.",
+                    capacity(INVENTORY_CAPACITY),
+                    item_name(content, definition)
+                ),
+            )),
+            Event::NothingToPickUp { .. } => Some(Message::new(
+                Tone::Info,
+                "There is nothing here to pick up.",
+            )),
+            Event::Used { definition, .. } => {
+                let verb = content
+                    .item(definition)
+                    .map_or("use", |item| use_verb(item.family()));
+                use_lead = Some(format!("You {verb} the {}", item_name(content, definition)));
+                None
+            }
+            Event::EssenceRestored {
+                actor,
+                amount,
+                essence,
+            } => {
+                let max = game
+                    .actor(*actor)
+                    .map_or(*essence, |actor| actor.max_essence());
+                let lead = use_lead.take().unwrap_or_else(|| "You rest".to_owned());
+                Some(Message::new(
+                    Tone::Success,
+                    restored_line(&lead, *amount, Restored::Essence, *essence, max),
+                ))
+            }
+            Event::SigilLearned { sigil } => {
+                let lead = use_lead.take().unwrap_or_else(|| "You learn".to_owned());
+                Some(Message::new(
+                    Tone::Success,
+                    format!(
+                        "{lead}: {} joins your grimoire.",
+                        sigil_name(content, sigil)
+                    ),
+                ))
+            }
+            Event::Steadied { casts } => {
+                let lead = use_lead.take().unwrap_or_else(|| "You steady".to_owned());
+                let next = match casts {
+                    1 => "your next unstable cast".to_owned(),
+                    casts => format!("your next {casts} unstable casts"),
+                };
+                Some(Message::new(
+                    Tone::Success,
+                    format!("{lead}: {next} will be cast pure."),
+                ))
+            }
+            Event::Dropped { definition, .. } => Some(Message::new(
+                Tone::Info,
+                format!("You drop the {}.", item_name(content, definition)),
+            )),
+            Event::ItemRefused { item, reason } => {
+                Some(Message::new(Tone::Info, item_refusal(game, *item, *reason)))
+            }
             Event::Died { .. }
             | Event::Moved { .. }
             | Event::Waited { .. }
             | Event::MoveBlocked { .. }
             | Event::TurnLost { .. }
-            | Event::Backlash { .. }
-            | Event::PickedUp { .. }
-            | Event::InventoryFull { .. }
-            | Event::NothingToPickUp { .. }
-            | Event::Used { .. }
-            | Event::Dropped { .. }
-            | Event::ItemRefused { .. }
-            | Event::EssenceRestored { .. }
-            | Event::SigilLearned { .. }
-            | Event::Steadied { .. }
-            | Event::CastSteadied { .. } => None,
+            | Event::Backlash { .. } => None,
         };
         messages.extend(message);
     }
     if let Some(lead) = cast_lead {
         messages.push(Message::new(Tone::Sigil, format!("{lead}.")));
     }
+    if let Some(lead) = use_lead {
+        messages.push(Message::new(Tone::Success, format!("{lead}.")));
+    }
     messages
+}
+
+/// Returns why the game refused to use or drop the item `item` of `game`
+/// for `reason`, as the log and the inventory say it: "You do not carry
+/// that item.", "You already know Veil: the Page of the Veil has nothing
+/// to teach.", "Something already lies here: drop the Healing Draught
+/// elsewhere."
+///
+/// The item is named from `game`, which keeps every item not used up; one
+/// it no longer knows is called "that item".
+pub fn item_refusal(game: &Game, item: ItemId, reason: ItemRefusal) -> String {
+    let definition = game.item(item).map(|item| item.definition());
+    let name = definition.map_or_else(
+        || "that item".to_owned(),
+        |definition| format!("the {}", definition.name()),
+    );
+    match reason {
+        ItemRefusal::NotCarried => "You do not carry that item.".to_owned(),
+        ItemRefusal::NothingToLearn => {
+            let sigil = definition.and_then(|definition| match definition.effect() {
+                ItemEffect::Teach(sigil) => Some(sigil.name()),
+                _ => None,
+            });
+            format!(
+                "You already know {}: {name} has nothing to teach.",
+                sigil.unwrap_or("its sigil")
+            )
+        }
+        ItemRefusal::CellTaken => format!("Something already lies here: drop {name} elsewhere."),
+    }
+}
+
+/// Returns the name shown to the player for the item definition `id` of
+/// `content`, such as "Healing Draught"; an identifier missing from
+/// `content` is shown as is, as [`monster_name`] does.
+pub fn item_name<'name>(content: &'name Content, id: &'name str) -> &'name str {
+    content.item(id).map_or(id, ItemDef::name)
+}
+
+/// Returns what `item` does in a few words, for the inventory: "heal 10
+/// HP", "restore 4 essence", "teach Veil", "steady 2 casts".
+///
+/// A page whose sigil the player already knows (`known`) says so after
+/// `separator`, "teach Veil · known", since the game would refuse to use
+/// it.
+pub fn item_summary(item: &ItemDef, known: bool, separator: char) -> String {
+    match item.effect() {
+        ItemEffect::Heal(amount) => format!("heal {amount} HP"),
+        ItemEffect::RestoreEssence(amount) => format!("restore {amount} essence"),
+        ItemEffect::Teach(sigil) if known => format!("teach {} {separator} known", sigil.name()),
+        ItemEffect::Teach(sigil) => format!("teach {}", sigil.name()),
+        ItemEffect::Steady(1) => "steady 1 cast".to_owned(),
+        ItemEffect::Steady(casts) => format!("steady {casts} casts"),
+    }
+}
+
+/// Returns how full the inventory is with `carried` items, out of
+/// `item::INVENTORY_CAPACITY`: "3/10".
+pub fn capacity(carried: usize) -> String {
+    format!("{carried}/{INVENTORY_CAPACITY}")
 }
 
 /// Returns the sentence of the end screen that says who killed the player
@@ -499,6 +712,54 @@ const fn quality_words(quality: CastQuality) -> &'static str {
         CastQuality::Unstable => "unstable trace",
         CastQuality::Fizzled => "fizzled trace",
     }
+}
+
+/// The verb of using an item of `family`: a vial is drunk, a page read, a
+/// catalyst used.
+const fn use_verb(family: ItemFamily) -> &'static str {
+    match family {
+        ItemFamily::Vial => "drink",
+        ItemFamily::Page => "read",
+        ItemFamily::Catalyst => "use",
+    }
+}
+
+/// What an item restored, for [`restored_line`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Restored {
+    /// Hit points.
+    Health,
+    /// Essence.
+    Essence,
+}
+
+/// The line of an item that restored `amount` of `what`, opened by `lead`
+/// ("You drink the Healing Draught") and closed by the `value` reached out
+/// of `max`, so a capped restoration reads as such: "… and recover 8 HP
+/// (30/30)." or, when nothing was missing, "…, but you were not hurt
+/// (30/30)."
+fn restored_line(lead: &str, amount: i32, what: Restored, value: i32, max: i32) -> String {
+    let (unit, already) = match what {
+        Restored::Health => ("HP", "you were not hurt"),
+        Restored::Essence => ("essence", "your essence was full"),
+    };
+    if amount > 0 {
+        format!("{lead} and recover {amount} {unit} ({value}/{max}).")
+    } else {
+        format!("{lead}, but {already} ({value}/{max}).")
+    }
+}
+
+/// Whether `event` is the effect of an item that ends the line of its use
+/// (see [`describe`]).
+const fn is_item_effect(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::Healed { .. }
+            | Event::EssenceRestored { .. }
+            | Event::SigilLearned { .. }
+            | Event::Steadied { .. }
+    )
 }
 
 /// "1 turn" or "3 turns".
@@ -1103,5 +1364,231 @@ mod tests {
                 "harm 9 - aimed",
             ]
         );
+    }
+
+    /// The event of the item of definition `id` used up.
+    fn used(id: &str) -> Event {
+        Event::Used {
+            item: ItemId::default(),
+            definition: id.to_owned(),
+        }
+    }
+
+    #[test]
+    fn an_item_used_and_its_effect_make_one_line_with_the_capped_value() {
+        let (game, _, content) = spell_target();
+        let player = game.player();
+        let cases = [
+            (
+                vec![
+                    used("healing_draught"),
+                    Event::Healed {
+                        actor: player,
+                        amount: 8,
+                        hp: 30,
+                    },
+                ],
+                "You drink the Healing Draught and recover 8 HP (30/30).",
+            ),
+            (
+                vec![
+                    used("healing_draught"),
+                    Event::Healed {
+                        actor: player,
+                        amount: 0,
+                        hp: 30,
+                    },
+                ],
+                "You drink the Healing Draught, but you were not hurt (30/30).",
+            ),
+            (
+                vec![
+                    used("essence_phial"),
+                    Event::EssenceRestored {
+                        actor: player,
+                        amount: 4,
+                        essence: 5,
+                    },
+                ],
+                "You drink the Essence Phial and recover 4 essence (5/6).",
+            ),
+            (
+                vec![
+                    used("essence_phial"),
+                    Event::EssenceRestored {
+                        actor: player,
+                        amount: 0,
+                        essence: 6,
+                    },
+                ],
+                "You drink the Essence Phial, but your essence was full (6/6).",
+            ),
+            (
+                vec![
+                    used("veil_page"),
+                    Event::SigilLearned {
+                        sigil: "veil".to_owned(),
+                    },
+                ],
+                "You read the Page of the Veil: Veil joins your grimoire.",
+            ),
+            (
+                vec![used("steadying_ink"), Event::Steadied { casts: 2 }],
+                "You use the Steadying Ink: your next 2 unstable casts will be cast pure.",
+            ),
+            (
+                vec![used("steadying_ink"), Event::Steadied { casts: 1 }],
+                "You use the Steadying Ink: your next unstable cast will be cast pure.",
+            ),
+            (
+                vec![used("healing_draught")],
+                "You drink the Healing Draught.",
+            ),
+        ];
+
+        for (events, expected) in cases {
+            let messages = describe(&events, &game, &content);
+            assert_eq!(lines(&messages), [(Tone::Success, expected)], "{events:?}");
+        }
+    }
+
+    #[test]
+    fn a_healing_spell_and_a_healing_draught_read_apart() {
+        let (game, _, content) = spell_target();
+        let healed = Event::Healed {
+            actor: game.player(),
+            amount: 8,
+            hp: 30,
+        };
+
+        let spell = describe(
+            &[cast("recall", CastQuality::Pure), healed.clone()],
+            &game,
+            &content,
+        );
+        let draught = describe(&[used("healing_draught"), healed], &game, &content);
+
+        assert_eq!(texts(&spell), ["Recall, pure trace: you mend (8)."]);
+        assert_eq!(
+            texts(&draught),
+            ["You drink the Healing Draught and recover 8 HP (30/30)."]
+        );
+    }
+
+    #[test]
+    fn picking_up_dropping_and_refusals_have_their_own_lines() {
+        let (game, _, content) = spell_target();
+        let item = ItemId::default();
+        let events = [
+            Event::PickedUp {
+                item,
+                definition: "healing_draught".to_owned(),
+            },
+            Event::NothingToPickUp {
+                position: Position::new(5, 5),
+            },
+            Event::InventoryFull {
+                item,
+                definition: "steadying_ink".to_owned(),
+            },
+            Event::Dropped {
+                item,
+                definition: "essence_phial".to_owned(),
+                position: Position::new(5, 5),
+            },
+            Event::ItemRefused {
+                item,
+                reason: ItemRefusal::NotCarried,
+            },
+        ];
+
+        let messages = describe(&events, &game, &content);
+
+        assert_eq!(
+            lines(&messages),
+            [
+                (Tone::Success, "You pick up the Healing Draught."),
+                (Tone::Info, "There is nothing here to pick up."),
+                (
+                    Tone::Info,
+                    "Your pack is full (10/10): the Steadying Ink stays on the floor."
+                ),
+                (Tone::Info, "You drop the Essence Phial."),
+                (Tone::Info, "You do not carry that item."),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_refusal_names_the_item_and_why() {
+        let content = content();
+        let mut game = Game::in_fixed_room(SEED);
+        let page = game.place_item(Position::new(6, 5), content.item("veil_page").unwrap());
+        let draught = game.place_item(
+            Position::new(7, 5),
+            content.item("healing_draught").unwrap(),
+        );
+
+        assert_eq!(
+            item_refusal(&game, page, ItemRefusal::NothingToLearn),
+            "You already know Veil: the Page of the Veil has nothing to teach."
+        );
+        assert_eq!(
+            item_refusal(&game, draught, ItemRefusal::CellTaken),
+            "Something already lies here: drop the Healing Draught elsewhere."
+        );
+        assert_eq!(
+            item_refusal(&game, ItemId::default(), ItemRefusal::CellTaken),
+            "Something already lies here: drop that item elsewhere."
+        );
+    }
+
+    #[test]
+    fn a_steadied_cast_says_so_in_its_line() {
+        let (game, rat, content) = spell_target();
+        let events = [
+            cast("ember", CastQuality::Pure),
+            Event::CastSteadied {
+                sigil: "ember".to_owned(),
+                casts_left: 1,
+            },
+            Event::Wounded {
+                actor: rat,
+                damage: 6,
+                hp_left: 2,
+            },
+        ];
+
+        let messages = describe(&events, &game, &content);
+
+        assert_eq!(
+            lines(&messages),
+            [(
+                Tone::Sigil,
+                "Ember, steadied trace (1 left): the ossuary rat is seared (6)."
+            )]
+        );
+    }
+
+    #[test]
+    fn every_shipped_item_has_a_short_summary() {
+        let summaries: Vec<String> = content()
+            .items()
+            .iter()
+            .map(|item| item_summary(item, false, '-'))
+            .collect();
+
+        assert_eq!(
+            summaries,
+            [
+                "heal 10 HP",
+                "restore 4 essence",
+                "steady 2 casts",
+                "teach Veil"
+            ]
+        );
+        let page = content().item("veil_page").unwrap().clone();
+        assert_eq!(item_summary(&page, true, '-'), "teach Veil - known");
+        assert_eq!(capacity(3), "3/10");
     }
 }

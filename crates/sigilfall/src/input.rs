@@ -3,8 +3,9 @@
 //! Exposes one keymap per kind of screen: [`command_for`] on the game
 //! screen ([`Command`]), [`trace_command_for`] while a sigil is traced
 //! ([`TraceCommand`]), [`aim_command_for`] while its direction is asked
-//! ([`AimCommand`]) and [`verdict_command_for`] while the verdict of a cast
-//! is shown ([`VerdictCommand`]). Only key presses count: crossterm also
+//! ([`AimCommand`]), [`verdict_command_for`] while the verdict of a cast
+//! is shown ([`VerdictCommand`]) and [`inventory_command_for`] while the
+//! inventory is open ([`InventoryCommand`]). Only key presses count: crossterm also
 //! reports key releases on Windows, and treating them as input would play
 //! every key twice. Ctrl+C quits from every screen, since raw mode turns it
 //! into a plain key. This module decides nothing about the game itself; the
@@ -22,6 +23,8 @@ pub enum Command {
     Act(Action),
     /// Open the sigil overlay to trace a sigil.
     Trace,
+    /// Open the inventory.
+    Inventory,
     /// Leave the game.
     Quit,
 }
@@ -53,6 +56,30 @@ pub enum AimCommand {
     Quit,
 }
 
+/// What the player asked for with one key press while the inventory is
+/// open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InventoryCommand {
+    /// Choose the item above the chosen one, or the last from the first.
+    Previous,
+    /// Choose the item below the chosen one, or the first from the last.
+    Next,
+    /// Choose the first item.
+    First,
+    /// Choose the last item.
+    Last,
+    /// Choose the item in this slot, counted from 0.
+    Slot(usize),
+    /// Use the chosen item.
+    Use,
+    /// Drop the chosen item on the player's cell.
+    Drop,
+    /// Close the inventory without doing anything.
+    Close,
+    /// Leave the game.
+    Quit,
+}
+
 /// What the player asked for with one key press while the verdict of a
 /// cast is shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,6 +99,9 @@ pub enum VerdictCommand {
 /// - wait: `.`, `5` or the keypad centre key without Num Lock;
 /// - trace a sigil: `t`, as in the mock-ups of `docs/design.md` (the
 ///   digits are taken by movement, and `t` is not a vi key);
+/// - pick up the item underfoot: `g`, as in the mock-up, or `,`, the key
+///   of other roguelikes; neither is a vi key;
+/// - open the inventory: `i`;
 /// - quit: `q`, Escape or Ctrl+C (raw mode turns Ctrl+C into a plain key).
 ///
 /// Releases and repeats are ignored (`None`), so each physical press counts
@@ -85,6 +115,8 @@ pub fn command_for(key: KeyEvent) -> Option<Command> {
     match code {
         KeyCode::Char('q') | KeyCode::Esc => Some(Command::Quit),
         KeyCode::Char('t') => Some(Command::Trace),
+        KeyCode::Char('i') => Some(Command::Inventory),
+        KeyCode::Char('g' | ',') => Some(Command::Act(Action::PickUp)),
         KeyCode::Char('.' | '5') | KeyCode::KeypadBegin => Some(Command::Act(Action::Wait)),
         code => direction_for(code).map(|direction| Command::Act(Action::Move(direction))),
     }
@@ -148,6 +180,42 @@ pub fn verdict_command_for(key: KeyEvent) -> Option<VerdictCommand> {
         Press::Quit => Some(VerdictCommand::Quit),
         Press::Code(_) => Some(VerdictCommand::Continue),
     }
+}
+
+/// Returns the command bound to `key` while the inventory is open, or
+/// `None` when the key does nothing there.
+///
+/// Bindings:
+/// - choose an item: Up and Down (or `k` and `j`), which wrap around the
+///   list; Home and End for the first and the last; a digit for the item
+///   in its slot, `1` for the first and `0` for the tenth
+///   (`item::INVENTORY_CAPACITY`), as the list numbers them;
+/// - use the chosen item: Enter or `u`;
+/// - drop it: `d`;
+/// - close: Escape;
+/// - quit: Ctrl+C only, so that `q` pressed by mistake loses nothing.
+///
+/// Releases and repeats are ignored, Shift is accepted (some layouts need
+/// it for the digit row), and keys with Alt or Ctrl, Ctrl+C aside, do
+/// nothing.
+pub fn inventory_command_for(key: KeyEvent) -> Option<InventoryCommand> {
+    let code = match plain_press(key)? {
+        Press::Quit => return Some(InventoryCommand::Quit),
+        Press::Code(code) => code,
+    };
+    let command = match code {
+        KeyCode::Up | KeyCode::Char('k') => InventoryCommand::Previous,
+        KeyCode::Down | KeyCode::Char('j') => InventoryCommand::Next,
+        KeyCode::Home => InventoryCommand::First,
+        KeyCode::End => InventoryCommand::Last,
+        KeyCode::Char('0') => InventoryCommand::Slot(9),
+        KeyCode::Char(digit @ '1'..='9') => InventoryCommand::Slot(usize::from(digit as u8 - b'1')),
+        KeyCode::Enter | KeyCode::Char('u') => InventoryCommand::Use,
+        KeyCode::Char('d') => InventoryCommand::Drop,
+        KeyCode::Esc => InventoryCommand::Close,
+        _ => return None,
+    };
+    Some(command)
 }
 
 /// A key press that may mean something, once the modifiers are checked.
@@ -279,6 +347,86 @@ mod tests {
             command_for(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
             Some(Command::Quit)
         );
+    }
+
+    #[test]
+    fn g_and_comma_pick_up_and_i_opens_the_inventory() {
+        for code in [KeyCode::Char('g'), KeyCode::Char(',')] {
+            assert_eq!(
+                command_for(press(code)),
+                Some(Command::Act(Action::PickUp)),
+                "{code:?}"
+            );
+        }
+        assert_eq!(
+            command_for(press(KeyCode::Char('i'))),
+            Some(Command::Inventory)
+        );
+        assert_eq!(
+            command_for(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::ALT)),
+            None
+        );
+    }
+
+    #[test]
+    fn in_the_inventory_arrows_vi_keys_and_digits_choose_an_item() {
+        for (code, expected) in [
+            (KeyCode::Up, InventoryCommand::Previous),
+            (KeyCode::Char('k'), InventoryCommand::Previous),
+            (KeyCode::Down, InventoryCommand::Next),
+            (KeyCode::Char('j'), InventoryCommand::Next),
+            (KeyCode::Home, InventoryCommand::First),
+            (KeyCode::End, InventoryCommand::Last),
+            (KeyCode::Char('1'), InventoryCommand::Slot(0)),
+            (KeyCode::Char('9'), InventoryCommand::Slot(8)),
+            (KeyCode::Char('0'), InventoryCommand::Slot(9)),
+        ] {
+            assert_eq!(
+                inventory_command_for(press(code)),
+                Some(expected),
+                "{code:?}"
+            );
+        }
+        let shifted = KeyEvent::new(KeyCode::Char('3'), KeyModifiers::SHIFT);
+        assert_eq!(
+            inventory_command_for(shifted),
+            Some(InventoryCommand::Slot(2))
+        );
+    }
+
+    #[test]
+    fn in_the_inventory_enter_and_u_use_d_drops_and_escape_closes() {
+        for (code, expected) in [
+            (KeyCode::Enter, InventoryCommand::Use),
+            (KeyCode::Char('u'), InventoryCommand::Use),
+            (KeyCode::Char('d'), InventoryCommand::Drop),
+            (KeyCode::Esc, InventoryCommand::Close),
+        ] {
+            assert_eq!(
+                inventory_command_for(press(code)),
+                Some(expected),
+                "{code:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn in_the_inventory_only_ctrl_c_quits_and_other_keys_do_nothing() {
+        assert_eq!(
+            inventory_command_for(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+            Some(InventoryCommand::Quit)
+        );
+        for key in [
+            press(KeyCode::Char('q')),
+            press(KeyCode::Char('i')),
+            press(KeyCode::Char('g')),
+            press(KeyCode::Left),
+            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::ALT),
+            KeyEvent::new_with_kind(KeyCode::Enter, KeyModifiers::NONE, KeyEventKind::Release),
+            KeyEvent::new_with_kind(KeyCode::Down, KeyModifiers::NONE, KeyEventKind::Repeat),
+        ] {
+            assert_eq!(inventory_command_for(key), None, "{key:?}");
+        }
     }
 
     #[test]

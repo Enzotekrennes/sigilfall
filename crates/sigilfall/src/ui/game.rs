@@ -11,10 +11,12 @@
 //! to what the player knows of it ([`Sight`]): in full when in view, only
 //! its landmarks when explored but out of view, not at all when never seen.
 //! Engraved glyphs are landmarks: `§` until the player knows their sigil,
-//! `≡` after, dimmer once out of view. Monsters are drawn only on cells in
-//! view, with their family's letter and colour, and the player is drawn
-//! over everything else. While the player casts, the sigil overlay
-//! (`ui::sigil`) covers the map, and the key help names the keys of the
+//! `≡` after, dimmer once out of view. Items and monsters are drawn only on
+//! cells in view, items with their family's glyph in `item`, monsters with
+//! their family's letter and colour, monsters over items, and the player is
+//! drawn over everything else. While the player casts or looks at the
+//! inventory, the sigil overlay (`ui::sigil`) or the inventory
+//! (`ui::inventory`) covers the map, and the key help names the keys of the
 //! overlay instead of those of the game.
 
 use ratatui::Frame;
@@ -23,14 +25,14 @@ use ratatui::layout::{Constraint, Layout, Position as ScreenPosition, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use sigilfall_core::content::Content;
-use sigilfall_core::game::{Game, VisibleMonster};
+use sigilfall_core::game::{Game, VisibleItem, VisibleMonster};
 use sigilfall_core::generation::Engraving;
 use sigilfall_core::geometry::Position;
 use sigilfall_core::map::Tile;
 use sigilfall_core::rng::Seed;
 
 use super::camera::Camera;
-use super::{hud, log, sigil};
+use super::{Overlay, hud, inventory, log, sigil};
 use crate::casting::Casting;
 use crate::message_log::MessageLog;
 use crate::messages;
@@ -109,9 +111,9 @@ pub fn log_area(screen: Rect) -> Rect {
 }
 
 /// Draws the game screen for `game` inside `area`, with the messages of
-/// `log`, monster names from `content` and `theme`; while the player casts,
-/// the overlay of `casting` covers the map and the key help is the
-/// overlay's.
+/// `log`, monster names from `content` and `theme`; while the player casts
+/// or looks at the inventory, `overlay` covers the map and the key help is
+/// the overlay's.
 ///
 /// `area` is expected to be at least 80 × 24 (checked by the caller); a
 /// smaller area is still drawn without panicking, only clipped. The
@@ -122,7 +124,7 @@ pub fn render(
     game: &Game,
     log: &MessageLog,
     content: &Content,
-    casting: Option<&Casting>,
+    overlay: Option<Overlay<'_>>,
     theme: &Theme,
 ) {
     let layout = GameLayout::new(area);
@@ -141,10 +143,17 @@ pub fn render(
         log,
         theme,
     );
-    if let Some(casting) = casting {
-        sigil::render(frame.buffer_mut(), layout.map, casting, game, theme);
+    match overlay {
+        Some(Overlay::Casting(casting)) => {
+            sigil::render(frame.buffer_mut(), layout.map, casting, game, theme);
+        }
+        Some(Overlay::Inventory(screen)) => {
+            inventory::render(frame.buffer_mut(), layout.map, screen, game, theme);
+        }
+        None => {}
     }
-    frame.render_widget(key_help(casting, theme), layout.help);
+    let carries_items = game.inventory().next().is_some();
+    frame.render_widget(key_help(overlay, carries_items, theme), layout.help);
 }
 
 /// Builds the left part of the status line: the player's current turn,
@@ -180,31 +189,44 @@ fn seed_label(seed: Seed, theme: &Theme) -> Line<'static> {
 /// does in the muted style, so keys stand out from their labels.
 ///
 /// The keys are those of the screen in front of the player: the game's
-/// (move, wait, trace, quit), or, while `casting`, the overlay's (link a
-/// node, undo, cast, cancel), the direction prompt's (aim, back) or the
-/// verdict's (continue).
-fn key_help(casting: Option<&Casting>, theme: &Theme) -> Line<'static> {
-    let directions = format!("{}/1-9", theme.glyphs.arrows());
-    let bindings: Vec<(String, &str)> = match casting {
+/// (move, wait, trace, pick up, inventory, quit); under the sigil overlay,
+/// the overlay's (link a node, undo, cast, cancel), the direction prompt's
+/// (aim, back) or the verdict's (continue); in the inventory, its own
+/// (choose, use, drop, close), or only close while the player carries
+/// nothing (`carries_items` false).
+fn key_help(overlay: Option<Overlay<'_>>, carries_items: bool, theme: &Theme) -> Line<'static> {
+    let glyphs = &theme.glyphs;
+    let directions = format!("{}/1-9", glyphs.arrows());
+    let bindings: Vec<(String, &str)> = match overlay {
         None => vec![
             (directions, messages::MOVE_LABEL),
             (messages::WAIT_KEY.to_owned(), messages::WAIT_LABEL),
             (messages::TRACE_KEY.to_owned(), messages::TRACE_KEY_LABEL),
+            (messages::PICK_UP_KEY.to_owned(), messages::PICK_UP_LABEL),
+            (
+                messages::INVENTORY_KEY.to_owned(),
+                messages::INVENTORY_LABEL,
+            ),
             (messages::QUIT_KEY.to_owned(), messages::QUIT_LABEL),
         ],
-        Some(Casting::Drawing(_)) => vec![
-            (messages::LINK_KEYS.to_owned(), messages::LINK_LABEL),
-            (messages::UNDO_KEY.to_owned(), messages::UNDO_LABEL),
-            (messages::CAST_KEY.to_owned(), messages::CAST_LABEL),
-            (messages::CANCEL_KEY.to_owned(), messages::CANCEL_LABEL),
+        Some(Overlay::Inventory(_)) if carries_items => vec![
+            (
+                format!(
+                    "{}{}/{}",
+                    glyphs.arrow_up,
+                    glyphs.arrow_down,
+                    messages::SLOT_KEYS
+                ),
+                messages::CHOOSE_LABEL,
+            ),
+            (messages::USE_KEYS.to_owned(), messages::USE_LABEL),
+            (messages::DROP_KEY.to_owned(), messages::DROP_LABEL),
+            (messages::CANCEL_KEY.to_owned(), messages::CLOSE_LABEL),
         ],
-        Some(Casting::Aiming { .. }) => vec![
-            (directions, messages::AIM_LABEL),
-            (messages::CANCEL_KEY.to_owned(), messages::BACK_LABEL),
-        ],
-        Some(Casting::Verdict(_)) => {
-            vec![(messages::CAST_KEY.to_owned(), messages::CONTINUE_LABEL)]
+        Some(Overlay::Inventory(_)) => {
+            vec![(messages::CANCEL_KEY.to_owned(), messages::CLOSE_LABEL)]
         }
+        Some(Overlay::Casting(casting)) => casting_bindings(casting, directions),
     };
     let mut spans = vec![Span::raw(" ")];
     for (index, (key, label)) in bindings.into_iter().enumerate() {
@@ -215,6 +237,26 @@ fn key_help(casting: Option<&Casting>, theme: &Theme) -> Line<'static> {
         spans.push(Span::styled(format!(" {label}"), theme.text_muted));
     }
     Line::from(spans)
+}
+
+/// The keys of the sigil overlay at the step `casting`, with their labels,
+/// for [`key_help`]; `directions` names the movement keys.
+fn casting_bindings(casting: &Casting, directions: String) -> Vec<(String, &'static str)> {
+    match casting {
+        Casting::Drawing(_) => vec![
+            (messages::LINK_KEYS.to_owned(), messages::LINK_LABEL),
+            (messages::UNDO_KEY.to_owned(), messages::UNDO_LABEL),
+            (messages::CAST_KEY.to_owned(), messages::CAST_LABEL),
+            (messages::CANCEL_KEY.to_owned(), messages::CANCEL_LABEL),
+        ],
+        Casting::Aiming { .. } => vec![
+            (directions, messages::AIM_LABEL),
+            (messages::CANCEL_KEY.to_owned(), messages::BACK_LABEL),
+        ],
+        Casting::Verdict(_) => {
+            vec![(messages::CAST_KEY.to_owned(), messages::CONTINUE_LABEL)]
+        }
+    }
 }
 
 /// What the player knows of a map cell, which decides how it is drawn.
@@ -277,6 +319,15 @@ const fn monster_look(monster: &VisibleMonster<'_>, theme: &Theme) -> (char, Sty
     (glyph, theme.creature(monster.family))
 }
 
+/// Returns the character and style `item` is drawn with: its family's
+/// glyph (see [`Glyphs::item`](crate::theme::Glyphs::item)) in `item`.
+///
+/// The glyph alone names the family, in both glyph sets, so the item stays
+/// legible without colour.
+const fn item_look(item: &VisibleItem<'_>, theme: &Theme) -> (char, Style) {
+    (theme.glyphs.item(item.family), theme.item)
+}
+
 /// Returns the character and style an engraved glyph is drawn with, given
 /// whether the player of `game` knows its sigil and what the player knows
 /// of its cell, or `None` on a cell never seen.
@@ -306,11 +357,13 @@ fn engraving_look(
 }
 
 /// Draws the part of the map the camera shows in `area`, then the engraved
-/// glyphs, then the monsters in view, then the player on top of everything,
-/// into `buffer`.
+/// glyphs, then the items in view, then the monsters in view, then the
+/// player on top of everything, into `buffer`.
 ///
 /// Each cell is drawn by [`cell_look`] from what the player knows of it,
-/// and each engraved glyph by [`engraving_look`].
+/// and each engraved glyph by [`engraving_look`]. Items come from
+/// [`Game::visible_items`], which only lists those lying on a cell in view,
+/// like monsters: an item out of view is never drawn ([`item_look`]).
 /// Monsters come from [`Game::visible_monsters`], which only lists those on
 /// a cell in view: a monster out of view is never drawn, not even on a
 /// remembered cell, where only the landmarks show. Each one replaces the
@@ -336,6 +389,11 @@ fn render_map(buffer: &mut Buffer, area: Rect, game: &Game, theme: &Theme) {
         let look = engraving_look(engraving, game, Sight::of(game, position), theme);
         if let Some((screen, look)) = camera.screen_position(position).zip(look) {
             draw_cell(buffer, screen, look);
+        }
+    }
+    for item in game.visible_items() {
+        if let Some(screen) = camera.screen_position(item.position) {
+            draw_cell(buffer, screen, item_look(&item, theme));
         }
     }
     for monster in game.visible_monsters() {
@@ -365,10 +423,10 @@ fn draw_cell(buffer: &mut Buffer, screen: ScreenPosition, (glyph, style): (char,
 #[cfg(test)]
 mod tests {
     //! Layout of the game screen, the three states of a map cell (visible,
-    //! remembered, unknown) and the monsters in view, checked on the styles
-    //! of the rendered buffer in every rendering mode: text snapshots do not
-    //! carry styles. Two snapshots show monsters on a generated floor and
-    //! every creature form side by side.
+    //! remembered, unknown), the monsters and the items in view, checked on
+    //! the styles of the rendered buffer in every rendering mode: text
+    //! snapshots do not carry styles. Two snapshots show monsters on a
+    //! generated floor and every creature form side by side.
 
     use insta::assert_snapshot;
     use ratatui::Terminal;
@@ -943,6 +1001,112 @@ mod tests {
         }
 
         assert_snapshot!(screen_text(&screen));
+    }
+
+    /// Items of [`room_with_items`], with the glyph of their family in
+    /// Unicode and in ASCII (`docs/design.md`, "Objets") and their cell: in
+    /// view, in a row two cells above the player of [`explored_fixed_room`].
+    const ITEMS: [(&str, char, char, Position); 3] = [
+        ("healing_draught", '¡', '!', Position::new(18, 3)),
+        ("veil_page", '¶', '?', Position::new(19, 3)),
+        ("steadying_ink", '♦', '*', Position::new(20, 3)),
+    ];
+
+    /// Cell of the draught a monster stands on in [`room_with_items`].
+    const ITEM_UNDER_MONSTER: Position = Position::new(21, 6);
+
+    /// [`explored_fixed_room`] with the items of [`ITEMS`] in view, one more
+    /// under a monster and one under the player, and one on the remembered
+    /// floor and one on the floor never seen, out of view.
+    fn room_with_items() -> Game {
+        let content = Content::load().expect("the shipped content is valid");
+        let item = |id| content.item(id).expect("a shipped item");
+        let mut game = explored_fixed_room();
+        for (id, _, _, position) in ITEMS {
+            game.place_item(position, item(id));
+        }
+        for position in [
+            ITEM_UNDER_MONSTER,
+            game.player_actor().position(),
+            REMEMBERED_FLOOR,
+            UNKNOWN_FLOOR,
+        ] {
+            game.place_item(position, item("essence_phial"));
+        }
+        let monsters = every_form();
+        game.spawn_monster(ITEM_UNDER_MONSTER, definition(&monsters, "eye"));
+        game
+    }
+
+    #[test]
+    fn items_in_view_take_their_family_glyph_in_the_item_token_in_every_mode() {
+        let game = room_with_items();
+        for mode in MODES {
+            for glyph_set in GLYPH_SETS {
+                let theme = Theme::new(mode, glyph_set);
+                let screen = draw(&game, &theme);
+                for (id, unicode, ascii, position) in ITEMS {
+                    let glyph = match glyph_set {
+                        GlyphSet::Unicode => unicode,
+                        GlyphSet::Ascii => ascii,
+                    };
+                    let what = format!("{mode:?}, {glyph_set:?}: {id}");
+                    assert_drawn(cell_at(&screen, &game, position), glyph, theme.item, &what);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn item_colours_take_the_values_of_the_design_in_every_mode() {
+        // "item" row of docs/design.md.
+        let expected = [
+            (ColorMode::TrueColorDark, Color::Rgb(0x8D, 0xBD, 0xE6)),
+            (ColorMode::TrueColorLight, Color::Rgb(0x21, 0x56, 0x85)),
+            (ColorMode::Ansi16, Color::LightBlue),
+            (ColorMode::Monochrome, Color::Reset),
+        ];
+        let game = room_with_items();
+        for (mode, colour) in expected {
+            let screen = draw(&game, &Theme::new(mode, GlyphSet::Unicode));
+            for (id, _, _, position) in ITEMS {
+                let cell = cell_at(&screen, &game, position);
+                assert_eq!(look_of(cell), (colour, Modifier::empty()), "{mode:?}: {id}");
+            }
+        }
+    }
+
+    #[test]
+    fn items_out_of_view_are_never_drawn_and_creatures_stand_over_items() {
+        let game = room_with_items();
+        assert_eq!(
+            game.visible_items().count(),
+            ITEMS.len() + 2,
+            "the three in a row, the one under the eye and the one underfoot"
+        );
+        for mode in MODES {
+            for glyph_set in GLYPH_SETS {
+                let theme = Theme::new(mode, glyph_set);
+                let screen = draw(&game, &theme);
+                let cell = |position| cell_at(&screen, &game, position);
+                let case = |what: &str| format!("{mode:?}, {glyph_set:?}: {what}");
+
+                assert_blank(cell(REMEMBERED_FLOOR), &theme, &case("remembered item"));
+                assert_blank(cell(UNKNOWN_FLOOR), &theme, &case("item never seen"));
+                assert_drawn(
+                    cell(ITEM_UNDER_MONSTER),
+                    'e',
+                    theme.monster_arcane,
+                    &case("the eye over its item"),
+                );
+                assert_drawn(
+                    cell(game.player_actor().position()),
+                    '@',
+                    theme.player,
+                    &case("the player over the item underfoot"),
+                );
+            }
+        }
     }
 
     #[test]

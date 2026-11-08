@@ -21,6 +21,14 @@
 //! `Action::Cast` (decision D19), so time passes once, for every stroke at
 //! once. A pure cast closes the overlay; an unstable or fizzled one shows
 //! its verdict until the next key.
+//!
+//! Items are picked up from the game screen (`g` or `,`) and handled in the
+//! inventory ([`State::Inventory`]): `i` opens it at no cost, the arrows and
+//! digits choose an item, Enter or `u` uses it, `d` drops it, Escape closes
+//! it. Using or dropping submits one action for the chosen item and goes
+//! back to the map, so the player sees at once what the monsters did in the
+//! meantime; a refusal of the game took no time and keeps the inventory
+//! open, with the reason under the list.
 
 use std::cell::Cell;
 
@@ -33,15 +41,17 @@ use sigilfall_core::content::{Content, SigilDef, Targeting};
 use sigilfall_core::event::Event as GameEvent;
 use sigilfall_core::game::Game;
 use sigilfall_core::geometry::Direction;
+use sigilfall_core::item::ItemId;
 use sigilfall_core::rng::Seed;
 use sigilfall_core::sigil::{CastQuality, ESSENCE_COST, Recognition, Trace, recognize};
 
 use crate::casting::{Casting, Drawing, Verdict};
-use crate::input::{self, AimCommand, Command, TraceCommand, VerdictCommand};
+use crate::input::{self, AimCommand, Command, InventoryCommand, TraceCommand, VerdictCommand};
 use crate::message_log::MessageLog;
 use crate::messages;
 use crate::theme::Theme;
-use crate::ui;
+use crate::ui::inventory::InventoryScreen;
+use crate::ui::{self, Overlay};
 
 /// The screen the application is on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +61,9 @@ pub enum State {
     /// The sigil overlay is open over the game: the player traces a sigil,
     /// chooses its direction or reads the verdict of a cast.
     Casting(Casting),
+    /// The inventory is open over the game: the player chooses an item to
+    /// use or drop.
+    Inventory(InventoryScreen),
     /// The player has died: the end screen is shown, the game takes no
     /// more actions and only the quit keys work.
     GameOver,
@@ -143,7 +156,9 @@ impl App {
     /// without any time passing, and what happened is added to the log
     /// (`messages::describe`). `t` opens the sigil overlay
     /// ([`State::Casting`]), whose keys are described at
-    /// [`App::handle_casting_key`]. If the player died, the application
+    /// [`App::handle_casting_key`]; `i` opens the inventory
+    /// ([`State::Inventory`]), whose keys are described at
+    /// [`App::handle_inventory_key`]. If the player died, the application
     /// moves to [`State::GameOver`], where game actions are ignored and only
     /// quitting works. Once the application has quit, keys are ignored.
     ///
@@ -156,6 +171,7 @@ impl App {
         match self.state {
             State::Quit => {}
             State::Casting(casting) => self.handle_casting_key(casting, key),
+            State::Inventory(screen) => self.handle_inventory_key(screen, key),
             State::Playing | State::GameOver => self.handle_game_key(key),
         }
     }
@@ -166,13 +182,80 @@ impl App {
         match input::command_for(key) {
             None => {}
             Some(Command::Quit) => self.state = State::Quit,
-            Some(Command::Act(_) | Command::Trace)
+            Some(Command::Act(_) | Command::Trace | Command::Inventory)
                 if self.state == State::GameOver || !self.game_is_visible() => {}
             Some(Command::Act(action)) => {
                 self.play(action);
             }
             Some(Command::Trace) => self.state = State::Casting(Casting::start()),
+            Some(Command::Inventory) => self.state = State::Inventory(InventoryScreen::open()),
         }
+    }
+
+    /// Reacts to `key` while the inventory shows `screen`
+    /// (`input::inventory_command_for`).
+    ///
+    /// The arrows, Home, End and the digits choose an item, which takes no
+    /// time; Escape closes the inventory, and no time passes either. Use
+    /// and Drop submit `Action::Use` or `Action::Drop` for the chosen item
+    /// (see [`App::act_on_item`]); with nothing carried they do nothing.
+    /// Ctrl+C quits. Below 80 × 24 nothing else works.
+    fn handle_inventory_key(&mut self, screen: InventoryScreen, key: KeyEvent) {
+        let carried = self.game.inventory().count();
+        let screen = match input::inventory_command_for(key) {
+            None => return,
+            Some(InventoryCommand::Quit) => {
+                self.state = State::Quit;
+                return;
+            }
+            Some(_) if !self.game_is_visible() => return,
+            Some(InventoryCommand::Close) => {
+                self.state = State::Playing;
+                return;
+            }
+            Some(InventoryCommand::Previous) => screen.previous(carried),
+            Some(InventoryCommand::Next) => screen.next(carried),
+            Some(InventoryCommand::First) => InventoryScreen::open(),
+            Some(InventoryCommand::Last) => InventoryScreen::last(carried),
+            Some(InventoryCommand::Slot(slot)) => screen.slot(slot, carried),
+            Some(InventoryCommand::Use) => return self.act_on_item(screen, Action::Use),
+            Some(InventoryCommand::Drop) => return self.act_on_item(screen, Action::Drop),
+        };
+        self.state = State::Inventory(screen);
+    }
+
+    /// Submits `action` (`Action::Use` or `Action::Drop`) for the item
+    /// `screen` has chosen, and logs what happened.
+    ///
+    /// When the action took time, the inventory closes: the player is back
+    /// on the map and sees what the monsters did meanwhile, and the end
+    /// screen follows if the player died. Dropping again at once could only
+    /// be refused, since a cell holds one item. When the game refused the
+    /// action ([`GameEvent::ItemRefused`]), no time passed and the
+    /// inventory stays open on the same item with the reason under the
+    /// list. With nothing carried, nothing is submitted.
+    fn act_on_item(&mut self, screen: InventoryScreen, action: fn(ItemId) -> Action) {
+        let carried = self.game.inventory().count();
+        let chosen = self
+            .game
+            .inventory()
+            .nth(screen.selected(carried))
+            .map(|(id, _)| id);
+        let Some(item) = chosen else {
+            return;
+        };
+        let events = self.play(action(item));
+        if self.state == State::GameOver {
+            return;
+        }
+        let refusal = events.iter().find_map(|event| match event {
+            GameEvent::ItemRefused { item, reason } => Some((*item, *reason)),
+            _ => None,
+        });
+        self.state = match refusal {
+            Some((item, reason)) => State::Inventory(screen.refused(item, reason)),
+            None => State::Playing,
+        };
     }
 
     /// Reacts to `key` while the sigil overlay shows `casting`.
@@ -304,15 +387,17 @@ impl App {
 
     /// Draws the active screen over the whole frame, with the application's
     /// theme: the game screen with its log, under the sigil overlay while
-    /// the player casts, or the end screen once the game is over.
+    /// the player casts or under the inventory while it is open, or the end
+    /// screen once the game is over.
     ///
     /// Any frame size is accepted: below 80 × 24 a message asks for a larger
     /// terminal instead (see `ui::render`). The frame's size is recorded, and
     /// decides whether [`App::handle_key`] plays game actions.
     pub fn render(&self, frame: &mut Frame) {
         self.screen_size.set(Some(frame.area().as_size()));
-        let casting = match &self.state {
-            State::Casting(casting) => Some(casting),
+        let overlay = match &self.state {
+            State::Casting(casting) => Some(Overlay::Casting(casting)),
+            State::Inventory(screen) => Some(Overlay::Inventory(screen)),
             State::Playing | State::GameOver | State::Quit => None,
         };
         ui::render(
@@ -320,7 +405,7 @@ impl App {
             &self.game,
             &self.log,
             &self.content,
-            casting,
+            overlay,
             &self.theme,
         );
     }
@@ -374,6 +459,8 @@ mod tests {
     use super::*;
     use crate::theme::{ColorMode, GlyphSet};
     use crate::ui::camera::Camera;
+
+    mod inventory_screen;
 
     /// Seed of every test game: its written form, `7F3A-91C2-0B5E-D4A8`,
     /// is the one of the game screen mock-up in `docs/design.md`.

@@ -9,8 +9,8 @@
 //! `docs/design.md`: a border down the left, "HP" with its value, the bar,
 //! "Essence" with its value, a blank row, "SIGILS" with the count known out
 //! of those that exist and their names, a blank row, then "IN VIEW" with
-//! the player, one line per kind of monster and one per kind of engraved
-//! glyph in view.
+//! the player, one line per kind of monster, one per kind of item and one
+//! per kind of engraved glyph in view.
 //!
 //! Health is never told by colour alone: the value is written out, the bar
 //! is drawn with two glyphs, and below a quarter the value is preceded by
@@ -292,9 +292,11 @@ struct Entry {
 
 /// The "in view" block in at most `rows` rows of `width` columns: its
 /// title, the player, then one entry per kind of monster in view, in the
-/// order of `Game::visible_monsters`, then the engraved glyphs in view,
+/// order of `Game::visible_monsters`, then one per kind of item in view, in
+/// the order of `Game::visible_items`, then the engraved glyphs in view,
 /// unread ones first, with "×2" after the name when several of a kind are
-/// in view.
+/// in view. Monsters come first since they threaten the player; items, which
+/// the player may pick up, come before the glyphs, as in the mock-up.
 fn in_view_block(
     game: &Game,
     content: &Content,
@@ -327,6 +329,24 @@ fn in_view_block(
             glyph_style: style,
             name: counted_name(name, count, name_width, theme.glyphs.dimension),
         }
+    }));
+    let mut items: Vec<(&str, char, usize)> = Vec::new();
+    for item in game.visible_items() {
+        if let Some(kind) = items.iter_mut().find(|kind| kind.0 == item.definition) {
+            kind.2 += 1;
+        } else {
+            items.push((item.definition, theme.glyphs.item(item.family), 1));
+        }
+    }
+    entries.extend(items.into_iter().map(|(definition, glyph, count)| Entry {
+        glyph,
+        glyph_style: theme.item,
+        name: counted_name(
+            messages::item_name(content, definition),
+            count,
+            name_width,
+            theme.glyphs.dimension,
+        ),
     }));
     let (read, unread): (Vec<_>, Vec<_>) = game
         .engravings()
@@ -485,6 +505,43 @@ mod tests {
         assert_eq!(
             texts(&lines),
             ["IN VIEW", "@ you", "v rat ×2", "e eye", "s shade"]
+        );
+    }
+
+    #[test]
+    fn items_in_view_follow_the_monsters_grouped_by_kind() {
+        // The test monsters come with the shipped items (`Content::parse`).
+        let (mut game, content) = crowded_room();
+        let draught = content.item("healing_draught").unwrap();
+        let ink = content.item("steadying_ink").unwrap();
+        for (definition, x) in [(draught, 3), (ink, 4), (draught, 6)] {
+            game.place_item(Position::new(x, PLAYER_START.y + 1), definition);
+        }
+        let theme = Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode);
+
+        let lines = in_view_block(&game, &content, 10, 19, &theme);
+
+        assert_eq!(
+            texts(&lines),
+            [
+                "IN VIEW",
+                "@ you",
+                "v rat ×2",
+                "e eye",
+                "s shade",
+                "¡ Healing Draugh ×2",
+                "♦ Steadying Ink",
+            ]
+        );
+        let ascii = Theme::new(ColorMode::Monochrome, GlyphSet::Ascii);
+        let lines = in_view_block(&game, &content, 10, 19, &ascii);
+        assert_eq!(
+            texts(&lines)[5..],
+            ["! Healing Draugh x2", "* Steadying Ink"]
+        );
+        assert_eq!(
+            lines[5].spans[0].style, ascii.item,
+            "glyph in the item token"
         );
     }
 

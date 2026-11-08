@@ -186,8 +186,9 @@ fn sigil_name(game: &Game, index: usize) -> &str {
 
 /// Clears `frame` to the panel background and draws its rounded border
 /// (`border`), with `title` (`text_title`) on the top edge after one
-/// stroke, as in the mock-up: "╭─ Trace a sigil ──╮".
-fn draw_frame(buffer: &mut Buffer, frame: Rect, title: &str, theme: &Theme) {
+/// stroke, as in the mock-up: "╭─ Trace a sigil ──╮". The inventory
+/// (`ui::inventory`) draws its frame the same way.
+pub(super) fn draw_frame(buffer: &mut Buffer, frame: Rect, title: &str, theme: &Theme) {
     let glyphs = &theme.glyphs;
     for y in frame.top()..frame.bottom() {
         for x in frame.left()..frame.right() {
@@ -409,7 +410,7 @@ fn info_area(inner: Rect) -> Rect {
 }
 
 /// Writes `lines` one per row of `area`, from its top, as far as it goes.
-fn draw_lines(buffer: &mut Buffer, area: Rect, lines: Vec<Line<'static>>) {
+pub(super) fn draw_lines(buffer: &mut Buffer, area: Rect, lines: Vec<Line<'static>>) {
     for (offset, line) in (0..area.height).zip(lines) {
         line.render(
             Rect {

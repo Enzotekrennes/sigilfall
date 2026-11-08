@@ -23,7 +23,7 @@ const AMBIENT_TOKENS: [&str; 6] = [
 ];
 
 /// Tokens also drawn on `bg_panel` (marked ᴾ in `docs/design.md`).
-const PANEL_TOKENS: [&str; 9] = [
+const PANEL_TOKENS: [&str; 10] = [
     "text",
     "text_muted",
     "text_title",
@@ -33,7 +33,12 @@ const PANEL_TOKENS: [&str; 9] = [
     "sigil_cursor",
     "sigil_unstable",
     "sigil_failed",
+    "item",
 ];
+
+/// Tokens drawn on the selected line of a list (the inventory), over
+/// `bg_selection`: its text, its caption and the glyph of its item.
+const SELECTION_TOKENS: [&str; 3] = ["text", "text_muted", "item"];
 
 /// Every foreground token of `theme`, with its name.
 fn foreground_tokens(theme: &Theme) -> [(&'static str, Style); 30] {
@@ -254,26 +259,47 @@ fn contrast_formula_matches_the_figures_of_the_design() {
     assert_eq!(ratio(ansi.item, ansi.bg), 4.95);
 }
 
+/// Checks that every token of [`SELECTION_TOKENS`] reaches the text
+/// minimum on `bg_selection`.
+fn assert_selection_contrasts(theme: &Theme) {
+    let selection = theme
+        .bg_selection
+        .bg
+        .expect("bg_selection sets a background");
+    for (name, style) in foreground_tokens(theme) {
+        if SELECTION_TOKENS.contains(&name) {
+            let ratio = contrast(style.fg.unwrap(), selection);
+            assert!(ratio >= TEXT_CONTRAST, "{name} on bg_selection: {ratio:.2}");
+        }
+    }
+}
+
 #[test]
 fn dark_true_colour_tokens_reach_aa_contrast() {
     let theme = theme(ColorMode::TrueColorDark);
     assert_contrasts(&theme);
-    let selection = contrast(theme.text.fg.unwrap(), theme.bg_selection.bg.unwrap());
-    assert!(
-        selection >= TEXT_CONTRAST,
-        "text on bg_selection: {selection:.2}"
-    );
+    assert_selection_contrasts(&theme);
 }
 
 #[test]
 fn light_true_colour_tokens_reach_aa_contrast() {
     let theme = theme(ColorMode::TrueColorLight);
     assert_contrasts(&theme);
-    let selection = contrast(theme.text.fg.unwrap(), theme.bg_selection.bg.unwrap());
-    assert!(
-        selection >= TEXT_CONTRAST,
-        "text on bg_selection: {selection:.2}"
-    );
+    assert_selection_contrasts(&theme);
+}
+
+#[test]
+fn the_selection_figures_of_the_design_hold() {
+    // "bg_selection" paragraph of docs/design.md: the lowest ratios of the
+    // selected line, in the light theme.
+    let light = theme(ColorMode::TrueColorLight);
+    let on_selection = |token: Style| {
+        let ratio = contrast(token.fg.unwrap(), light.bg_selection.bg.unwrap());
+        (ratio * 100.0).round() / 100.0
+    };
+
+    assert_eq!(on_selection(light.item), 4.73);
+    assert_eq!(on_selection(light.text_muted), 4.53);
 }
 
 #[test]

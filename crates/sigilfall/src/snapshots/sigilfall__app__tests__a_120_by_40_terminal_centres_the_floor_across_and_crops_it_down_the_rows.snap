@@ -41,4 +41,4 @@ expression: terminal.backend()
 "                                                                                                                        "
 "                                                                                                                        "
 "                                                                                                                        "
-" ←↑→↓/1-9 move   . wait   t trace   q quit                                                                              "
+" ←↑→↓/1-9 move   . wait   t trace   g pick up   i inventory   q quit                                                    "

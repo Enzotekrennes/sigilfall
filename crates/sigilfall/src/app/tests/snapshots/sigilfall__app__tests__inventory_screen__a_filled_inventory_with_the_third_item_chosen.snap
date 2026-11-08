@@ -1,0 +1,28 @@
+---
+source: crates/sigilfall/src/app/tests/inventory_screen.rs
+expression: text(&app)
+---
+" Turn 6                                                Seed 7F3A-91C2-0B5E-D4A8 "
+"╭─ Inventory ──────────────────────────────────── 5/10 ─╮ │ HP            30/30 "
+"│                                                       │ │ ██████████████████  "
+"│   1  ¡ Healing Draught   heal 10 HP                   │ │ Essence         6/6 "
+"│   2  ¡ Essence Phial     restore 4 essence            │ │                     "
+"│ › 3  ♦ Steadying Ink     steady 2 casts               │ │ SIGILS          0/5 "
+"│   4  ¶ Page of the Veil  teach Veil                   │ │ none yet            "
+"│   5  ¡ Healing Draught   heal 10 HP                   │ │                     "
+"│                                                       │ │ IN VIEW             "
+"│                                                       │ │ @ you               "
+"│                                                       │ │                     "
+"│                                                       │ │                     "
+"│                                                       │ │                     "
+"│                                                       │ │                     "
+"│                                                       │ │                     "
+"╰───────────────────────────────────────────────────────╯ │                     "
+"                                                          │                     "
+"─ Log ────────────────────────────────────────────────────┴─────────────────────"
+"   You enter the dungeon.                                                       "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+" ↑↓/1-0 choose   Enter/u use   d drop   Esc close                               "

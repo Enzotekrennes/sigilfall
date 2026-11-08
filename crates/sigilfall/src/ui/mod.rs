@@ -1,11 +1,12 @@
 //! Screens of the game, drawn with ratatui from read-only game state.
 //!
 //! Exposes [`render`], which picks what to draw for the current terminal
-//! size and the state of the game, one module per screen ([`game`] while
-//! playing, [`death`] once the player has died), the parts of the game
-//! screen ([`hud`], the side panel, [`log`], the message log, and
-//! [`sigil`], the overlay where sigils are traced, with its [`grimoire`])
-//! and the [`camera`] that decides which part of the map is seen. Drawing never
+//! size and the state of the game, the [`Overlay`] drawn over the map, one
+//! module per screen ([`game`] while playing, [`death`] once the player has
+//! died), the parts of the game screen ([`hud`], the side panel, [`log`],
+//! the message log, [`sigil`], the overlay where sigils are traced, with
+//! its [`grimoire`], and [`inventory`], the overlay of what the player
+//! carries) and the [`camera`] that decides which part of the map is seen. Drawing never
 //! changes the game and never touches the real terminal: it fills a
 //! [`Frame`], so every screen can be rendered into a test backend. Every
 //! colour and glyph comes from the [`Theme`] passed in.
@@ -15,6 +16,7 @@ pub mod death;
 pub mod game;
 pub mod grimoire;
 pub mod hud;
+pub mod inventory;
 pub mod log;
 pub mod sigil;
 
@@ -24,9 +26,20 @@ use ratatui::widgets::{Paragraph, Wrap};
 use sigilfall_core::content::Content;
 use sigilfall_core::game::Game;
 
+use self::inventory::InventoryScreen;
 use crate::casting::Casting;
 use crate::message_log::MessageLog;
 use crate::theme::Theme;
+
+/// What covers the map of the game screen, if anything: the side panel
+/// and the log stay in view under both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Overlay<'state> {
+    /// The sigil overlay, at this step of the cast.
+    Casting(&'state Casting),
+    /// The inventory, in this state.
+    Inventory(&'state InventoryScreen),
+}
 
 /// Smallest terminal width, in columns, the game screen is laid out for.
 ///
@@ -48,9 +61,10 @@ pub const fn fits(size: Size) -> bool {
 }
 
 /// Draws the screen for `game` over the whole frame, with `theme`: the game
-/// screen with the messages of `log` while the game is played, with the
-/// sigil overlay of `casting` over its map while the player casts, and the
-/// end screen once the game is over. Monster names come from `content`.
+/// screen with the messages of `log` while the game is played, with
+/// `overlay` over its map while the player casts or looks at the
+/// inventory, and the end screen once the game is over. Monster and sigil
+/// names come from `content`.
 ///
 /// The theme's background is painted on every cell first. When the frame
 /// is smaller than [`MIN_WIDTH`] × [`MIN_HEIGHT`], a message asking for a
@@ -62,7 +76,7 @@ pub fn render(
     game: &Game,
     log: &MessageLog,
     content: &Content,
-    casting: Option<&Casting>,
+    overlay: Option<Overlay<'_>>,
     theme: &Theme,
 ) {
     let area = frame.area();
@@ -72,7 +86,7 @@ pub fn render(
     } else if game.is_over() {
         death::render(frame, area, game, log, content, theme);
     } else {
-        game::render(frame, area, game, log, content, casting, theme);
+        game::render(frame, area, game, log, content, overlay, theme);
     }
 }
 

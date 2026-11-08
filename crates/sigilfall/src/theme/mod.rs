@@ -310,7 +310,7 @@ impl Theme {
             player: fg(0x7A4E00).add_modifier(Modifier::BOLD),
             monster_hostile: fg(0xA82C1A),
             monster_arcane: fg(0x6A3FB0),
-            item: fg(0x255C8C),
+            item: fg(0x215685),
             sigil_node: fg(0x857868),
             sigil_stroke: fg(0x0B6E58),
             sigil_cursor: fg(0x7A4E00).add_modifier(Modifier::BOLD),

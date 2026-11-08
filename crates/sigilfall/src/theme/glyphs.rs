@@ -4,15 +4,18 @@
 //! Exposes [`GlyphSet`] and [`Glyphs`]. The values come from section
 //! "Glyphes" of `docs/design.md`; every Unicode glyph there is present in
 //! Cascadia Mono, the default font of Windows Terminal. Only the glyphs of
-//! elements the game already has are listed: the others (arches, items)
-//! join this table with the tasks that bring them to the screen.
+//! elements the game already has are listed: the others (arches, weapons,
+//! talismans) join this table with the tasks that bring them to the screen.
+//!
+//! Items are drawn with the glyph of their family ([`Glyphs::item`]), so a
+//! vial, a page and a catalyst tell apart without colour.
 //!
 //! Creatures are drawn with the letter of their family, lower case for the
 //! common form and upper case for the elite one ([`Glyphs::creature`]).
 //! These letters are plain ASCII, so they are the same in both sets, and
 //! they alone tell the families apart when the terminal shows no colour.
 
-use sigilfall_core::content::Family;
+use sigilfall_core::content::{Family, ItemFamily};
 
 /// Which character set to draw with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,6 +106,16 @@ pub struct Glyphs {
     /// Separator inside a line of text, as between the nodes of a pattern
     /// ("7·5·3") or between two facts: `·`, or `-` in ASCII.
     pub separator: char,
+    /// Item of the vial family, a draught to drink: `¡`, or `!` in ASCII.
+    pub vial: char,
+    /// Item of the page family, torn from a grimoire: `¶`, or `?` in ASCII.
+    pub page: char,
+    /// Item of the catalyst family, an aid to casting: `♦`, or `*` in
+    /// ASCII.
+    pub catalyst: char,
+    /// Marker of the selected line of a list, always shown on the
+    /// `bg_selection` background as well: `›`, or `>` in ASCII.
+    pub selection: char,
 }
 
 impl Glyphs {
@@ -145,6 +158,10 @@ impl Glyphs {
                 frame_bottom_left: '╰',
                 frame_bottom_right: '╯',
                 separator: '·',
+                vial: '¡',
+                page: '¶',
+                catalyst: '♦',
+                selection: '›',
             },
             GlyphSet::Ascii => Self {
                 floor: '.',
@@ -182,6 +199,10 @@ impl Glyphs {
                 frame_bottom_left: '+',
                 frame_bottom_right: '+',
                 separator: '-',
+                vial: '!',
+                page: '?',
+                catalyst: '*',
+                selection: '>',
             },
         }
     }
@@ -204,6 +225,16 @@ impl Glyphs {
         }
     }
 
+    /// Returns the glyph an item of `family` is drawn with, on the map, in
+    /// the side panel and in the inventory (`docs/design.md`, "Objets").
+    pub const fn item(&self, family: ItemFamily) -> char {
+        match family {
+            ItemFamily::Vial => self.vial,
+            ItemFamily::Page => self.page,
+            ItemFamily::Catalyst => self.catalyst,
+        }
+    }
+
     /// Returns the four movement arrows as one key name, in the order
     /// left, up, right, down (`←↑→↓`), as the key help shows them.
     pub fn arrows(&self) -> String {
@@ -223,7 +254,7 @@ mod tests {
     use super::*;
 
     /// Every glyph of `glyphs`, with its field name for failure messages.
-    fn all(glyphs: Glyphs) -> [(&'static str, char); 35] {
+    fn all(glyphs: Glyphs) -> [(&'static str, char); 39] {
         [
             ("floor", glyphs.floor),
             ("wall", glyphs.wall),
@@ -260,6 +291,10 @@ mod tests {
             ("frame_bottom_left", glyphs.frame_bottom_left),
             ("frame_bottom_right", glyphs.frame_bottom_right),
             ("separator", glyphs.separator),
+            ("vial", glyphs.vial),
+            ("page", glyphs.page),
+            ("catalyst", glyphs.catalyst),
+            ("selection", glyphs.selection),
         ]
     }
 
@@ -303,6 +338,10 @@ mod tests {
             ("frame_bottom_left", '\u{2570}'),
             ("frame_bottom_right", '\u{256F}'),
             ("separator", '\u{00B7}'),
+            ("vial", '\u{00A1}'),
+            ("page", '\u{00B6}'),
+            ("catalyst", '\u{2666}'),
+            ("selection", '\u{203A}'),
         ];
         assert_eq!(all(glyphs), expected);
     }
@@ -323,6 +362,20 @@ mod tests {
         Family::Spectre,
     ];
 
+    /// The item families the content has, in the order of
+    /// `docs/design.md`.
+    const ITEM_FAMILIES: [ItemFamily; 3] =
+        [ItemFamily::Vial, ItemFamily::Page, ItemFamily::Catalyst];
+
+    #[test]
+    fn items_take_the_glyph_of_their_family() {
+        let unicode = Glyphs::new(GlyphSet::Unicode);
+        let ascii = Glyphs::new(GlyphSet::Ascii);
+
+        assert_eq!(ITEM_FAMILIES.map(|f| unicode.item(f)), ['¡', '¶', '♦']);
+        assert_eq!(ITEM_FAMILIES.map(|f| ascii.item(f)), ['!', '?', '*']);
+    }
+
     #[test]
     fn map_glyphs_are_distinct_in_both_sets() {
         for set in [GlyphSet::Unicode, GlyphSet::Ascii] {
@@ -335,6 +388,7 @@ mod tests {
                 glyphs.engraving_unread,
                 glyphs.engraving_read,
             ];
+            map.extend(ITEM_FAMILIES.map(|family| glyphs.item(family)));
             for family in FAMILIES {
                 map.push(glyphs.creature(family, false));
                 map.push(glyphs.creature(family, true));

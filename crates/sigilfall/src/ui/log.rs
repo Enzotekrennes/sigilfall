@@ -143,8 +143,8 @@ const fn tone_look(tone: Tone, theme: &Theme) -> (char, Style) {
 /// Splits `text` into lines of at most `width` characters, breaking
 /// between words; a word longer than `width` is cut. Runs of spaces count
 /// as one break. Returns one empty line for an empty text, and no line is
-/// ever empty otherwise.
-fn wrap(text: &str, width: usize) -> Vec<String> {
+/// ever empty otherwise. The inventory wraps its notices with it too.
+pub(super) fn wrap(text: &str, width: usize) -> Vec<String> {
     let width = width.max(1);
     let mut lines = Vec::new();
     let mut current = String::new();
