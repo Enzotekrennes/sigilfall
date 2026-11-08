@@ -14,6 +14,7 @@ use anyhow::Context as _;
 use ratatui::crossterm::event::{self, Event, KeyEvent};
 use ratatui::layout::Size;
 use ratatui::{DefaultTerminal, Frame};
+use sigilfall_core::content::Content;
 use sigilfall_core::game::Game;
 use sigilfall_core::rng::Seed;
 
@@ -50,10 +51,11 @@ pub struct App {
 
 impl App {
     /// Starts the application on a new game of the run identified by
-    /// `seed`, in [`State::Playing`], drawn with `theme`.
-    pub fn new(theme: Theme, seed: Seed) -> Self {
+    /// `seed`, peopled from `content`, in [`State::Playing`], drawn with
+    /// `theme`.
+    pub fn new(theme: Theme, seed: Seed, content: &Content) -> Self {
         Self {
-            game: Game::new(seed),
+            game: Game::new(seed, content),
             state: State::Playing,
             theme,
             screen_size: Cell::new(None),
@@ -365,11 +367,13 @@ mod tests {
     }
 
     /// A new application on the generated first floor of [`SEED`], in the
-    /// default mode of Windows Terminal (see [`new_app`]).
+    /// default mode of Windows Terminal (see [`new_app`]), without its
+    /// monsters: these tests walk the floor, and a monster in the way would
+    /// refuse the player's moves.
     fn generated_floor_app() -> App {
-        App::new(
+        App::with_game(
             Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode),
-            SEED,
+            Game::on_floor(SEED, generation::generate(SEED, FIRST_DEPTH)),
         )
     }
 
@@ -414,8 +418,15 @@ mod tests {
         let mut origins = vec![start_origin];
 
         while to_stairs.distance(player_position(&app)) > Some(2) {
+            let before = to_stairs.distance(player_position(&app));
             let direction = to_stairs.downhill(player_position(&app)).unwrap();
             app.handle_key(press(vi_key(direction)));
+            // Each step must bring the player closer, which also bounds the
+            // loop: a refused move fails here instead of looping forever.
+            assert!(
+                to_stairs.distance(player_position(&app)) < before,
+                "the move {direction:?} was refused"
+            );
             let buffer = render(&app, 80, 24).backend().buffer().clone();
             let camera = camera(&app, 80, 24);
             let player = camera.screen_position(player_position(&app));

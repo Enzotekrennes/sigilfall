@@ -145,11 +145,12 @@ fn scheduled_mut(actors: &mut SlotMap<ActorId, Actor>, id: ActorId) -> &mut Acto
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::actor::ActorKind;
     use crate::geometry::{Direction, Position};
 
     /// Creates an actor of the given speed, stores it and enrols it.
     fn add(actors: &mut SlotMap<ActorId, Actor>, scheduler: &mut Scheduler, speed: i32) -> ActorId {
-        let id = actors.insert(Actor::new(Position::new(1, 1), speed));
+        let id = actors.insert(Actor::new(Position::new(1, 1), speed, ActorKind::Player));
         scheduler.enrol(id);
         id
     }
@@ -221,7 +222,11 @@ mod tests {
         let mut scheduler = Scheduler::default();
         // Free the first slot so the next insertion reuses it: slot order
         // and creation order now disagree.
-        let removed = actors.insert(Actor::new(Position::new(1, 1), NORMAL_SPEED));
+        let removed = actors.insert(Actor::new(
+            Position::new(1, 1),
+            NORMAL_SPEED,
+            ActorKind::Player,
+        ));
         let older = add(&mut actors, &mut scheduler, NORMAL_SPEED);
         actors.remove(removed);
         let newer = add(&mut actors, &mut scheduler, NORMAL_SPEED);
@@ -254,7 +259,7 @@ mod tests {
             ACTION_THRESHOLD
         );
 
-        let mut actor = Actor::new(Position::new(1, 1), NORMAL_SPEED);
+        let mut actor = Actor::new(Position::new(1, 1), NORMAL_SPEED, ActorKind::Player);
         spend_energy(&mut actor, Action::Move(Direction::East));
         assert_eq!(actor.energy(), -MOVE_COST);
     }

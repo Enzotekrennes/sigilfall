@@ -1,18 +1,21 @@
 //! Reachability and distance computations on a [`Map`](crate::map::Map).
 //!
 //! Exposes [`flood_fill`], the set of cells reachable from a starting cell,
-//! and [`DijkstraMap`], step distances from one or more goals with the
-//! farthest cell and the way downhill towards the nearest goal.
+//! [`DijkstraMap`], step distances from one or more goals with the farthest
+//! cell and the way downhill towards the nearest goal, and [`find_path`], a
+//! shortest walk between two given cells (A*).
 //!
 //! Every computation moves in the eight directions and asks
 //! [`Map::can_step`](crate::map::Map::can_step) whether a step is allowed,
 //! the same rule as actor movement: a cell is reachable here exactly when an
-//! actor could walk to it. Shortest paths between two given cells (A*) are
-//! not handled here.
+//! actor could walk to it. Only [`find_path`] knows that other actors may
+//! stand in the way, through a predicate given by its caller.
 
+mod astar;
 mod dijkstra;
 mod flood;
 
+pub use astar::find_path;
 pub use dijkstra::{DijkstraMap, STEP_COST};
 pub use flood::flood_fill;
 

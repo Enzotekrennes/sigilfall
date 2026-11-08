@@ -7,6 +7,7 @@
 
 pub mod action;
 pub mod actor;
+pub mod ai;
 pub mod content;
 pub mod event;
 pub mod fov;

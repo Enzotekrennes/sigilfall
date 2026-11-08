@@ -1,24 +1,27 @@
 //! A game in progress and its single entry point, [`Game::submit`].
 //!
-//! Exposes [`Game`] and [`PLAYER_START`]. The game owns the run's seed, the
-//! map, the actors and the scheduler. A new game starts on the first
-//! generated floor of its seed (see the `generation` module). The player's
-//! action is applied, then the other actors take their turns until the
-//! player may act again, and everything that happened is returned as
-//! [`Event`]s. The game produces no text and draws nothing.
+//! Exposes [`Game`], [`VisibleMonster`] and [`PLAYER_START`]. The game owns
+//! the run's seed, the map, the actors and the scheduler. A new game starts
+//! on the first generated floor of its seed, with its monsters (see the
+//! `generation` module). The player's action is applied, then the other
+//! actors take their turns until the player may act again, and everything
+//! that happened is returned as [`Event`]s. The game produces no text and
+//! draws nothing.
 //!
 //! The game also keeps the player's field of view up to date: it is computed
 //! when the game starts and again after each action of the player, and the
-//! cells seen are remembered on the map. Going down the stairs is not handled
-//! yet.
+//! cells seen are remembered on the map. Monsters choose their actions with
+//! the `ai` module. Going down the stairs is not handled yet.
 
 use slotmap::SlotMap;
 
 use crate::action::{self, Action, ActionOutcome};
-use crate::actor::{Actor, ActorId};
+use crate::actor::{Actor, ActorId, ActorKind};
+use crate::ai;
+use crate::content::{Content, Family, MonsterDef};
 use crate::event::Event;
 use crate::fov::{self, SIGHT_RADIUS};
-use crate::generation::{self, FIRST_DEPTH};
+use crate::generation::{self, FIRST_DEPTH, Floor, MonsterSpawn};
 use crate::geometry::Position;
 use crate::map::Map;
 use crate::rng::Seed;
@@ -51,16 +54,55 @@ pub struct Game {
     player_turns: u64,
 }
 
+/// A monster the player sees right now, as the binary needs it to draw it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VisibleMonster<'game> {
+    /// Key of the monster's actor.
+    pub id: ActorId,
+    /// Cell the monster stands on; always visible to the player.
+    pub position: Position,
+    /// Identifier of the monster's definition in the content files.
+    pub definition: &'game str,
+    /// Family of the monster, which gives its letter.
+    pub family: Family,
+    /// Whether the monster is the elite form of its family (upper-case
+    /// letter).
+    pub elite: bool,
+}
+
 impl Game {
     /// Starts a game of the run identified by `seed`, on its first floor
-    /// (`generation::generate(seed, FIRST_DEPTH)`), with the player on that
-    /// floor's start cell, moving at normal speed, and no other actor.
+    /// (`generation::generate_with_monsters(seed, FIRST_DEPTH, content)`),
+    /// with the player on that floor's start cell, moving at normal speed,
+    /// and the floor's monsters.
     ///
-    /// The same seed always gives the same floor. Time is advanced until the
-    /// player's first turn, so [`Game::submit`] can be called right away.
-    pub fn new(seed: Seed) -> Self {
-        let floor = generation::generate(seed, FIRST_DEPTH);
-        Self::start(seed, floor.map, floor.start)
+    /// `content` is the validated game data, normally `Content::load()`; the
+    /// monsters are drawn from its spawn table for the first floor. The
+    /// player is created first, so it acts before the monsters on ties, then
+    /// the monsters in the order they were drawn, each with the starting
+    /// energy chosen by the generation (`MonsterSpawn::energy`).
+    ///
+    /// The same seed and content always give the same floor and monsters.
+    /// Time is advanced until the player's first turn, so [`Game::submit`]
+    /// can be called right away; no monster has acted yet.
+    pub fn new(seed: Seed, content: &Content) -> Self {
+        Self::on_floor(
+            seed,
+            generation::generate_with_monsters(seed, FIRST_DEPTH, content),
+        )
+    }
+
+    /// Starts a game of the run identified by `seed` on `floor`, with the
+    /// player on its start cell and one monster per entry of
+    /// `Floor::monsters`, created in that order with their starting energy.
+    ///
+    /// [`Game::new`] is this function on the first floor of the seed with
+    /// its monsters. Given a floor from `generation::generate`, which places
+    /// none, the player is alone: tests of movement, sight or the camera use
+    /// that to walk a generated floor without a monster in the way. Time is
+    /// advanced until the player's first turn.
+    pub fn on_floor(seed: Seed, floor: Floor) -> Self {
+        Self::start(seed, floor.map, floor.start, &floor.monsters)
     }
 
     /// Starts a game of the run identified by `seed` in the hand-made room of
@@ -69,21 +111,31 @@ impl Game {
     ///
     /// The room never changes, whatever the seed, which makes it the ground
     /// of tests that need known walls and distances. The seed is only kept
-    /// (see [`Game::seed`]).
+    /// (see [`Game::seed`]). Monsters can be added with
+    /// [`Game::spawn_monster`].
     pub fn in_fixed_room(seed: Seed) -> Self {
-        Self::start(seed, Map::fixed_room(), PLAYER_START)
+        Self::start(seed, Map::fixed_room(), PLAYER_START, &[])
     }
 
-    /// Starts a game on `map` with the player alone at `start`, at normal
-    /// speed, computes what the player sees from there and runs the clock to
-    /// the player's first turn.
+    /// Starts a game on `map` with the player at `start`, at normal speed,
+    /// and one monster per entry of `monsters`, computes what the player
+    /// sees from there and runs the clock to the player's first turn.
     ///
-    /// `start` is expected to be walkable; both callers guarantee it.
-    fn start(seed: Seed, map: Map, start: Position) -> Self {
+    /// `start` and the monster cells are expected to be distinct walkable
+    /// cells; the callers guarantee it.
+    fn start(seed: Seed, map: Map, start: Position, monsters: &[MonsterSpawn]) -> Self {
         let mut actors = SlotMap::with_key();
-        let player = actors.insert(Actor::new(start, NORMAL_SPEED));
+        let player = actors.insert(Actor::new(start, NORMAL_SPEED, ActorKind::Player));
         let mut scheduler = Scheduler::default();
         scheduler.enrol(player);
+        for spawn in monsters {
+            let monster = actors.insert(Actor::monster(
+                spawn.position(),
+                spawn.definition(),
+                spawn.energy(),
+            ));
+            scheduler.enrol(monster);
+        }
 
         let mut game = Self {
             seed,
@@ -94,31 +146,34 @@ impl Game {
             player_turns: 0,
         };
         game.update_field_of_view();
-        // Only the player exists, so no event can be produced here.
+        // The player is first in turn order and every monster starts below
+        // the action threshold, so the player is the first actor ready and
+        // no event can be produced here.
         game.run_until_player_turn(&mut Vec::new());
         game
     }
 
-    /// Places a new non-player actor at `position` with the given `speed`
-    /// (energy per tick, see `schedule::NORMAL_SPEED`) and returns its key.
+    /// Places a new monster of kind `definition` at `position` and returns
+    /// its key.
     ///
-    /// The actor starts with no energy and takes turns after every actor
-    /// created before it when they are ready at the same time. It is still
-    /// the player's turn afterwards.
+    /// Unlike the monsters of a generated floor, it starts with no energy,
+    /// so its first turn comes after the player's next action, and it takes
+    /// turns after every actor created before it when they are ready at the
+    /// same time. It has no memory of the player. It is still the player's
+    /// turn afterwards.
     ///
     /// # Panics
     ///
-    /// Panics if `position` is not walkable or already holds an actor, or if
-    /// `speed` is not positive: placing an actor there is a bug in the
-    /// calling code.
-    pub fn spawn_actor(&mut self, position: Position, speed: i32) -> ActorId {
+    /// Panics if `position` is not walkable or already holds an actor:
+    /// placing a monster there is a bug in the calling code.
+    pub fn spawn_monster(&mut self, position: Position, definition: &MonsterDef) -> ActorId {
         assert!(
             self.map.is_walkable(position) && self.actor_at(position).is_none(),
             "cannot spawn an actor at ({}, {}): the cell is not free floor",
             position.x,
             position.y
         );
-        let id = self.actors.insert(Actor::new(position, speed));
+        let id = self.actors.insert(Actor::monster(position, definition, 0));
         self.scheduler.enrol(id);
         id
     }
@@ -171,11 +226,33 @@ impl Game {
         self.actors.get(id)
     }
 
-    /// Iterates over every actor, the player included, with its key.
+    /// Iterates over every actor, the player included, with its key,
+    /// whether the player sees it or not.
     ///
-    /// The order is stable between calls but is not the turn order.
+    /// The order is stable between calls but is not the turn order. To draw
+    /// the map, use [`Game::visible_monsters`], which hides what the player
+    /// cannot see.
     pub fn actors(&self) -> impl Iterator<Item = (ActorId, &Actor)> {
         self.actors.iter()
+    }
+
+    /// Iterates over the monsters standing on a cell the player sees right
+    /// now (see [`Game::is_visible`]), with what is needed to draw them.
+    ///
+    /// A monster out of the player's field of view is never listed, even on
+    /// a remembered cell. The order is stable between calls, like
+    /// [`Game::actors`].
+    pub fn visible_monsters(&self) -> impl Iterator<Item = VisibleMonster<'_>> {
+        self.actors.iter().filter_map(|(id, actor)| {
+            let monster = actor.as_monster()?;
+            self.map.is_visible(actor.position).then(|| VisibleMonster {
+                id,
+                position: actor.position,
+                definition: monster.definition(),
+                family: monster.family(),
+                elite: monster.elite(),
+            })
+        })
     }
 
     /// Returns the number of ticks elapsed since the game started.
@@ -250,12 +327,38 @@ impl Game {
         }
     }
 
-    /// Chooses the action of a non-player actor whose turn it is.
+    /// Chooses the action of the non-player actor `id`, whose turn it is,
+    /// and updates its memory of the player.
     ///
-    /// Actors have no behaviour yet, so they always wait. Monster behaviour will
-    /// replace this choice.
-    const fn non_player_action(&self, _actor: ActorId) -> Action {
-        Action::Wait
+    /// Monsters follow `ai::choose_action`. A monster sees as far as the
+    /// player does, and sight between two floor cells is symmetric
+    /// (decision D15, `fov` module), so the monster sees the player exactly
+    /// when the player's field of view, computed after the player's last
+    /// action, holds the monster's cell. Other actors count as obstacles on
+    /// the way.
+    fn non_player_action(&mut self, id: ActorId) -> Action {
+        let player = self.actors[self.player].position;
+        let actor = &self.actors[id];
+        let Some(monster) = actor.as_monster() else {
+            return Action::Wait;
+        };
+        let position = actor.position;
+        let sees_player = self.map.is_visible(position);
+        let mut last_seen = monster.last_seen_player;
+
+        let action = ai::choose_action(
+            &self.map,
+            position,
+            player,
+            sees_player,
+            &mut last_seen,
+            |cell| self.actor_at(cell).is_some(),
+        );
+
+        if let ActorKind::Monster(monster) = &mut self.actors[id].kind {
+            monster.last_seen_player = last_seen;
+        }
+        action
     }
 
     /// Applies `action` for actor `id` and appends the resulting event to
@@ -308,17 +411,56 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::generation::MONSTERS_PER_FLOOR;
     use crate::geometry::Direction;
     use crate::map::Tile;
     use crate::path::DijkstraMap;
+    use crate::path::test_maps::from_rows;
     use crate::schedule::ACTION_THRESHOLD;
 
     /// Seed of every test game; the fixed room does not depend on it.
     const SEED: Seed = Seed::new(42);
 
+    /// Cells of the fixed room out of the player's sight from
+    /// [`PLAYER_START`] (more than eight cells away), where monsters wait
+    /// unseen as long as the player stays near the left wall.
+    const FAR_CELLS: [Position; 2] = [Position::new(25, 3), Position::new(27, 8)];
+
     /// A new game in the fixed room, the ground of most tests here.
     fn fixed_room_game() -> Game {
         Game::in_fixed_room(SEED)
+    }
+
+    /// The content shipped with the game.
+    fn content() -> Content {
+        Content::load().expect("the shipped content is valid")
+    }
+
+    /// A monster definition moving at `speed`, for tests that need a given
+    /// pace.
+    fn creature(speed: i32) -> MonsterDef {
+        let source = format!(
+            "[Monster(id: \"test_creature\", name: \"test creature\", family: Vermin, \
+             elite: false, speed: {speed}, hp: 5, attack: 1, defense: 0, min_depth: 1)]"
+        );
+        let content = Content::parse(&source).expect("valid test monster");
+        content.monsters()[0].clone()
+    }
+
+    /// A game on the map drawn by `rows` (see `path::test_maps::from_rows`)
+    /// with the player alone at `start`.
+    fn game_on(rows: &[&str], start: Position) -> Game {
+        Game::start(SEED, from_rows(rows), start, &[])
+    }
+
+    /// Plays `turns` waits of the player and returns every event.
+    fn wait_turns(game: &mut Game, turns: usize) -> Vec<Event> {
+        (0..turns).flat_map(|_| game.submit(Action::Wait)).collect()
+    }
+
+    /// Returns where the actor `id` stands.
+    fn position_of(game: &Game, id: ActorId) -> Position {
+        game.actor(id).expect("the actor exists").position()
     }
 
     /// Energy of every actor, keyed for comparison before and after a turn.
@@ -381,10 +523,11 @@ mod tests {
     fn other_actors_act_before_the_player_turn_returns() {
         let mut game = fixed_room_game();
         let player = game.player();
-        let fast = game.spawn_actor(Position::new(10, 3), 2 * NORMAL_SPEED);
+        let fast = game.spawn_monster(FAR_CELLS[0], &creature(2 * NORMAL_SPEED));
 
-        // The new actor starts without energy, so it first acts after the
-        // player's next tick; the player was created first and keeps the lead.
+        // The new monster starts without energy, so it first acts after the
+        // player's next tick; the player was created first and keeps the
+        // lead. Out of sight and with no memory of the player, it waits.
         assert_eq!(game.submit(Action::Wait), [Event::Waited { actor: player }]);
         let events = game.submit(Action::Move(Direction::South));
 
@@ -406,8 +549,8 @@ mod tests {
     fn double_speed_actor_acts_twice_per_normal_player_action() {
         let mut game = fixed_room_game();
         let player = game.player();
-        let fast = game.spawn_actor(Position::new(10, 3), 2 * NORMAL_SPEED);
-        let slow = game.spawn_actor(Position::new(12, 3), NORMAL_SPEED / 2);
+        let fast = game.spawn_monster(FAR_CELLS[0], &creature(2 * NORMAL_SPEED));
+        let slow = game.spawn_monster(FAR_CELLS[1], &creature(NORMAL_SPEED / 2));
 
         let events: Vec<Event> = (0..20).flat_map(|_| game.submit(Action::Wait)).collect();
 
@@ -428,7 +571,7 @@ mod tests {
     fn wall_blocks_the_player_without_spending_time() {
         let mut game = fixed_room_game();
         let player = game.player();
-        let fast = game.spawn_actor(Position::new(10, 3), 2 * NORMAL_SPEED);
+        let fast = game.spawn_monster(FAR_CELLS[0], &creature(2 * NORMAL_SPEED));
         game.submit(Action::Wait);
         // Walk to the cell next to the left wall.
         for _ in 0..4 {
@@ -453,8 +596,9 @@ mod tests {
         assert_eq!(game.ticks(), ticks, "no time passed");
         assert_eq!(energies(&game), energy_before, "nobody acted");
         assert_eq!(
-            game.actor(fast).map(Actor::position),
-            Some(Position::new(10, 3))
+            position_of(&game, fast),
+            FAR_CELLS[0],
+            "never saw the player"
         );
     }
 
@@ -463,7 +607,7 @@ mod tests {
         let mut game = fixed_room_game();
         let player = game.player();
         let east = PLAYER_START.step(Direction::East);
-        game.spawn_actor(east, NORMAL_SPEED);
+        game.spawn_monster(east, &creature(NORMAL_SPEED));
         let ticks = game.ticks();
 
         let events = game.submit(Action::Move(Direction::East));
@@ -486,12 +630,12 @@ mod tests {
             let seed = Seed::new(value);
             let floor = generation::generate(seed, FIRST_DEPTH);
 
-            let game = Game::new(seed);
+            let game = Game::new(seed, &content());
 
             let tiles = |map: &Map| map.positions().map(|p| map.tile(p)).collect::<Vec<_>>();
             assert_eq!(tiles(game.map()), tiles(floor.map()));
             assert_eq!(game.player_actor().position(), floor.start());
-            assert_eq!(game.actors().count(), 1);
+            assert_eq!(game.actors().count(), 1 + MONSTERS_PER_FLOOR);
             assert!(game.player_actor().energy() >= ACTION_THRESHOLD);
         }
     }
@@ -499,8 +643,9 @@ mod tests {
     #[test]
     fn the_player_can_walk_onto_the_stairs() {
         let seed = Seed::new(42);
-        let mut game = Game::new(seed);
         let floor = generation::generate(seed, FIRST_DEPTH);
+        // Without monsters, which could stand in the way.
+        let mut game = Game::on_floor(seed, floor.clone());
         let stairs = floor.stairs();
         let distances = DijkstraMap::new(floor.map(), [stairs]);
 
@@ -520,7 +665,7 @@ mod tests {
     #[test]
     fn a_game_keeps_the_seed_it_was_started_with() {
         for value in [0, 42, u64::MAX] {
-            let mut game = Game::new(Seed::new(value));
+            let mut game = Game::new(Seed::new(value), &content());
             game.submit(Action::Wait);
 
             assert_eq!(game.seed(), Seed::new(value));
@@ -538,8 +683,8 @@ mod tests {
     #[test]
     fn player_turns_count_only_player_actions_that_took_time() {
         let mut game = fixed_room_game();
-        let fast = game.spawn_actor(Position::new(10, 3), 2 * NORMAL_SPEED);
-        let slow = game.spawn_actor(Position::new(12, 3), NORMAL_SPEED / 2);
+        let fast = game.spawn_monster(FAR_CELLS[0], &creature(2 * NORMAL_SPEED));
+        let slow = game.spawn_monster(FAR_CELLS[1], &creature(NORMAL_SPEED / 2));
         // Four moves west reach the wall, the fifth is refused, then waits.
         let actions = [
             Action::Move(Direction::West),
@@ -666,7 +811,7 @@ mod tests {
 
     #[test]
     fn a_new_generated_floor_shows_the_view_from_its_start() {
-        let game = Game::new(SEED);
+        let game = Game::new(SEED, &content());
         let map = game.map();
         let start = game.player_actor().position();
 
@@ -681,6 +826,256 @@ mod tests {
     #[test]
     #[should_panic(expected = "cannot spawn an actor at (5, 5)")]
     fn spawning_on_an_occupied_cell_panics() {
-        fixed_room_game().spawn_actor(PLAYER_START, NORMAL_SPEED);
+        fixed_room_game().spawn_monster(PLAYER_START, &creature(NORMAL_SPEED));
+    }
+
+    #[test]
+    fn a_new_game_places_the_floor_monsters_with_their_head_start() {
+        let content = content();
+        for value in [0, 42, 7_777] {
+            let seed = Seed::new(value);
+            let floor = generation::generate_with_monsters(seed, FIRST_DEPTH, &content);
+
+            let game = Game::new(seed, &content);
+
+            let monsters: Vec<(Position, &str, i32)> = game
+                .actors()
+                .filter_map(|(_, a)| {
+                    a.as_monster()
+                        .map(|m| (a.position(), m.definition(), a.energy()))
+                })
+                .collect();
+            let expected: Vec<(Position, &str, i32)> = floor
+                .monsters()
+                .iter()
+                .map(|spawn| {
+                    // One tick has passed to give the player its first turn.
+                    let energy = spawn.energy() + spawn.definition().speed();
+                    (spawn.position(), spawn.definition().id(), energy)
+                })
+                .collect();
+            assert_eq!(monsters, expected, "seed {value}");
+        }
+    }
+
+    #[test]
+    fn the_player_acts_first_on_a_new_floor() {
+        let content = content();
+        for value in 0..20 {
+            let mut game = Game::new(Seed::new(value), &content);
+            let player = game.player();
+
+            let events = game.submit(Action::Wait);
+
+            assert_eq!(events.first(), Some(&Event::Waited { actor: player }));
+        }
+    }
+
+    #[test]
+    fn a_monster_in_sight_closes_in_by_the_shortest_path() {
+        let mut game = fixed_room_game();
+        // Behind the pillar from the player's side, so the straight line is
+        // not the way.
+        let monster = game.spawn_monster(Position::new(12, 7), &creature(NORMAL_SPEED));
+        assert!(game.is_visible(Position::new(12, 7)));
+        let player = PLAYER_START;
+        // Its first turn comes after the player's first action.
+        game.submit(Action::Wait);
+
+        let mut distance = DijkstraMap::new(game.map(), [player])
+            .distance(position_of(&game, monster))
+            .expect("same room");
+        while distance > 1 {
+            let events = game.submit(Action::Wait);
+
+            let now = position_of(&game, monster);
+            let closer = DijkstraMap::new(game.map(), [player]).distance(now);
+            assert_eq!(closer, Some(distance - 1), "one step closer each turn");
+            assert!(matches!(events[1], Event::Moved { actor, .. } if actor == monster));
+            distance -= 1;
+        }
+
+        // Next to the player, it has no attack yet: it waits there.
+        let at_contact = position_of(&game, monster);
+        let events = wait_turns(&mut game, 3);
+        assert_eq!(position_of(&game, monster), at_contact);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| **e == Event::Waited { actor: monster })
+                .count(),
+            3
+        );
+    }
+
+    #[test]
+    fn a_fast_monster_moves_twice_per_normal_player_action() {
+        let mut game = fixed_room_game();
+        let fast = game.spawn_monster(Position::new(12, 5), &creature(2 * NORMAL_SPEED));
+        let player = game.player();
+        game.submit(Action::Wait);
+
+        let events = game.submit(Action::Wait);
+
+        assert_eq!(
+            events,
+            [
+                Event::Waited { actor: player },
+                Event::Moved {
+                    actor: fast,
+                    from: Position::new(12, 5),
+                    to: Position::new(11, 5),
+                },
+                Event::Moved {
+                    actor: fast,
+                    from: Position::new(11, 5),
+                    to: Position::new(10, 5),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_monster_walks_to_where_it_last_saw_the_player_then_waits() {
+        // Two rooms with no opening between them.
+        let rows = [
+            "####################", //
+            "#........#.........#", //
+            "#........#.........#", //
+            "#........#.........#", //
+            "####################", //
+        ];
+        let last_seen = Position::new(7, 2);
+        let mut game = game_on(&rows, last_seen);
+        let monster = game.spawn_monster(Position::new(2, 2), &creature(NORMAL_SPEED));
+        game.submit(Action::Wait);
+        // The monster sees the player and steps towards it.
+        game.submit(Action::Wait);
+        assert_eq!(position_of(&game, monster), Position::new(3, 2));
+
+        // The player vanishes into the other room, out of the monster's
+        // sight.
+        let hidden = Position::new(15, 2);
+        game.actors[game.player].position = hidden;
+        game.update_field_of_view();
+        assert!(
+            !fov::visible_cells(game.map(), position_of(&game, monster), SIGHT_RADIUS)
+                .contains(&hidden)
+        );
+
+        for expected_x in 4..=7 {
+            game.submit(Action::Wait);
+            assert_eq!(position_of(&game, monster), Position::new(expected_x, 2));
+        }
+        // On the last cell where it saw the player, it stops for good.
+        let events = wait_turns(&mut game, 5);
+        assert_eq!(position_of(&game, monster), last_seen);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| **e == Event::Waited { actor: monster })
+                .count(),
+            5
+        );
+        let memory = game
+            .actor(monster)
+            .and_then(Actor::as_monster)
+            .map(|m| m.last_seen_player());
+        assert_eq!(memory, Some(None), "the player is forgotten");
+    }
+
+    #[test]
+    fn a_monster_that_never_saw_the_player_stays_put() {
+        let mut game = fixed_room_game();
+        let monster = game.spawn_monster(FAR_CELLS[0], &creature(NORMAL_SPEED));
+
+        wait_turns(&mut game, 10);
+
+        assert_eq!(position_of(&game, monster), FAR_CELLS[0]);
+    }
+
+    #[test]
+    fn a_monster_sees_the_player_exactly_when_the_player_sees_it() {
+        // The rule `non_player_action` relies on: from the monster's own
+        // field of view, computed independently, the answer is the same.
+        let content = content();
+        for value in 0..30 {
+            let game = Game::new(Seed::new(value), &content);
+            let player = game.player_actor().position();
+            for cell in game
+                .map()
+                .positions()
+                .filter(|&p| game.map().is_walkable(p))
+            {
+                let monster_sees =
+                    fov::visible_cells(game.map(), cell, SIGHT_RADIUS).contains(&player);
+                assert_eq!(
+                    monster_sees,
+                    game.is_visible(cell),
+                    "seed {value}, {cell:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn monsters_out_of_sight_are_not_listed_as_visible() {
+        let mut game = fixed_room_game();
+        let near = game.spawn_monster(Position::new(9, 5), &creature(NORMAL_SPEED));
+        let far = game.spawn_monster(FAR_CELLS[0], &creature(NORMAL_SPEED));
+
+        let visible: Vec<VisibleMonster<'_>> = game.visible_monsters().collect();
+
+        assert_eq!(
+            visible,
+            [VisibleMonster {
+                id: near,
+                position: Position::new(9, 5),
+                definition: "test_creature",
+                family: Family::Vermin,
+                elite: false,
+            }]
+        );
+        assert!(
+            game.actor(far).is_some(),
+            "the hidden one exists all the same"
+        );
+
+        // Walking away hides the near one too.
+        for _ in 0..4 {
+            game.submit(Action::Move(Direction::West));
+        }
+        let near_at = position_of(&game, near);
+        let listed: Vec<ActorId> = game.visible_monsters().map(|m| m.id).collect();
+        assert_eq!(listed.contains(&near), game.is_visible(near_at));
+        assert!(!listed.contains(&far));
+    }
+
+    #[test]
+    fn a_new_floor_shows_no_monster_and_lists_only_visible_ones_later() {
+        let content = content();
+        for value in 0..50 {
+            let mut game = Game::new(Seed::new(value), &content);
+            assert_eq!(game.visible_monsters().count(), 0, "seed {value}");
+
+            // Walk towards the stairs for a while; whatever is listed must be
+            // in view, and every monster in view must be listed.
+            let stairs = generation::generate(Seed::new(value), FIRST_DEPTH).stairs();
+            for _ in 0..40 {
+                let distances = DijkstraMap::new(game.map(), [stairs]);
+                let action = distances
+                    .downhill(game.player_actor().position())
+                    .map_or(Action::Wait, Action::Move);
+                game.submit(action);
+
+                let listed: Vec<Position> = game.visible_monsters().map(|m| m.position).collect();
+                let in_view: Vec<Position> = game
+                    .actors()
+                    .filter(|(_, a)| a.as_monster().is_some() && game.is_visible(a.position()))
+                    .map(|(_, a)| a.position())
+                    .collect();
+                assert_eq!(listed, in_view, "seed {value}");
+            }
+        }
     }
 }

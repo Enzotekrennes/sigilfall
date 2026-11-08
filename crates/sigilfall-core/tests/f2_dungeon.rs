@@ -14,6 +14,7 @@
 use std::collections::{HashSet, VecDeque};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use sigilfall_core::content::Content;
 use sigilfall_core::game::Game;
 use sigilfall_core::generation::{FIRST_DEPTH, FLOOR_HEIGHT, FLOOR_WIDTH, generate};
 use sigilfall_core::geometry::Position;
@@ -279,7 +280,8 @@ fn scenario_1_the_same_seed_gives_identical_dungeons() {
         let (first, second) = (generate(seed, FIRST_DEPTH), generate(seed, FIRST_DEPTH));
         assert_eq!(first, second, "seed {seed}");
 
-        let (game_a, game_b) = (Game::new(seed), Game::new(seed));
+        let content = Content::load().expect("the shipped content is valid");
+        let (game_a, game_b) = (Game::new(seed, &content), Game::new(seed, &content));
         assert_eq!(game_a.map(), game_b.map(), "seed {seed}");
         // The game's map also holds what the player has seen, so only the
         // tiles are compared with the generated floor.

@@ -26,6 +26,8 @@ use ratatui::crossterm::terminal::{
 };
 use ratatui::{DefaultTerminal, Terminal};
 
+use sigilfall_core::content::Content;
+
 use crate::app::App;
 use crate::cli::Cli;
 use crate::theme::{Appearance, ColorMode, ColorSupport, GlyphSet, Theme};
@@ -49,8 +51,9 @@ fn main() -> anyhow::Result<()> {
     require_terminal_output()?;
     install_panic_hook();
 
+    let content = Content::load().context("the game data built into this binary is invalid")?;
     let theme = startup_theme(cli.glyph_set());
-    let mut app = App::new(theme, cli.seed_or_random());
+    let mut app = App::new(theme, cli.seed_or_random(), &content);
     let outcome = enter_terminal().and_then(|mut terminal| app.run(&mut terminal));
     // Restore even when the game failed, so the error is printed on the
     // normal screen; the game's own error is the more useful one to report.

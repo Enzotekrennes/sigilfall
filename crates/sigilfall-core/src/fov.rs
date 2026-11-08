@@ -96,6 +96,16 @@ fn max_depth(map: &Map, radius: u32) -> i32 {
         .min(width.max(height))
 }
 
+/// Returns whether `target` lies within `radius` cells of `origin` by the
+/// range rule of [`visible_cells`], walls ignored.
+///
+/// Every cell visible from `origin` within `radius` passes this test, so a
+/// cell that fails it cannot be seen from `origin`, whatever the map. The
+/// test is symmetric between the two cells.
+pub(crate) fn in_sight_range(origin: Position, target: Position, radius: u32) -> bool {
+    in_range(target.y - origin.y, target.x - origin.x, radius)
+}
+
 /// Returns whether the cell at `depth` rows and `column` columns from the
 /// origin is within `radius` (see [`visible_cells`]).
 fn in_range(depth: i32, column: i32, radius: u32) -> bool {
