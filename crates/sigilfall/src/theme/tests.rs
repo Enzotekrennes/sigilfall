@@ -36,8 +36,9 @@ const PANEL_TOKENS: [&str; 10] = [
     "item",
 ];
 
-/// Tokens drawn on the selected line of a list (the inventory), over
-/// `bg_selection`: its text, its caption and the glyph of its item.
+/// Tokens drawn on the selected line of a list (the inventory, the title
+/// and options menus, the seed field), over `bg_selection`: its text, its
+/// caption and the glyph of its item.
 const SELECTION_TOKENS: [&str; 3] = ["text", "text_muted", "item"];
 
 /// Every foreground token of `theme`, with its name.
@@ -380,4 +381,113 @@ fn every_mode_paints_a_background() {
     ] {
         assert_eq!(theme(mode).bg.bg, Some(expected), "{mode:?}");
     }
+}
+
+/// Settings for `options` on a terminal `detected` as such, with
+/// `--ascii` if `forced_ascii`.
+const fn settings(options: Options, detected: ColorSupport, forced_ascii: bool) -> Settings {
+    Settings {
+        options,
+        detected,
+        forced_ascii,
+    }
+}
+
+#[test]
+fn auto_follows_the_terminal_and_the_other_choices_win_over_it() {
+    for detected in [
+        ColorSupport::TrueColor,
+        ColorSupport::Ansi16,
+        ColorSupport::None,
+    ] {
+        assert_eq!(ColorChoice::Auto.support(detected), detected);
+        assert_eq!(ColorChoice::Ansi16.support(detected), ColorSupport::Ansi16);
+        assert_eq!(
+            ColorChoice::Monochrome.support(detected),
+            ColorSupport::None
+        );
+    }
+}
+
+#[test]
+fn the_settings_pick_the_mode_of_the_options_and_the_terminal() {
+    let light = Options {
+        appearance: Appearance::Light,
+        ..Options::default()
+    };
+    let ansi16 = Options {
+        colors: ColorChoice::Ansi16,
+        ..Options::default()
+    };
+    let cases = [
+        (
+            Options::default(),
+            ColorSupport::TrueColor,
+            ColorMode::TrueColorDark,
+        ),
+        (light, ColorSupport::TrueColor, ColorMode::TrueColorLight),
+        (Options::default(), ColorSupport::Ansi16, ColorMode::Ansi16),
+        (ansi16, ColorSupport::TrueColor, ColorMode::Ansi16),
+        // The light theme has no 16-colour form: monochrome instead.
+        (
+            Options {
+                appearance: Appearance::Light,
+                ..ansi16
+            },
+            ColorSupport::TrueColor,
+            ColorMode::Monochrome,
+        ),
+        (
+            Options::default(),
+            ColorSupport::None,
+            ColorMode::Monochrome,
+        ),
+        // An explicit choice wins over NO_COLOR.
+        (ansi16, ColorSupport::None, ColorMode::Ansi16),
+    ];
+    for (options, detected, mode) in cases {
+        let settings = settings(options, detected, false);
+        assert_eq!(settings.color_mode(), mode, "{options:?} on {detected:?}");
+        assert_eq!(settings.theme().bg, Theme::new(mode, GlyphSet::Unicode).bg);
+    }
+}
+
+#[test]
+fn ascii_on_the_command_line_wins_over_the_glyph_option() {
+    let unicode = Options::default();
+    let ascii = Options {
+        glyphs: GlyphSet::Ascii,
+        ..Options::default()
+    };
+
+    assert_eq!(
+        settings(unicode, ColorSupport::TrueColor, false).glyph_set(),
+        GlyphSet::Unicode
+    );
+    assert_eq!(
+        settings(ascii, ColorSupport::TrueColor, false).glyph_set(),
+        GlyphSet::Ascii
+    );
+    assert_eq!(
+        settings(unicode, ColorSupport::TrueColor, true).glyph_set(),
+        GlyphSet::Ascii
+    );
+    assert_eq!(
+        settings(unicode, ColorSupport::TrueColor, true)
+            .theme()
+            .glyphs,
+        Glyphs::new(GlyphSet::Ascii)
+    );
+}
+
+#[test]
+fn the_default_options_are_unicode_auto_and_dark() {
+    assert_eq!(
+        Options::default(),
+        Options {
+            glyphs: GlyphSet::Unicode,
+            colors: ColorChoice::Auto,
+            appearance: Appearance::Dark,
+        }
+    );
 }

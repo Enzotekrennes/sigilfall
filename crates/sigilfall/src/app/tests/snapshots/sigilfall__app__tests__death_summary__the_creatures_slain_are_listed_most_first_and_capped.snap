@@ -25,4 +25,4 @@ expression: "rows.join(\"\\n\")"
              Replay this seed: sigilfall --seed 7F3A-91C2-0B5E-D4A8             
                                                                                 
                                                                                 
- q quit
+ Enter title screen   q quit

@@ -1,0 +1,28 @@
+---
+source: crates/sigilfall/src/app/tests/options_screen.rs
+expression: text
+---
+"                                                                                "
+"                                                                                "
+"                                 ●─────●─────●                                  "
+"                                           ╱                                    "
+"                                         ╱                                      "
+"                                 ○     ●     ○                                  "
+"                                     ╱                                          "
+"                                   ╱                                            "
+"                                 ●─────●─────●                                  "
+"                                                                                "
+"                               S I G I L F A L L                                "
+"                        Trace true. The dungeon listens.                        "
+"                                                                                "
+"                      › New game                                                "
+"                        Seed                                                    "
+"                        Options                                                 "
+"                        Quit                                                    "
+"                                                                                "
+" ! The options file could not be read (it has format version 9, but this game   "
+"   reads version 1). The default options are in use; changing one rewrites the  "
+"   file.                                                                        "
+"                                                                                "
+"                                                                                "
+" ↑↓ choose   Enter confirm   q quit                                      v0.1.0 "

@@ -1,0 +1,28 @@
+---
+source: crates/sigilfall/src/app/tests/title_screen.rs
+expression: text
+---
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                 ●─────●─────●                                  "
+"                                           ╱                                    "
+"                                         ╱                                      "
+"                                 ○     ●     ○                                  "
+"                                     ╱                                          "
+"                                   ╱                                            "
+"                                 ●─────●─────●                                  "
+"                                                                                "
+"                               S I G I L F A L L                                "
+"                        Trace true. The dungeon listens.                        "
+"                                                                                "
+"                Type the seed of the dungeon, then press Enter.                 "
+"                                                                                "
+"                        Seed  7F3A-91C2_                                        "
+"                                                                                "
+"          A number such as 42, or the shared form 7F3A-91C2-0B5E-D4A8.          "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+" Enter start   Backspace erase   Esc back                                       "

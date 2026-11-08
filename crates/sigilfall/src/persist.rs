@@ -1,9 +1,11 @@
-//! Files the game keeps between runs: where they live, and the save of the
-//! game in progress.
+//! Files the game keeps between runs: where they live, the save of the
+//! game in progress and the player's options.
 //!
 //! Exposes [`SaveFile`], the save file of one data folder, which reads,
-//! writes and deletes the save; [`Loaded`], what reading it found; and
-//! [`DATA_DIR_VAR`], the environment variable that moves the data folder.
+//! writes and deletes the save; [`Loaded`], what reading it found;
+//! [`OptionsFile`], the options file beside the save, and
+//! [`LoadedOptions`], what reading it found; and [`DATA_DIR_VAR`], the
+//! environment variable that moves the data folder.
 //!
 //! The data folder is the operating system's folder for application data,
 //! found by `directories::ProjectDirs` with no qualifier, no organization
@@ -23,8 +25,15 @@
 //! `save.ron.bad` rather than deleted, so the run it held can still be
 //! looked at.
 //!
+//! The options are `options.ron` in the same folder, a short RON record
+//! with its own format version ([`OPTIONS_FORMAT_VERSION`]), written the
+//! same atomic way. An options file that cannot be read back never stops
+//! the game: the default options are used, the reason is reported, and the
+//! file is replaced the next time an option changes.
+//!
 //! The text of a save and its checks belong to `sigilfall_core::save`; when
-//! to save, resume or delete is decided by the `app` module.
+//! to save, resume or delete, and when to write the options, is decided by
+//! the `app` module.
 
 use std::ffi::OsString;
 use std::fs::{self, File};
@@ -33,9 +42,12 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
 use directories::ProjectDirs;
+use serde::{Deserialize, Serialize};
 use sigilfall_core::content::Content;
 use sigilfall_core::game::Game;
 use sigilfall_core::save;
+
+use crate::theme::{Appearance, ColorChoice, GlyphSet, Options};
 
 /// Environment variable that replaces the operating system's data folder,
 /// as a path to a folder, created if missing; an empty value is ignored.
@@ -43,8 +55,8 @@ use sigilfall_core::save;
 /// An environment variable rather than a command-line option: the command
 /// line stays the one the plan documents (`--seed`, `--ascii`), a test or a
 /// tester can move the folder of a game started from a script without
-/// changing its arguments, and the options of T26 will live in the same
-/// folder, so one variable moves every file of the game.
+/// changing its arguments, and the options live in the same folder, so one
+/// variable moves every file of the game.
 pub const DATA_DIR_VAR: &str = "SIGILFALL_DATA_DIR";
 
 /// Application name given to `directories::ProjectDirs`, which makes the
@@ -53,6 +65,16 @@ const APPLICATION: &str = "Sigilfall";
 
 /// Name of the save file in the data folder.
 const SAVE_NAME: &str = "save.ron";
+
+/// Name of the options file in the data folder.
+const OPTIONS_NAME: &str = "options.ron";
+
+/// Version of the options file's format, written at its top.
+///
+/// Raised whenever a field is renamed, removed or given a new meaning, so
+/// an options file written by another version of the game is recognised
+/// and replaced by the defaults instead of being misread.
+pub const OPTIONS_FORMAT_VERSION: u32 = 1;
 
 /// Suffix of the file a save is written to before it replaces the save.
 const TEMPORARY_SUFFIX: &str = ".tmp";
@@ -122,6 +144,7 @@ impl SaveFile {
 
     /// Path of the file a save is written to before it replaces the save:
     /// `save.ron.tmp`.
+    #[cfg(test)]
     fn temporary_path(&self) -> PathBuf {
         with_suffix(&self.path, TEMPORARY_SUFFIX)
     }
@@ -204,19 +227,7 @@ impl SaveFile {
     /// The steps of [`SaveFile::write`], without the context of its error.
     fn try_write(&self, game: &Game) -> anyhow::Result<()> {
         let text = save::to_string(game)?;
-        if let Some(folder) = self.path.parent() {
-            fs::create_dir_all(folder)
-                .with_context(|| format!("cannot create the folder {}", folder.display()))?;
-        }
-        let temporary = self.temporary_path();
-        let mut file = File::create(&temporary)
-            .with_context(|| format!("cannot create {}", temporary.display()))?;
-        file.write_all(text.as_bytes())
-            .and_then(|()| file.sync_all())
-            .with_context(|| format!("cannot write {}", temporary.display()))?;
-        drop(file);
-        fs::rename(&temporary, &self.path)
-            .with_context(|| format!("cannot rename {}", temporary.display()))
+        write_atomically(&self.path, &text)
     }
 
     /// Deletes the save, so a dead character can never be resumed. Deleting
@@ -240,6 +251,184 @@ impl SaveFile {
             _ => Ok(()),
         }
     }
+}
+
+/// The options file of one data folder: `options.ron`, beside the save.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OptionsFile {
+    /// Path of `options.ron`.
+    path: PathBuf,
+}
+
+/// What [`OptionsFile::load`] found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoadedOptions {
+    /// There is no options file yet: the defaults apply.
+    Missing,
+    /// The options the player chose.
+    Found(Options),
+    /// The file could not be read back: the defaults apply until an
+    /// option changes, which rewrites the file.
+    Unreadable {
+        /// Why, in a short sentence a player can act on.
+        reason: String,
+    },
+}
+
+impl LoadedOptions {
+    /// Returns the options to play with: those found, or the defaults.
+    pub fn options(&self) -> Options {
+        match self {
+            Self::Found(options) => *options,
+            Self::Missing | Self::Unreadable { .. } => Options::default(),
+        }
+    }
+}
+
+/// The options file as written on disk: the format version first, then
+/// one field per option, such as
+/// `(format_version: 1, glyphs: Unicode, colors: Auto, theme: Dark)`.
+#[derive(Debug, Serialize, Deserialize)]
+struct OptionsRecord {
+    /// [`OPTIONS_FORMAT_VERSION`] when the file was written.
+    format_version: u32,
+    /// Characters to draw with.
+    glyphs: GlyphSet,
+    /// Colours to draw with.
+    colors: ColorChoice,
+    /// Dark or light theme.
+    theme: Appearance,
+}
+
+/// The first field of any options file, read alone so that a file of
+/// another format version is named as such rather than reported as
+/// malformed.
+#[derive(Debug, Deserialize)]
+struct OptionsVersion {
+    /// The format version the file says it was written in.
+    format_version: u32,
+}
+
+impl OptionsFile {
+    /// The options file in `folder`, which need not exist yet: it is
+    /// created by the first [`OptionsFile::write`].
+    pub fn in_folder(folder: impl Into<PathBuf>) -> Self {
+        Self {
+            path: folder.into().join(OPTIONS_NAME),
+        }
+    }
+
+    /// The options file in the same folder as `save`, so
+    /// [`DATA_DIR_VAR`] moves both.
+    pub fn beside(save: &SaveFile) -> Self {
+        Self::in_folder(save.path().parent().unwrap_or_else(|| Path::new("")))
+    }
+
+    /// Returns the path of the options file, `options.ron`.
+    #[cfg(test)]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Reads the player's options back.
+    ///
+    /// Never fails: a missing file gives [`LoadedOptions::Missing`], and a
+    /// file that cannot be read (permissions, not text, not RON, another
+    /// format version, an unknown value) gives
+    /// [`LoadedOptions::Unreadable`] with the reason. The file itself is
+    /// left as it is.
+    pub fn load(&self) -> LoadedOptions {
+        let text = match fs::read_to_string(&self.path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return LoadedOptions::Missing,
+            Err(error) if error.kind() == io::ErrorKind::InvalidData => {
+                return unreadable("it is not text");
+            }
+            Err(error) => return unreadable(&error.to_string()),
+        };
+        match parse_options(&text) {
+            Ok(options) => LoadedOptions::Found(options),
+            Err(reason) => LoadedOptions::Unreadable { reason },
+        }
+    }
+
+    /// Writes `options` as the options file, replacing the previous one and
+    /// creating the data folder if needed, atomically as
+    /// [`SaveFile::write`] does.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error naming the file when the folder cannot be created
+    /// or the file cannot be written or renamed; the previous file, if any,
+    /// is then left as it was.
+    pub fn write(&self, options: &Options) -> anyhow::Result<()> {
+        let record = OptionsRecord {
+            format_version: OPTIONS_FORMAT_VERSION,
+            glyphs: options.glyphs,
+            colors: options.colors,
+            theme: options.appearance,
+        };
+        let text = ron::ser::to_string_pretty(&record, ron::ser::PrettyConfig::default())
+            .context("cannot write the options as text")?;
+        write_atomically(&self.path, &text).with_context(|| {
+            format!(
+                "the options could not be saved to {}: check that this folder \
+                 can be written to (set {DATA_DIR_VAR} to keep them elsewhere)",
+                self.path.display()
+            )
+        })
+    }
+}
+
+/// A [`LoadedOptions::Unreadable`] whose reason is `reason`.
+fn unreadable(reason: &str) -> LoadedOptions {
+    LoadedOptions::Unreadable {
+        reason: reason.to_owned(),
+    }
+}
+
+/// Reads the text of an options file, or returns why it cannot be: another
+/// format version, or the parser's message (with its line and column) for
+/// anything malformed.
+fn parse_options(text: &str) -> Result<Options, String> {
+    let version: OptionsVersion = ron::from_str(text).map_err(|error| error.to_string())?;
+    if version.format_version != OPTIONS_FORMAT_VERSION {
+        return Err(format!(
+            "it has format version {}, but this game reads version {OPTIONS_FORMAT_VERSION}",
+            version.format_version
+        ));
+    }
+    let record: OptionsRecord = ron::from_str(text).map_err(|error| error.to_string())?;
+    Ok(Options {
+        glyphs: record.glyphs,
+        colors: record.colors,
+        appearance: record.theme,
+    })
+}
+
+/// Writes `text` to `path` so that a crash leaves the old file or the new
+/// one whole, never half of one: the text goes to `path` with
+/// [`TEMPORARY_SUFFIX`], is flushed to the disk, and that file is renamed
+/// over `path`. The folder of `path` is created if missing, and a temporary
+/// file left by an interrupted write is overwritten.
+///
+/// # Errors
+///
+/// Returns an error naming the folder or the file when the folder cannot
+/// be created, or the temporary file cannot be created, written or renamed.
+fn write_atomically(path: &Path, text: &str) -> anyhow::Result<()> {
+    if let Some(folder) = path.parent() {
+        fs::create_dir_all(folder)
+            .with_context(|| format!("cannot create the folder {}", folder.display()))?;
+    }
+    let temporary = with_suffix(path, TEMPORARY_SUFFIX);
+    let mut file = File::create(&temporary)
+        .with_context(|| format!("cannot create {}", temporary.display()))?;
+    file.write_all(text.as_bytes())
+        .and_then(|()| file.sync_all())
+        .with_context(|| format!("cannot write {}", temporary.display()))?;
+    drop(file);
+    fs::rename(&temporary, path).with_context(|| format!("cannot rename {}", temporary.display()))
 }
 
 /// The data folder: `override_folder` (the value of [`DATA_DIR_VAR`]) when
@@ -301,6 +490,11 @@ impl ScratchFolder {
     /// The save file of this folder.
     pub fn save_file(&self) -> SaveFile {
         SaveFile::in_folder(&self.path)
+    }
+
+    /// The options file of this folder.
+    pub fn options_file(&self) -> OptionsFile {
+        OptionsFile::in_folder(&self.path)
     }
 }
 
@@ -588,5 +782,172 @@ mod tests {
         let error = save.delete().unwrap_err();
 
         assert!(format!("{error:#}").contains("delete"), "{error:#}");
+    }
+
+    #[test]
+    fn the_options_are_options_ron_beside_the_save() {
+        let folder = ScratchFolder::new("options-path");
+
+        let options = OptionsFile::beside(&folder.save_file());
+
+        assert_eq!(options.path(), folder.path().join("options.ron"));
+        assert_eq!(options, folder.options_file());
+    }
+
+    #[test]
+    fn every_combination_of_options_is_read_back() {
+        let folder = ScratchFolder::new("options-round-trip");
+        let file = folder.options_file();
+        for glyphs in [GlyphSet::Unicode, GlyphSet::Ascii] {
+            for colors in [
+                ColorChoice::Auto,
+                ColorChoice::Ansi16,
+                ColorChoice::Monochrome,
+            ] {
+                for appearance in [Appearance::Dark, Appearance::Light] {
+                    let options = Options {
+                        glyphs,
+                        colors,
+                        appearance,
+                    };
+
+                    file.write(&options).unwrap();
+
+                    assert_eq!(file.load(), LoadedOptions::Found(options));
+                    assert!(!with_suffix(file.path(), TEMPORARY_SUFFIX).exists());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_options_file_is_readable_text_with_its_version_first() {
+        let folder = ScratchFolder::new("options-text");
+        let file = folder.options_file();
+        let options = Options {
+            glyphs: GlyphSet::Ascii,
+            colors: ColorChoice::Ansi16,
+            appearance: Appearance::Light,
+        };
+
+        file.write(&options).unwrap();
+
+        let text = fs::read_to_string(file.path()).unwrap();
+        let version = text.find("format_version: 1").expect("the version");
+        for field in ["glyphs: Ascii", "colors: Ansi16", "theme: Light"] {
+            let at = text
+                .find(field)
+                .unwrap_or_else(|| panic!("{field}:\n{text}"));
+            assert!(version < at, "the version comes first:\n{text}");
+        }
+        // Written by hand, in any order and on one line, it reads the same.
+        fs::write(
+            file.path(),
+            "(theme: Light, colors: Ansi16, glyphs: Ascii, format_version: 1)",
+        )
+        .unwrap();
+        assert_eq!(file.load(), LoadedOptions::Found(options));
+    }
+
+    #[test]
+    fn no_options_file_reads_as_missing_with_the_defaults() {
+        let folder = ScratchFolder::new("options-missing");
+
+        let loaded = folder.options_file().load();
+
+        assert_eq!(loaded, LoadedOptions::Missing);
+        assert_eq!(loaded.options(), Options::default());
+    }
+
+    #[test]
+    fn an_unreadable_options_file_gives_the_defaults_and_a_reason() {
+        for (label, bytes) in [
+            ("not-ron", b"glyphs = ascii".to_vec()),
+            ("not-text", vec![0xFF, 0xFE, 0x00]),
+            ("empty", Vec::new()),
+            ("truncated", b"(format_version: 1, glyphs: Asc".to_vec()),
+            (
+                "unknown-value",
+                b"(format_version: 1, glyphs: Emoji, colors: Auto, theme: Dark)".to_vec(),
+            ),
+            (
+                "missing-field",
+                b"(format_version: 1, glyphs: Ascii)".to_vec(),
+            ),
+        ] {
+            let folder = ScratchFolder::new(label);
+            let file = folder.options_file();
+            fs::write(file.path(), &bytes).unwrap();
+
+            let loaded = file.load();
+
+            let LoadedOptions::Unreadable { reason } = &loaded else {
+                panic!("{label}: {loaded:?}");
+            };
+            assert!(!reason.is_empty(), "{label}");
+            assert_eq!(loaded.options(), Options::default(), "{label}");
+            assert_eq!(fs::read(file.path()).unwrap(), bytes, "{label}: left as is");
+        }
+    }
+
+    #[test]
+    fn an_options_file_of_another_version_names_both_versions() {
+        let folder = ScratchFolder::new("options-other-version");
+        let file = folder.options_file();
+        fs::write(
+            file.path(),
+            "(format_version: 2, glyphs: Ascii, colors: Auto, theme: Dark, sound: On)",
+        )
+        .unwrap();
+
+        let LoadedOptions::Unreadable { reason } = file.load() else {
+            panic!("a version 2 file is not read");
+        };
+
+        assert_eq!(
+            reason,
+            "it has format version 2, but this game reads version 1"
+        );
+    }
+
+    #[test]
+    fn a_folder_in_place_of_the_options_file_is_unreadable_not_an_error() {
+        let folder = ScratchFolder::new("options-folder");
+        let file = folder.options_file();
+        fs::create_dir(file.path()).unwrap();
+
+        assert!(matches!(file.load(), LoadedOptions::Unreadable { .. }));
+    }
+
+    #[test]
+    fn a_failed_options_write_names_the_file_and_keeps_the_previous_one() {
+        let folder = ScratchFolder::new("options-write-fails");
+        let file = folder.options_file();
+        file.write(&Options::default()).unwrap();
+        fs::create_dir(with_suffix(file.path(), TEMPORARY_SUFFIX)).unwrap();
+        let ascii = Options {
+            glyphs: GlyphSet::Ascii,
+            ..Options::default()
+        };
+
+        let error = file.write(&ascii).unwrap_err();
+
+        let message = format!("{error:#}");
+        assert!(message.contains("could not be saved"), "{message}");
+        assert!(
+            message.contains(&file.path().display().to_string()),
+            "{message}"
+        );
+        assert_eq!(file.load(), LoadedOptions::Found(Options::default()));
+    }
+
+    #[test]
+    fn writing_the_options_creates_the_data_folder() {
+        let folder = ScratchFolder::new("options-nested");
+        let file = OptionsFile::in_folder(folder.path().join("a").join("b"));
+
+        file.write(&Options::default()).unwrap();
+
+        assert_eq!(file.load(), LoadedOptions::Found(Options::default()));
     }
 }

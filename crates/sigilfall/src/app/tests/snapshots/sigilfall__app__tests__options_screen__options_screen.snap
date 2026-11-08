@@ -1,0 +1,28 @@
+---
+source: crates/sigilfall/src/app/tests/options_screen.rs
+expression: text
+---
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                 O P T I O N S                                  "
+"                                                                                "
+"                       › Glyphs       Unicode                                   "
+"                         Colours      Auto · true colour                        "
+"                         Theme        Dark                                      "
+"                         Back                                                   "
+"                                                                                "
+"                         Sample       @ v s ¡ § ▼ ▒▒▒···                        "
+"                                                                                "
+"          Unicode draws stone walls and sigils; ASCII suits any font.           "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+" ↑↓ choose   ←→ change   Esc back                                               "

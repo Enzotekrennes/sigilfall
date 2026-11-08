@@ -332,7 +332,7 @@ fn the_seed_shown_is_the_run_seed_and_replays_it() {
     let arguments: Vec<&str> = command.split(' ').collect();
     let cli = Cli::try_parse_from(arguments).expect("the command parses");
     assert_eq!(cli.seed, Some(app.game().seed()));
-    let replay = Game::new(cli.seed_or_random(), &shipped_content());
+    let replay = Game::new(cli.seed.expect("a seed"), &shipped_content());
     let original = Game::new(SEED, &shipped_content());
     assert_eq!(
         sigilfall_core::save::to_string(&replay).unwrap(),
@@ -363,7 +363,10 @@ fn the_summary_fits_80_by_24_and_centres_on_larger_screens() {
     ] {
         assert!(small_text.contains(needle), "{needle}:\n{small_text}");
     }
-    assert!(small[23].starts_with(" q quit"), "{small_text}");
+    assert!(
+        small[23].starts_with(" Enter title screen   q quit"),
+        "{small_text}"
+    );
     assert!(small[22].trim().is_empty(), "a margin above the help");
     assert!(small[0].trim().is_empty(), "a margin above the title");
 
@@ -393,7 +396,10 @@ fn the_summary_fits_80_by_24_and_centres_on_larger_screens() {
         .map(|row| row.len() - row.trim_start().len())
         .collect();
     assert!(starts.windows(2).all(|w| w[0] == w[1]), "{large_text}");
-    assert!(large[39].starts_with(" q quit"), "{large_text}");
+    assert!(
+        large[39].starts_with(" Enter title screen   q quit"),
+        "{large_text}"
+    );
     assert_snapshot!(large_text);
 }
 

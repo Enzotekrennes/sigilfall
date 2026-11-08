@@ -939,6 +939,8 @@ dependencies = [
  "insta",
  "rand",
  "ratatui",
+ "ron",
+ "serde",
  "sigilfall-core",
 ]
 

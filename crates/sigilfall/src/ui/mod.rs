@@ -1,15 +1,19 @@
 //! Screens of the game, drawn with ratatui from read-only game state.
 //!
 //! Exposes [`render`], which picks what to draw for the current terminal
-//! size and the state of the game, the [`Overlay`] drawn over the map, one
-//! module per screen ([`game`] while playing, [`death`], the death
-//! summary, once the player has died), the parts of the game screen ([`hud`], the side panel, [`log`],
-//! the message log, [`sigil`], the overlay where sigils are traced, with
-//! its [`grimoire`], and [`inventory`], the overlay of what the player
-//! carries) and the [`camera`] that decides which part of the map is seen. Drawing never
+//! size and the state of the game, and [`render_menu`], its counterpart for
+//! the screens before a game ([`MenuScreen`]); the [`Overlay`] drawn over
+//! the map; one module per screen ([`title`], the title screen with its
+//! seed entry and confirmation, [`options`], [`game`] while playing,
+//! [`death`], the death summary, once the player has died); the parts of
+//! the game screen ([`hud`], the side panel, [`log`], the message log,
+//! [`sigil`], the overlay where sigils are traced, with its [`grimoire`],
+//! and [`inventory`], the overlay of what the player carries); and the
+//! [`camera`] that decides which part of the map is seen. Drawing never
 //! changes the game and never touches the real terminal: it fills a
 //! [`Frame`], so every screen can be rendered into a test backend. Every
-//! colour and glyph comes from the [`Theme`] passed in.
+//! colour and glyph comes from the [`Theme`] passed in, and every word from
+//! `messages`.
 
 pub mod camera;
 pub mod death;
@@ -18,18 +22,52 @@ pub mod grimoire;
 pub mod hud;
 pub mod inventory;
 pub mod log;
+pub mod options;
 pub mod sigil;
+pub mod title;
 
 use ratatui::Frame;
+use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Rect, Size};
-use ratatui::widgets::{Paragraph, Wrap};
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Paragraph, Widget as _, Wrap};
 use sigilfall_core::content::Content;
 use sigilfall_core::game::Game;
 
 use self::inventory::InventoryScreen;
+use self::options::OptionsMenu;
+use self::title::TitleStep;
 use crate::casting::Casting;
 use crate::message_log::MessageLog;
-use crate::theme::Theme;
+use crate::messages;
+use crate::theme::{Settings, Theme};
+
+/// A screen shown before a game, drawn by [`render_menu`].
+#[derive(Debug, Clone, Copy)]
+pub enum MenuScreen<'state> {
+    /// The title screen at this step, with the saved game described for
+    /// "Continue" (`None` when no game is saved) and the notices to show
+    /// under the menu.
+    Title {
+        /// The menu, the seed entry or the confirmation.
+        step: TitleStep<'state>,
+        /// The saved game, as `messages::saved_run` describes it.
+        saved: Option<&'state str>,
+        /// Problems met at launch, such as an unreadable options file.
+        notices: &'state [String],
+    },
+    /// The options screen, in this state, for these settings, with the
+    /// notice of a failed write if any.
+    Options {
+        /// Which entry is chosen.
+        menu: &'state OptionsMenu,
+        /// The options and what decides the theme with them.
+        settings: &'state Settings,
+        /// Why the options could not be written, if they could not.
+        notice: Option<&'state str>,
+    },
+}
 
 /// What covers the map of the game screen, if anything: the side panel
 /// and the log stay in view under both.
@@ -90,13 +128,100 @@ pub fn render(
     }
 }
 
+/// Draws `screen`, a screen shown before a game, over the whole frame with
+/// `theme`, as [`render`] draws the game: the background painted first,
+/// and the "enlarge the terminal" message instead below [`MIN_WIDTH`] ×
+/// [`MIN_HEIGHT`].
+pub fn render_menu(frame: &mut Frame, screen: MenuScreen<'_>, theme: &Theme) {
+    let area = frame.area();
+    frame.buffer_mut().set_style(area, theme.bg);
+    if !fits(area.as_size()) {
+        render_too_small(frame, area, theme);
+        return;
+    }
+    let buffer = frame.buffer_mut();
+    match screen {
+        MenuScreen::Title {
+            step,
+            saved,
+            notices,
+        } => title::render(buffer, area, step, saved, notices, theme),
+        MenuScreen::Options {
+            menu,
+            settings,
+            notice,
+        } => options::render(buffer, area, menu, settings, notice, theme),
+    }
+}
+
+/// Builds a line of key help from `bindings`, pairs of a key and what it
+/// does: each key in `text`, its label in `text_muted`, three blank
+/// columns between two pairs, one before the first, as `docs/design.md`
+/// asks on every screen.
+pub(crate) fn key_help(bindings: Vec<(String, &str)>, theme: &Theme) -> Line<'static> {
+    let mut spans = vec![Span::raw(" ")];
+    for (index, (key, label)) in bindings.into_iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::raw("   "));
+        }
+        spans.push(Span::styled(key, theme.text));
+        spans.push(Span::styled(format!(" {label}"), theme.text_muted));
+    }
+    Line::from(spans)
+}
+
+/// The up and down arrows as one key name, `↑↓` (`^v` in ASCII), for the
+/// key help of the lists.
+pub(crate) fn up_down(theme: &Theme) -> String {
+    format!("{}{}", theme.glyphs.arrow_up, theme.glyphs.arrow_down)
+}
+
+/// Draws `rows` as a block centred in `area`: the block centred down the
+/// rows as if it had at least `reserved` rows, so a screen whose lower part
+/// changes length does not move its upper part, yet raised as needed for
+/// every row to fit; each line centred across on its own width (pad the
+/// lines of a list to one width to keep it aligned); and each line marked
+/// `true` on `selection` over its width. Rows beyond the area are dropped;
+/// nothing panics on a small area.
+pub(crate) fn draw_centred_rows(
+    buffer: &mut Buffer,
+    area: Rect,
+    rows: Vec<(Line<'static>, bool)>,
+    reserved: usize,
+    selection: Style,
+) {
+    let count = u16::try_from(rows.len()).unwrap_or(u16::MAX);
+    let centred_on = count.max(u16::try_from(reserved).unwrap_or(u16::MAX));
+    let centred = area.height.saturating_sub(centred_on) / 2;
+    let top = area.y + centred.min(area.height.saturating_sub(count));
+    for (offset, (line, chosen)) in (0..area.height).zip(rows) {
+        let y = top + offset;
+        if y >= area.bottom() {
+            break;
+        }
+        let width = u16::try_from(line.width())
+            .unwrap_or(u16::MAX)
+            .min(area.width);
+        let row = Rect {
+            x: area.x + (area.width - width) / 2,
+            y,
+            width,
+            height: 1,
+        };
+        if chosen {
+            buffer.set_style(row, selection);
+        }
+        line.render(row, buffer);
+    }
+}
+
 /// Draws the "enlarge the terminal" message, with the current size, roughly
 /// centred in `area` and wrapped to its width, in the theme's text style.
 fn render_too_small(frame: &mut Frame, area: Rect, theme: &Theme) {
-    let times = theme.glyphs.dimension;
-    let message = format!(
-        "Enlarge the terminal to {MIN_WIDTH} {times} {MIN_HEIGHT} (current: {} {times} {}).",
-        area.width, area.height
+    let message = messages::enlarge_terminal(
+        (MIN_WIDTH, MIN_HEIGHT),
+        (area.width, area.height),
+        theme.glyphs.dimension,
     );
     // Start one row above the middle so a message wrapped on two or three
     // lines stays centred.

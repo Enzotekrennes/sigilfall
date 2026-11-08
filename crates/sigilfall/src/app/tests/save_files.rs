@@ -1,10 +1,10 @@
 //! The save file across launches (T24), on scratch folders only: the game
-//! saved on quitting, resumed exactly with a "Welcome back", deleted the
-//! moment the player dies and never brought back from the end screen; a
-//! corrupt save or one of another version set aside with a message before
-//! a new game; a leftover temporary file never read; a failed write
-//! reported with a non-zero exit; and the refusal of `--seed` while a game
-//! is saved.
+//! saved on quitting, resumed exactly with a "Welcome back" through
+//! "Continue" on the title screen (T26), deleted the moment the player dies
+//! and never brought back from the end screen; a corrupt save or one of
+//! another version set aside with a message before a new game; a leftover
+//! temporary file never read; a failed write reported with a non-zero exit;
+//! and the refusal of `--seed` while a game is saved.
 
 use std::fs;
 
@@ -13,6 +13,8 @@ use sigilfall_core::save;
 use super::*;
 use crate::message_log::Tone;
 use crate::persist::{Loaded, SaveFile, ScratchFolder};
+use crate::theme::ColorSupport;
+use crate::ui::title::TitleMenu;
 
 /// A monster that kills the player in one blow, so a death takes one key.
 const EXECUTIONER: &str = r#"[
@@ -26,13 +28,13 @@ const OTHER_SEED: Seed = Seed::new(42);
 /// Keys of a walk on a generated floor that tries every direction and
 /// waits, long enough for monsters to come and fight: each key is played
 /// once, in order.
-const WALK: &[char] = &[
+pub(super) const WALK: &[char] = &[
     'l', 'l', 'j', 'j', 'h', 'k', 'y', 'u', 'b', 'n', '.', '.', 'l', 'l', 'l', 'j', 'j', 'j', 'h',
     'h', 'k', 'k', '.', '.', '.', 'n', 'n', 'u', 'u', 'b', 'y', '.', 'l', 'j', 'h', 'k',
 ];
 
 /// The default theme of Windows Terminal.
-fn dark() -> Theme {
+pub(super) fn dark() -> Theme {
     Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode)
 }
 
@@ -41,25 +43,50 @@ const fn command_line(seed: Option<Seed>) -> Cli {
     Cli { seed, ascii: false }
 }
 
-/// Launches the application as `main` does, on the save file of `folder`.
-fn launch(folder: &ScratchFolder, seed: Option<Seed>) -> anyhow::Result<App> {
+/// Launches the application as `main` does, on the save file of `folder`,
+/// on a 24-bit terminal: the default options give the dark theme.
+pub(super) fn launch(folder: &ScratchFolder, seed: Option<Seed>) -> anyhow::Result<App> {
     App::launch(
-        dark(),
+        ColorSupport::TrueColor,
         &command_line(seed),
         &shipped_content(),
         folder.save_file(),
     )
 }
 
+/// Launches the application without `--seed`, as `sigilfall` alone does,
+/// checks that the title screen offers "Continue" and chooses it, which
+/// is the entry chosen at first.
+fn resume(folder: &ScratchFolder) -> App {
+    let mut app = launch(folder, None).unwrap();
+    assert_eq!(app.state(), State::Title(TitleMenu::open()));
+    assert!(app.has_saved_game(), "Continue is offered");
+    app.handle_key(press(KeyCode::Enter));
+    assert_eq!(app.state(), State::Playing, "Continue resumes the game");
+    app
+}
+
+/// Launches the application without `--seed` on a folder whose save
+/// cannot be continued, checks that the title screen does not offer
+/// "Continue", and chooses "New game", the entry chosen at first.
+fn launch_new_game(folder: &ScratchFolder) -> App {
+    let mut app = launch(folder, None).unwrap();
+    assert_eq!(app.state(), State::Title(TitleMenu::open()));
+    assert!(!app.has_saved_game(), "Continue is not offered");
+    app.handle_key(press(KeyCode::Enter));
+    assert_eq!(app.state(), State::Playing, "New game starts a game");
+    app
+}
+
 /// Plays each key of `keys` once, as presses.
-fn type_keys(app: &mut App, keys: &[char]) {
+pub(super) fn type_keys(app: &mut App, keys: &[char]) {
     for &key in keys {
         app.handle_key(press(KeyCode::Char(key)));
     }
 }
 
 /// The log of `app`, oldest message first.
-fn log_lines(app: &App) -> Vec<Message> {
+pub(super) fn log_lines(app: &App) -> Vec<Message> {
     let mut lines: Vec<Message> = app.log().newest_first().cloned().collect();
     lines.reverse();
     lines
@@ -67,7 +94,7 @@ fn log_lines(app: &App) -> Vec<Message> {
 
 /// The save text of `game`, which holds its whole state, random stream
 /// included: two games with the same text play on identically.
-fn state_of(game: &Game) -> String {
+pub(super) fn state_of(game: &Game) -> String {
     save::to_string(game).expect("a game can be written")
 }
 
@@ -81,7 +108,7 @@ fn saved_game(folder: &ScratchFolder) -> Game {
 
 /// An application in the fixed room of [`SEED`], with an executioner east
 /// of the player, saving to `save`.
-fn doomed_app(save: SaveFile) -> App {
+pub(super) fn doomed_app(save: SaveFile) -> App {
     let content = Content::parse(EXECUTIONER).expect("valid test monster");
     let mut game = Game::in_fixed_room(SEED);
     game.spawn_monster(
@@ -92,7 +119,7 @@ fn doomed_app(save: SaveFile) -> App {
 }
 
 /// Waits until the executioner has killed the player of `app`.
-fn wait_for_death(app: &mut App) {
+pub(super) fn wait_for_death(app: &mut App) {
     for _ in 0..10 {
         if app.state() == State::GameOver {
             return;
@@ -145,9 +172,8 @@ fn a_resumed_game_goes_on_exactly_as_if_never_left() {
     type_keys(&mut first, &['q']);
     first.save_on_exit().unwrap();
 
-    let mut resumed = launch(&folder, None).unwrap();
+    let mut resumed = resume(&folder);
 
-    assert_eq!(resumed.state(), State::Playing);
     assert_eq!(resumed.game().seed(), SEED);
     assert_eq!(state_of(resumed.game()), state_of(&never_left));
     let opening = log_lines(&resumed);
@@ -183,12 +209,12 @@ fn quitting_a_resumed_game_saves_it_again() {
     type_keys(&mut first, &WALK[..5]);
     first.save_on_exit().unwrap();
 
-    let mut second = launch(&folder, None).unwrap();
+    let mut second = resume(&folder);
     type_keys(&mut second, &WALK[5..12]);
     type_keys(&mut second, &['q']);
     second.save_on_exit().unwrap();
 
-    let third = launch(&folder, None).unwrap();
+    let third = resume(&folder);
     assert_eq!(state_of(third.game()), state_of(second.game()));
 }
 
@@ -223,7 +249,7 @@ fn quitting_from_the_end_screen_brings_no_save_back() {
 
     assert!(!folder.save_file().path().exists());
     assert!(!folder.path().join("save.ron.tmp").exists());
-    let next = launch(&folder, None).unwrap();
+    let next = launch_new_game(&folder);
     assert_eq!(log_lines(&next), vec![messages::welcome()], "a new game");
 }
 
@@ -248,9 +274,16 @@ fn a_corrupt_save_is_set_aside_with_a_message_and_a_new_game_starts() {
     let save = folder.save_file();
     fs::write(save.path(), "(format_version: 1, seed: oops").unwrap();
 
-    let app = launch(&folder, None).unwrap();
+    let mut app = launch(&folder, None).unwrap();
+    assert!(!app.has_saved_game(), "nothing to continue");
+    let screen = render(&app, 80, 24).backend().to_string();
+    assert!(
+        screen.contains("! Your saved game could not be read:"),
+        "the title says so:\n{screen}"
+    );
+    app.handle_key(press(KeyCode::Enter));
 
-    assert_eq!(app.state(), State::Playing);
+    assert_eq!(app.state(), State::Playing, "New game was chosen");
     assert_eq!(app.game().player_turns(), 0, "a new game");
     let opening = log_lines(&app);
     assert_eq!(opening.len(), 2, "{opening:?}");
@@ -279,7 +312,7 @@ fn a_corrupt_save_is_set_aside_with_a_message_and_a_new_game_starts() {
 fn a_corrupt_save_is_never_overwritten_by_the_new_game() {
     let folder = ScratchFolder::new("corrupt-then-quit");
     fs::write(folder.save_file().path(), [0xFF, 0x00, 0xFE]).unwrap();
-    let mut app = launch(&folder, None).unwrap();
+    let mut app = launch_new_game(&folder);
 
     type_keys(&mut app, &['l', 'q']);
     app.save_on_exit().unwrap();
@@ -304,7 +337,7 @@ fn a_save_of_another_version_is_named_as_such_and_set_aside() {
     let text = text.replacen(&current, &format!("format_version: {newer},"), 1);
     fs::write(&path, &text).unwrap();
 
-    let app = launch(&folder, None).unwrap();
+    let app = launch_new_game(&folder);
 
     let opening = log_lines(&app);
     assert_eq!(opening[0].tone, Tone::Danger);
@@ -346,7 +379,7 @@ fn a_leftover_temporary_file_does_not_hide_the_save() {
     // What an interrupted write leaves next to the save.
     fs::write(folder.path().join("save.ron.tmp"), "(format_version: 1, se").unwrap();
 
-    let app = launch(&folder, None).unwrap();
+    let app = resume(&folder);
 
     assert_eq!(state_of(app.game()), state_of(first.game()));
     assert!(log_lines(&app)[0].text.starts_with("Welcome back"));
@@ -367,10 +400,11 @@ fn a_seed_given_while_a_game_is_saved_is_refused_and_the_save_kept() {
         let message = format!("{error:#}");
         assert!(message.contains(&path.display().to_string()), "{message}");
         assert!(message.contains("without --seed"), "{message}");
+        assert!(message.contains("title screen"), "{message}");
         assert!(message.contains("delete that file"), "{message}");
         assert_eq!(fs::read(&path).unwrap(), before, "the save is untouched");
     }
-    let resumed = launch(&folder, None).unwrap();
+    let resumed = resume(&folder);
     assert_eq!(state_of(resumed.game()), state_of(first.game()));
 }
 
@@ -405,7 +439,7 @@ fn a_saved_finished_game_is_deleted_and_a_new_game_starts() {
     fs::write(folder.save_file().path(), state_of(dead.game())).unwrap();
 
     let app = App::launch(
-        dark(),
+        ColorSupport::TrueColor,
         &command_line(Some(OTHER_SEED)),
         &content,
         folder.save_file(),

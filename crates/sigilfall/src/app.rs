@@ -8,14 +8,26 @@
 //! of the frame it drew, so that keys are not played on a screen too small
 //! to show the game.
 //!
-//! The application keeps the message log: the events of each action are
-//! turned into English lines by the `messages` module and appended to it.
-//! Once the player has died, the death summary (`ui::death`) replaces the
-//! game and only the quit keys still work.
+//! The application started by `main` ([`App::launch`]) opens on the title
+//! screen (`ui::title`), unless `--seed` asks for a game at once. The title
+//! menu lists "Continue" while a game is saved, "New game", "Seed", where
+//! the player types the seed of the new game, "Options" and "Quit". A new
+//! game that would replace a saved one asks first ([`State::Confirm`]), and
+//! deletes the save once the player agrees. The options screen
+//! ([`State::Options`], `ui::options`) changes the glyphs, the colours and
+//! the theme: each change is applied to the screen at once and written to
+//! the options file (`persist::OptionsFile`); `--ascii` keeps ASCII glyphs
+//! for the session whatever the option says.
 //!
-//! The quit keys are `q`, outside the overlays, and Ctrl+C everywhere.
-//! Escape never quits: it closes the overlays and verdicts below, and does
-//! nothing on the game and end screens.
+//! The application keeps the message log of the game in progress: the
+//! events of each action are turned into English lines by the `messages`
+//! module and appended to it. Once the player has died, the death summary
+//! (`ui::death`) replaces the game; Enter goes back to the title screen.
+//!
+//! The quit keys are `q`, on the game, end and title screens, and Ctrl+C
+//! everywhere; quitting a game saves it. Escape never quits: it closes the
+//! overlays, verdicts and sub-screens of the title, and does nothing on the
+//! game, end and title screens.
 //!
 //! Casting a sigil goes through the overlay ([`State::Casting`]): `t` opens
 //! it, the digits link nodes, Backspace removes the last one, Escape closes
@@ -40,12 +52,11 @@
 //! keeps the floors above. Off the stairs the game refuses it at no cost,
 //! and the log says so.
 //!
-//! The application started by `main` ([`App::launch`]) is tied to the
-//! player's save file (`persist::SaveFile`): it resumes the saved game if
-//! there is one, the save is deleted the moment the player dies, before the
-//! end screen is drawn, and [`App::save_on_exit`] writes the game in
-//! progress when the event loop ends. The rules of the launch are given at
-//! [`App::launch`].
+//! The launched application is tied to the player's save file
+//! (`persist::SaveFile`): "Continue" resumes the saved game, the save is
+//! deleted the moment the player dies, before the end screen is drawn, and
+//! [`App::save_on_exit`] writes the game in progress when the event loop
+//! ends. The rules of the launch are given at [`App::launch`].
 
 use std::cell::Cell;
 
@@ -59,21 +70,38 @@ use sigilfall_core::event::Event as GameEvent;
 use sigilfall_core::game::Game;
 use sigilfall_core::geometry::Direction;
 use sigilfall_core::item::ItemId;
+use sigilfall_core::rng::Seed;
 use sigilfall_core::sigil::{CastQuality, ESSENCE_COST, Recognition, Trace, recognize};
 
 use crate::casting::{Casting, Drawing, Verdict};
-use crate::cli::Cli;
-use crate::input::{self, AimCommand, Command, InventoryCommand, TraceCommand, VerdictCommand};
-use crate::message_log::{Message, MessageLog};
+use crate::cli::{self, Cli};
+use crate::input::{
+    self, AimCommand, Command, EndCommand, InventoryCommand, MenuCommand, OptionsCommand,
+    SeedCommand, TraceCommand, VerdictCommand,
+};
+use crate::message_log::{Message, MessageLog, Tone};
 use crate::messages;
-use crate::persist::{Loaded, SaveFile};
-use crate::theme::Theme;
+use crate::persist::{Loaded, LoadedOptions, OptionsFile, SaveFile};
+#[cfg(test)]
+use crate::theme::Options;
+use crate::theme::{ColorSupport, Settings, Theme};
 use crate::ui::inventory::InventoryScreen;
-use crate::ui::{self, Overlay};
+use crate::ui::options::{self as options_screen, OptionRow, OptionsMenu};
+use crate::ui::title::{Confirmation, SeedEntry, TitleItem, TitleMenu, TitleStep};
+use crate::ui::{self, MenuScreen, Overlay};
 
 /// The screen the application is on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
+    /// The title menu, in this state: no game is being played.
+    Title(TitleMenu),
+    /// The title screen asks for the seed of a new game.
+    SeedEntry(SeedEntry),
+    /// The title screen asks whether to abandon the saved game for a new
+    /// one.
+    Confirm(Confirmation),
+    /// The options screen, in this state.
+    Options(OptionsMenu),
     /// A game is in progress and keys control the player.
     Playing,
     /// The sigil overlay is open over the game: the player traces a sigil,
@@ -83,25 +111,41 @@ pub enum State {
     /// use or drop.
     Inventory(InventoryScreen),
     /// The player has died: the end screen is shown, the game takes no
-    /// more actions and only the quit keys work.
+    /// more actions, Enter goes back to the title and the quit keys work.
     GameOver,
     /// The player asked to leave; the event loop stops.
     Quit,
 }
 
-/// The running application: a game, its message log, the screen showing
-/// them and the theme they are drawn with.
+/// A game being played, with the log of what happened in it.
 #[derive(Debug)]
-pub struct App {
-    /// The game in progress.
+struct Run {
+    /// The game.
     game: Game,
-    /// The game data, for the names the log and the side panel show.
-    content: Content,
     /// What happened so far, in words, newest last.
     log: MessageLog,
+}
+
+/// The running application: the screen shown, the game in progress if
+/// any, the files kept between runs, and the theme everything is drawn
+/// with.
+///
+/// A game is in progress (`run` is set) on [`State::Playing`],
+/// [`State::Casting`], [`State::Inventory`] and [`State::GameOver`], and
+/// never on the screens of the title.
+#[derive(Debug)]
+pub struct App {
+    /// The game in progress and its log, or `None` on the title screens.
+    run: Option<Run>,
+    /// The game data, for new games and for the names the log and the side
+    /// panel show.
+    content: Content,
     /// The active screen.
     state: State,
-    /// Colours and glyphs of every screen, chosen at start-up.
+    /// The options and what decides the theme with them.
+    settings: Settings,
+    /// Colours and glyphs of every screen: the theme of `settings`, or the
+    /// one a test gave.
     theme: Theme,
     /// Size of the last frame drawn by [`App::render`], or `None` before the
     /// first one.
@@ -112,27 +156,57 @@ pub struct App {
     /// The save file the game is kept in between runs, or `None` for an
     /// application that saves nothing, such as most test ones.
     save: Option<SaveFile>,
+    /// The file the options are kept in, or `None` for an application that
+    /// keeps none, such as most test ones.
+    options_file: Option<OptionsFile>,
+    /// The saved game "Continue" resumes, read at launch; `None` when no
+    /// game is saved, or once it has been resumed or abandoned.
+    saved: Option<Game>,
+    /// Messages that open the next new game, such as why the save was set
+    /// aside at launch; emptied by that game.
+    opening: Vec<Message>,
+    /// Why the options file could not be read at launch, shown on the title
+    /// screen until the options are written again.
+    options_unreadable: Option<String>,
+    /// A problem with the save to show on the title screen: set aside at
+    /// launch, or not deleted. Cleared once a game starts.
+    save_notice: Option<String>,
+    /// Why the options could not be written, shown on the options screen
+    /// until they are written again.
+    options_not_saved: Option<String>,
 }
 
 impl App {
-    /// Starts the application of a run of the game, tied to the player's
-    /// `save` file, drawn with `theme`, with the monsters, items and sigils
-    /// of `content`.
+    /// Starts the application of a run of the program, tied to the player's
+    /// `save` file and to the options file beside it
+    /// (`OptionsFile::beside`), for a terminal `detected` to support that
+    /// much colour, with the monsters, items and sigils of `content`.
     ///
-    /// - A save of a game in progress and no `--seed` in `cli`: the saved
-    ///   game goes on exactly where it stopped, random stream included, and
-    ///   the log opens with "Welcome back" (`messages::welcome_back`).
-    /// - A save of a game in progress and a `--seed`: the launch is refused,
-    ///   so a seed typed out of habit never wipes a run; the error says how
-    ///   to continue it (no `--seed`) or abandon it (delete the save). The
-    ///   title menu of T26 will offer this choice on screen.
-    /// - No save: a new game of the seed of `cli` (`Cli::seed_or_random`).
-    /// - A save that could not be read back (corrupt, another format
-    ///   version, content changed): `SaveFile::load` set it aside, and a new
-    ///   game starts, its log opening with why and where the old save went
-    ///   (`messages::save_set_aside`).
-    /// - A save of a finished game, left by a deletion that failed: it is
-    ///   deleted and a new game starts.
+    /// The theme comes from the saved options, with ASCII glyphs whatever
+    /// they say when `cli` has `--ascii`. An options file that cannot be
+    /// read gives the default options and a notice, never an error.
+    ///
+    /// Without `--seed`, the title screen opens, its menu on its first
+    /// entry:
+    /// - a save of a game in progress: "Continue" is listed and chosen,
+    ///   and resumes the game exactly where it stopped, random stream
+    ///   included, its log opening with "Welcome back"
+    ///   (`messages::welcome_back`);
+    /// - no save: "New game" is chosen;
+    /// - a save that could not be read back (corrupt, another format
+    ///   version, content changed): `SaveFile::load` set it aside, the
+    ///   title says why and where it went, and the next new game's log
+    ///   opens with it too (`messages::save_set_aside`);
+    /// - a save of a finished game, left by a deletion that failed: it is
+    ///   deleted, and "Continue" is not listed.
+    ///
+    /// With `--seed`, a new game of that seed starts at once, without the
+    /// title, unless a game in progress is saved: the launch is then
+    /// refused, so a seed typed out of habit never wipes a run (decision of
+    /// T24, kept by T26: the refusal comes before the terminal changes,
+    /// works the same from a script, and says how to continue or abandon
+    /// the game on the title screen). A save set aside or finished is
+    /// handled as above, the options notice going to the log.
     ///
     /// # Errors
     ///
@@ -141,44 +215,55 @@ impl App {
     /// deleted (see `SaveFile::load` and `SaveFile::delete`). A saved game
     /// is never overwritten by a launch.
     pub fn launch(
-        theme: Theme,
+        detected: ColorSupport,
         cli: &Cli,
         content: &Content,
         save: SaveFile,
     ) -> anyhow::Result<Self> {
-        let (game, opening) = match save.load(content)? {
-            Loaded::Game(game) if game.is_over() => {
-                save.delete()?;
-                (
-                    Game::new(cli.seed_or_random(), content),
-                    vec![messages::welcome()],
-                )
-            }
+        let options_file = OptionsFile::beside(&save);
+        let loaded_options = options_file.load();
+        let settings = Settings {
+            options: loaded_options.options(),
+            detected,
+            forced_ascii: cli.ascii,
+        };
+        let mut app = Self::empty(settings.theme(), settings, content.clone());
+        if let LoadedOptions::Unreadable { reason } = loaded_options {
+            app.options_unreadable = Some(messages::options_unreadable(&reason));
+        }
+        match save.load(content)? {
+            Loaded::Game(game) if game.is_over() => save.delete()?,
             Loaded::Game(game) => {
                 if let Some(seed) = cli.seed {
                     anyhow::bail!(
                         "a game in progress is saved in {}: start the game without \
-                         --seed to continue it, or delete that file to abandon it \
-                         and play the seed {seed}",
+                         --seed to continue it, or to abandon it with New game or \
+                         Seed on the title screen; you can also delete that file \
+                         to abandon it and play the seed {seed}",
                         save.path().display()
                     );
                 }
-                (*game, vec![messages::welcome_back()])
+                app.saved = Some(*game);
             }
-            Loaded::Missing => (
-                Game::new(cli.seed_or_random(), content),
-                vec![messages::welcome()],
-            ),
-            Loaded::SetAside { reason, moved_to } => (
-                Game::new(cli.seed_or_random(), content),
-                vec![
-                    messages::save_set_aside(&reason, &moved_to.display().to_string()),
-                    messages::welcome(),
-                ],
-            ),
-        };
-        let mut app = Self::start(theme, game, content.clone(), opening);
+            Loaded::Missing => {}
+            Loaded::SetAside { reason, moved_to } => {
+                let moved_to = moved_to.display().to_string();
+                app.opening
+                    .push(messages::save_set_aside(&reason, &moved_to));
+                app.save_notice = Some(messages::save_set_aside_notice(&reason, &moved_to));
+            }
+        }
         app.save = Some(save);
+        app.options_file = Some(options_file);
+        match cli.seed {
+            Some(seed) => {
+                if let Some(problem) = app.options_unreadable.clone() {
+                    app.opening.insert(0, Message::new(Tone::Danger, problem));
+                }
+                app.start_new_game(seed);
+            }
+            None => app.state = State::Title(TitleMenu::open()),
+        }
         Ok(app)
     }
 
@@ -186,22 +271,25 @@ impl App {
     /// `seed`, peopled from `content`, in [`State::Playing`], drawn with
     /// `theme`, with no save file. The log opens with the welcome message.
     #[cfg(test)]
-    pub fn new(theme: Theme, seed: sigilfall_core::rng::Seed, content: &Content) -> Self {
-        Self::start(
-            theme,
-            Game::new(seed, content),
-            content.clone(),
-            vec![messages::welcome()],
-        )
+    pub fn new(theme: Theme, seed: Seed, content: &Content) -> Self {
+        Self::with_game(theme, Game::new(seed, content), content.clone())
     }
 
     /// Starts the application on `game` instead of a new game of a seed,
     /// so tests can play in a map they know, such as the fixed room of
-    /// `Game::in_fixed_room`; `content` names its monsters. No save file is
-    /// used.
+    /// `Game::in_fixed_room`; `content` names its monsters. No save or
+    /// options file is used, and the options screen, if reached, starts
+    /// from the default options on a 24-bit terminal.
     #[cfg(test)]
     pub fn with_game(theme: Theme, game: Game, content: Content) -> Self {
-        Self::start(theme, game, content, vec![messages::welcome()])
+        let settings = Settings {
+            options: Options::default(),
+            detected: ColorSupport::TrueColor,
+            forced_ascii: false,
+        };
+        let mut app = Self::empty(theme, settings, content);
+        app.begin(game, vec![messages::welcome()]);
+        app
     }
 
     /// Ties the application to `save`, as [`App::launch`] does, so tests
@@ -213,26 +301,49 @@ impl App {
         self
     }
 
-    /// Builds the application around `game`, with no save file: the log
-    /// holds the `opening` messages, and the screen is [`State::GameOver`]
-    /// if the game is already over, [`State::Playing`] otherwise.
-    fn start(theme: Theme, game: Game, content: Content, opening: Vec<Message>) -> Self {
+    /// An application on the title menu with no game, no file and nothing
+    /// to report, drawn with `theme` for `settings`.
+    fn empty(theme: Theme, settings: Settings, content: Content) -> Self {
+        Self {
+            run: None,
+            content,
+            state: State::Title(TitleMenu::open()),
+            settings,
+            theme,
+            screen_size: Cell::new(None),
+            save: None,
+            options_file: None,
+            saved: None,
+            opening: Vec::new(),
+            options_unreadable: None,
+            save_notice: None,
+            options_not_saved: None,
+        }
+    }
+
+    /// Starts playing `game`, its log holding the `opening` messages: the
+    /// screen is [`State::GameOver`] if the game is already over,
+    /// [`State::Playing`] otherwise. The notices about the save are
+    /// dropped: the player has seen them.
+    fn begin(&mut self, game: Game, opening: Vec<Message>) {
         let mut log = MessageLog::default();
         log.extend(opening);
-        let state = if game.is_over() {
+        self.state = if game.is_over() {
             State::GameOver
         } else {
             State::Playing
         };
-        Self {
-            game,
-            content,
-            log,
-            state,
-            theme,
-            screen_size: Cell::new(None),
-            save: None,
-        }
+        self.run = Some(Run { game, log });
+        self.save_notice = None;
+    }
+
+    /// Starts a new game of `seed`, its log opening with the messages
+    /// waiting in `opening`, then the welcome message.
+    fn start_new_game(&mut self, seed: Seed) {
+        let mut opening = std::mem::take(&mut self.opening);
+        opening.push(messages::welcome());
+        let game = Game::new(seed, &self.content);
+        self.begin(game, opening);
     }
 
     /// Returns the active screen, so tests can check it.
@@ -242,59 +353,321 @@ impl App {
     }
 
     /// Returns the game in progress, so tests can check its state.
+    ///
+    /// # Panics
+    ///
+    /// Panics on the title screens, where no game is in progress.
     #[cfg(test)]
-    pub const fn game(&self) -> &Game {
-        &self.game
+    pub fn game(&self) -> &Game {
+        &self.run.as_ref().expect("a game is in progress").game
     }
 
-    /// Returns the message log, so tests can check what it says.
+    /// Returns the message log of the game in progress, so tests can check
+    /// what it says.
+    ///
+    /// # Panics
+    ///
+    /// Panics on the title screens, where no game is in progress.
     #[cfg(test)]
-    pub const fn log(&self) -> &MessageLog {
-        &self.log
+    pub fn log(&self) -> &MessageLog {
+        &self.run.as_ref().expect("a game is in progress").log
     }
 
-    /// Reacts to one key event.
+    /// Returns whether a saved game can be resumed with "Continue", so
+    /// tests can check it.
+    #[cfg(test)]
+    pub const fn has_saved_game(&self) -> bool {
+        self.saved.is_some()
+    }
+
+    /// Returns the options in use, so tests can check them.
+    #[cfg(test)]
+    pub const fn options(&self) -> Options {
+        self.settings.options
+    }
+
+    /// Returns the theme every screen is drawn with, so tests can check it.
+    #[cfg(test)]
+    pub const fn theme(&self) -> &Theme {
+        &self.theme
+    }
+
+    /// Reacts to one key event, with the keymap of the active screen
+    /// (`input`): releases, repeats and unbound keys do nothing.
     ///
-    /// On the game screen, the key is translated by `input::command_for`:
-    /// releases, repeats and unbound keys do nothing. A game action is
-    /// submitted to the game, which may refuse it (a move into a wall)
-    /// without any time passing, and what happened is added to the log
-    /// (`messages::describe`). `t` opens the sigil overlay
-    /// ([`State::Casting`]), whose keys are described at
-    /// [`App::handle_casting_key`]; `i` opens the inventory
-    /// ([`State::Inventory`]), whose keys are described at
-    /// [`App::handle_inventory_key`]. If the player died, the application
-    /// moves to [`State::GameOver`], where game actions are ignored and only
-    /// quitting works. Once the application has quit, keys are ignored.
+    /// - Title screens: see [`App::handle_title_key`],
+    ///   [`App::handle_seed_key`], [`App::handle_confirm_key`] and
+    ///   [`App::handle_options_key`].
+    /// - Game screen (`input::command_for`): a game action is submitted to
+    ///   the game, which may refuse it (a move into a wall) without any
+    ///   time passing, and what happened is added to the log
+    ///   (`messages::describe`). `t` opens the sigil overlay
+    ///   ([`State::Casting`], see [`App::handle_casting_key`]); `i` opens
+    ///   the inventory ([`State::Inventory`], see
+    ///   [`App::handle_inventory_key`]). If the player died, the
+    ///   application moves to [`State::GameOver`].
+    /// - End screen (`input::end_command_for`): Enter goes back to the
+    ///   title screen, `q` quits.
     ///
-    /// While the last frame drawn was smaller than 80 × 24 (see `ui::fits`),
-    /// the screen shows a resize message instead of the game, so game
-    /// actions and the overlay's keys are ignored and only the quit keys
-    /// work. Before the first frame the size is unknown and actions are
-    /// accepted: the event loop always draws before it reads a key.
+    /// Once the application has quit, keys are ignored. While the last
+    /// frame drawn was smaller than 80 × 24 (see `ui::fits`), the screen
+    /// shows a resize message instead, so only the quit keys work. Before
+    /// the first frame the size is unknown and keys are accepted: the event
+    /// loop always draws before it reads a key.
     pub fn handle_key(&mut self, key: KeyEvent) {
         match self.state {
             State::Quit => {}
+            State::Title(menu) => self.handle_title_key(menu, key),
+            State::SeedEntry(entry) => self.handle_seed_key(entry, key),
+            State::Confirm(confirmation) => self.handle_confirm_key(confirmation, key),
+            State::Options(menu) => self.handle_options_key(menu, key),
             State::Casting(casting) => self.handle_casting_key(casting, key),
             State::Inventory(screen) => self.handle_inventory_key(screen, key),
-            State::Playing | State::GameOver => self.handle_game_key(key),
+            State::Playing => self.handle_game_key(key),
+            State::GameOver => self.handle_end_key(key),
         }
     }
 
-    /// Reacts to `key` on the game screen or the end screen (see
-    /// [`App::handle_key`]).
+    /// Reacts to `key` on the title menu in the state `menu`
+    /// (`input::title_command_for`): the arrows choose an entry, wrapping
+    /// around; Enter does what it says (see [`App::choose`]); `q` and
+    /// Ctrl+C quit.
+    fn handle_title_key(&mut self, menu: TitleMenu, key: KeyEvent) {
+        let has_save = self.saved.is_some();
+        let menu = match input::title_command_for(key) {
+            None => return,
+            Some(MenuCommand::Quit) => {
+                self.state = State::Quit;
+                return;
+            }
+            Some(_) if !self.screen_is_visible() => return,
+            Some(MenuCommand::Previous) => menu.previous(has_save),
+            Some(MenuCommand::Next) => menu.next(has_save),
+            Some(MenuCommand::First) => TitleMenu::open(),
+            Some(MenuCommand::Last) => TitleMenu::last(has_save),
+            Some(MenuCommand::Confirm) => return self.choose(menu.chosen(has_save)),
+            Some(MenuCommand::Back) => menu,
+        };
+        self.state = State::Title(menu);
+    }
+
+    /// Does what the title menu's entry `item` says: "Continue" resumes the
+    /// saved game; "New game" starts a game on a random seed, asking first
+    /// when a game is saved; "Seed" opens the seed entry; "Options" opens
+    /// the options screen; "Quit" quits.
+    fn choose(&mut self, item: TitleItem) {
+        match item {
+            TitleItem::Continue => {
+                if let Some(game) = self.saved.take() {
+                    self.begin(game, vec![messages::welcome_back()]);
+                }
+            }
+            TitleItem::NewGame => self.ask_new_game(None),
+            TitleItem::Seed => self.state = State::SeedEntry(SeedEntry::open()),
+            TitleItem::Options => self.state = State::Options(OptionsMenu::open()),
+            TitleItem::Quit => self.state = State::Quit,
+        }
+    }
+
+    /// Starts a new game on `seed` (`None` for a random one), or asks first
+    /// ([`State::Confirm`]) when a saved game would be abandoned.
+    fn ask_new_game(&mut self, seed: Option<Seed>) {
+        if self.saved.is_some() {
+            self.state = State::Confirm(Confirmation::new(seed));
+        } else {
+            self.start_new_game(seed.unwrap_or_else(cli::random_seed));
+        }
+    }
+
+    /// Reacts to `key` while the seed `entry` is typed
+    /// (`input::seed_command_for`): characters are typed, Backspace erases
+    /// the last one, Escape goes back to the menu on "Seed", Ctrl+C quits.
+    /// Enter starts a game on the seed typed (asking first when a game is
+    /// saved), or keeps the entry open with the reason it is not a seed.
+    fn handle_seed_key(&mut self, entry: SeedEntry, key: KeyEvent) {
+        let entry = match input::seed_command_for(key) {
+            None => return,
+            Some(SeedCommand::Quit) => {
+                self.state = State::Quit;
+                return;
+            }
+            Some(_) if !self.screen_is_visible() => return,
+            Some(SeedCommand::Type(typed)) => entry.push(typed),
+            Some(SeedCommand::Erase) => entry.erase(),
+            Some(SeedCommand::Back) => {
+                self.back_to_menu(TitleItem::Seed);
+                return;
+            }
+            Some(SeedCommand::Submit) => match entry.submit() {
+                Ok(seed) => return self.ask_new_game(Some(seed)),
+                Err(refused) => refused,
+            },
+        };
+        self.state = State::SeedEntry(entry);
+    }
+
+    /// Reacts to `key` on the confirmation `confirmation`
+    /// (`input::confirm_command_for`): the arrows switch between "Keep"
+    /// and "Abandon"; Escape, or Enter on "Keep", goes back to the menu
+    /// with the saved game untouched; Enter on "Abandon" deletes the save
+    /// and starts the new game (see [`App::abandon_saved_game`]); Ctrl+C
+    /// quits.
+    fn handle_confirm_key(&mut self, confirmation: Confirmation, key: KeyEvent) {
+        let confirmation = match input::confirm_command_for(key) {
+            None => return,
+            Some(MenuCommand::Quit) => {
+                self.state = State::Quit;
+                return;
+            }
+            Some(_) if !self.screen_is_visible() => return,
+            Some(MenuCommand::Previous | MenuCommand::Next) => confirmation.switch(),
+            Some(MenuCommand::First) => confirmation.choosing(false),
+            Some(MenuCommand::Last) => confirmation.choosing(true),
+            Some(MenuCommand::Confirm) if confirmation.abandons() => {
+                return self.abandon_saved_game(confirmation);
+            }
+            Some(MenuCommand::Confirm | MenuCommand::Back) => {
+                self.back_to_menu(confirmation.asked_from());
+                return;
+            }
+        };
+        self.state = State::Confirm(confirmation);
+    }
+
+    /// Deletes the save and starts the new game `confirmation` asked for.
+    ///
+    /// When the save cannot be deleted, no game starts: the title menu
+    /// comes back with the reason, so the save is never overwritten without
+    /// the player knowing.
+    fn abandon_saved_game(&mut self, confirmation: Confirmation) {
+        if let Some(save) = &self.save
+            && let Err(error) = save.delete()
+        {
+            self.save_notice = Some(messages::save_not_deleted_notice(
+                &save.path().display().to_string(),
+                &error.root_cause().to_string(),
+            ));
+            self.back_to_menu(confirmation.asked_from());
+            return;
+        }
+        self.saved = None;
+        self.start_new_game(confirmation.seed().unwrap_or_else(cli::random_seed));
+    }
+
+    /// Shows the title menu with `item` chosen.
+    fn back_to_menu(&mut self, item: TitleItem) {
+        self.state = State::Title(TitleMenu::on(item, self.saved.is_some()));
+    }
+
+    /// Reacts to `key` on the options screen in the state `menu`
+    /// (`input::options_command_for`): the arrows choose an entry; Left
+    /// and Right, Enter and Space change the chosen option (see
+    /// [`App::change_option`]); Escape, or Enter on "Back", goes back to
+    /// the menu on "Options"; Ctrl+C quits.
+    fn handle_options_key(&mut self, menu: OptionsMenu, key: KeyEvent) {
+        let menu = match input::options_command_for(key) {
+            None => return,
+            Some(OptionsCommand::Quit) => {
+                self.state = State::Quit;
+                return;
+            }
+            Some(_) if !self.screen_is_visible() => return,
+            Some(OptionsCommand::Previous) => menu.previous(),
+            Some(OptionsCommand::Next) => menu.next(),
+            Some(OptionsCommand::First) => OptionsMenu::open(),
+            Some(OptionsCommand::Last) => OptionsMenu::last(),
+            Some(OptionsCommand::Back) => {
+                self.back_to_menu(TitleItem::Options);
+                return;
+            }
+            Some(OptionsCommand::Confirm) if menu.chosen() == OptionRow::Back => {
+                self.back_to_menu(TitleItem::Options);
+                return;
+            }
+            Some(OptionsCommand::PreviousValue) => {
+                self.change_option(menu.chosen(), false);
+                menu
+            }
+            Some(OptionsCommand::NextValue | OptionsCommand::Confirm) => {
+                self.change_option(menu.chosen(), true);
+                menu
+            }
+        };
+        self.state = State::Options(menu);
+    }
+
+    /// Gives the option of `row` its next value (`forward`) or its previous
+    /// one, applies it to the theme at once, and writes the options to the
+    /// options file, if the application has one.
+    ///
+    /// A failed write does not undo the change: the options apply for this
+    /// session, and the options screen says why they were not kept. A
+    /// successful write clears the notices about the options file, which
+    /// it has just replaced.
+    fn change_option(&mut self, row: OptionRow, forward: bool) {
+        let options = options_screen::change(self.settings.options, row, forward);
+        if options == self.settings.options {
+            return;
+        }
+        self.settings.options = options;
+        self.theme = self.settings.theme();
+        let Some(file) = &self.options_file else {
+            return;
+        };
+        match file.write(&options) {
+            Ok(()) => {
+                self.options_not_saved = None;
+                self.options_unreadable = None;
+            }
+            Err(error) => {
+                self.options_not_saved = Some(messages::options_not_saved(&format!("{error:#}")));
+            }
+        }
+    }
+
+    /// Reacts to `key` on the game screen (see [`App::handle_key`]).
     fn handle_game_key(&mut self, key: KeyEvent) {
         match input::command_for(key) {
             None => {}
             Some(Command::Quit) => self.state = State::Quit,
-            Some(Command::Act(_) | Command::Trace | Command::Inventory)
-                if self.state == State::GameOver || !self.game_is_visible() => {}
+            Some(_) if !self.screen_is_visible() => {}
             Some(Command::Act(action)) => {
                 self.play(action);
             }
             Some(Command::Trace) => self.state = State::Casting(Casting::start()),
             Some(Command::Inventory) => self.state = State::Inventory(InventoryScreen::open()),
         }
+    }
+
+    /// Reacts to `key` on the end screen (`input::end_command_for`): Enter
+    /// goes back to the title screen (see [`App::back_to_title`]), `q` and
+    /// Ctrl+C quit.
+    fn handle_end_key(&mut self, key: KeyEvent) {
+        match input::end_command_for(key) {
+            None => {}
+            Some(EndCommand::Quit) => self.state = State::Quit,
+            Some(_) if !self.screen_is_visible() => {}
+            Some(EndCommand::Title) => self.back_to_title(),
+        }
+    }
+
+    /// Leaves the finished game for the title menu.
+    ///
+    /// The save of the dead character was deleted at the death; if that
+    /// failed, it is tried again here, and a second failure is shown on
+    /// the title screen. Nothing is left to continue.
+    fn back_to_title(&mut self) {
+        if let Some(save) = &self.save
+            && let Err(error) = save.delete()
+        {
+            self.save_notice = Some(messages::dead_save_not_deleted_notice(
+                &save.path().display().to_string(),
+                &error.root_cause().to_string(),
+            ));
+        }
+        self.run = None;
+        self.saved = None;
+        self.state = State::Title(TitleMenu::open());
     }
 
     /// Reacts to `key` while the inventory shows `screen`
@@ -306,14 +679,14 @@ impl App {
     /// (see [`App::act_on_item`]); with nothing carried they do nothing.
     /// Ctrl+C quits. Below 80 × 24 nothing else works.
     fn handle_inventory_key(&mut self, screen: InventoryScreen, key: KeyEvent) {
-        let carried = self.game.inventory().count();
+        let carried = self.carried();
         let screen = match input::inventory_command_for(key) {
             None => return,
             Some(InventoryCommand::Quit) => {
                 self.state = State::Quit;
                 return;
             }
-            Some(_) if !self.game_is_visible() => return,
+            Some(_) if !self.screen_is_visible() => return,
             Some(InventoryCommand::Close) => {
                 self.state = State::Playing;
                 return;
@@ -329,6 +702,14 @@ impl App {
         self.state = State::Inventory(screen);
     }
 
+    /// Returns how many items the player of the game in progress carries,
+    /// or 0 without a game.
+    fn carried(&self) -> usize {
+        self.run
+            .as_ref()
+            .map_or(0, |run| run.game.inventory().count())
+    }
+
     /// Submits `action` (`Action::Use` or `Action::Drop`) for the item
     /// `screen` has chosen, and logs what happened.
     ///
@@ -340,12 +721,13 @@ impl App {
     /// inventory stays open on the same item with the reason under the
     /// list. With nothing carried, nothing is submitted.
     fn act_on_item(&mut self, screen: InventoryScreen, action: fn(ItemId) -> Action) {
-        let carried = self.game.inventory().count();
-        let chosen = self
-            .game
-            .inventory()
-            .nth(screen.selected(carried))
-            .map(|(id, _)| id);
+        let carried = self.carried();
+        let chosen = self.run.as_ref().and_then(|run| {
+            run.game
+                .inventory()
+                .nth(screen.selected(carried))
+                .map(|(id, _)| id)
+        });
         let Some(item) = chosen else {
             return;
         };
@@ -376,7 +758,7 @@ impl App {
     ///
     /// Ctrl+C quits from every step. Below 80 × 24 nothing else works.
     fn handle_casting_key(&mut self, casting: Casting, key: KeyEvent) {
-        let visible = self.game_is_visible();
+        let visible = self.screen_is_visible();
         match casting {
             Casting::Drawing(mut drawing) => match input::trace_command_for(key) {
                 None => {}
@@ -426,7 +808,10 @@ impl App {
             self.state = State::Casting(Casting::Drawing(drawing));
             return;
         }
-        let can_pay = self.game.player_actor().essence() >= ESSENCE_COST;
+        let can_pay = self
+            .run
+            .as_ref()
+            .is_some_and(|run| run.game.player_actor().essence() >= ESSENCE_COST);
         match self.aimed_sigil(&trace) {
             Some(sigil) if can_pay => self.state = State::Casting(Casting::Aiming { trace, sigil }),
             _ => self.cast(trace, None),
@@ -435,12 +820,14 @@ impl App {
 
     /// Returns the position in the sigil file (`SigilDef::index`) of the
     /// sigil `trace` casts if that sigil is aimed in a direction, or `None`
-    /// when it casts no sigil or one that needs no direction.
+    /// when it casts no sigil, one that needs no direction, or there is no
+    /// game.
     ///
     /// The trace is recognised as the game will recognise it: against the
     /// player's grimoire, with `sigil::recognize`.
     fn aimed_sigil(&self, trace: &Trace) -> Option<usize> {
-        match recognize(trace, self.game.grimoire().sigils()) {
+        let run = self.run.as_ref()?;
+        match recognize(trace, run.game.grimoire().sigils()) {
             Recognition::Success(sigil) | Recognition::Unstable(sigil)
                 if sigil.targeting() == Targeting::Direction =>
             {
@@ -465,8 +852,11 @@ impl App {
             GameEvent::SigilCast { sigil, quality } => Some((sigil.as_deref(), *quality)),
             _ => None,
         });
+        let Some(run) = &self.run else {
+            return;
+        };
         if let Some((sigil, quality @ (CastQuality::Unstable | CastQuality::Fizzled))) = cast {
-            let known = self.game.grimoire().sigils();
+            let known = run.game.grimoire().sigils();
             let sigil = sigil.and_then(|id| known.iter().find(|known| known.id() == id));
             let sigil = sigil.map(SigilDef::index);
             self.state = State::Casting(Casting::Verdict(Verdict {
@@ -477,18 +867,21 @@ impl App {
         }
     }
 
-    /// Submits the player's `action` to the game, adds what happened to the
-    /// log, moves to [`State::GameOver`] if the player died, and returns the
-    /// events.
+    /// Submits the player's `action` to the game in progress, adds what
+    /// happened to the log, moves to [`State::GameOver`] if the player
+    /// died, and returns the events; without a game, does nothing.
     ///
     /// The death of the player deletes the save at once, before the end
     /// screen is drawn, so the dead character cannot be resumed even if the
     /// game is killed rather than quit.
     fn play(&mut self, action: Action) -> Vec<GameEvent> {
-        let events = self.game.submit(action);
-        self.log
-            .extend(messages::describe(&events, &self.game, &self.content));
-        if self.game.is_over() {
+        let Some(run) = &mut self.run else {
+            return Vec::new();
+        };
+        let events = run.game.submit(action);
+        run.log
+            .extend(messages::describe(&events, &run.game, &self.content));
+        if run.game.is_over() {
             self.state = State::GameOver;
             self.delete_save();
         }
@@ -498,13 +891,16 @@ impl App {
     /// Deletes the save of the dead character, if the application has one.
     ///
     /// A failure is not lost: the log says so, and [`App::save_on_exit`]
-    /// tries again and reports a second failure when the game ends.
+    /// (or going back to the title) tries again and reports a second
+    /// failure.
     fn delete_save(&mut self) {
         let Some(save) = &self.save else {
             return;
         };
-        if save.delete().is_err() {
-            self.log.push(messages::save_not_deleted());
+        if save.delete().is_err()
+            && let Some(run) = &mut self.run
+        {
+            run.log.push(messages::save_not_deleted());
         }
     }
 
@@ -512,7 +908,8 @@ impl App {
     /// game in progress is written to the save file (`SaveFile::write`),
     /// and the save of a finished game is deleted if it is still there, so
     /// quitting from the end screen never brings a save back. Does nothing
-    /// for an application without a save file.
+    /// for an application without a save file, nor on the title screens,
+    /// where the saved game, if any, is left as it is.
     ///
     /// Meant to be called once, after [`App::run`] returned, whatever it
     /// returned: a game whose screen failed is still saved.
@@ -523,50 +920,93 @@ impl App {
     /// says which file failed and what to check; the game in progress is then
     /// not saved, and the caller must tell the player.
     pub fn save_on_exit(&self) -> anyhow::Result<()> {
-        let Some(save) = &self.save else {
+        let (Some(save), Some(run)) = (&self.save, &self.run) else {
             return Ok(());
         };
-        if self.game.is_over() {
+        if run.game.is_over() {
             save.delete()
         } else {
-            save.write(&self.game)
+            save.write(&run.game)
         }
     }
 
     /// Draws the active screen over the whole frame, with the application's
-    /// theme: the game screen with its log, under the sigil overlay while
-    /// the player casts or under the inventory while it is open, or the end
-    /// screen once the game is over.
+    /// theme: the title screen, its seed entry or confirmation, or the
+    /// options screen before a game; the game screen with its log, under
+    /// the sigil overlay while the player casts or under the inventory
+    /// while it is open; or the end screen once the game is over.
     ///
     /// Any frame size is accepted: below 80 × 24 a message asks for a larger
     /// terminal instead (see `ui::render`). The frame's size is recorded, and
-    /// decides whether [`App::handle_key`] plays game actions.
+    /// decides whether [`App::handle_key`] acts on keys.
     pub fn render(&self, frame: &mut Frame) {
         self.screen_size.set(Some(frame.area().as_size()));
+        let step = match &self.state {
+            State::Title(menu) => Some(TitleStep::Menu(menu)),
+            State::SeedEntry(entry) => Some(TitleStep::Seed(entry)),
+            State::Confirm(confirmation) => Some(TitleStep::Confirm(confirmation)),
+            State::Options(menu) => {
+                let screen = MenuScreen::Options {
+                    menu,
+                    settings: &self.settings,
+                    notice: self.options_not_saved.as_deref(),
+                };
+                return ui::render_menu(frame, screen, &self.theme);
+            }
+            State::Playing
+            | State::Casting(_)
+            | State::Inventory(_)
+            | State::GameOver
+            | State::Quit => None,
+        };
+        let (Some(run), None) = (&self.run, step) else {
+            let menu = TitleMenu::open();
+            return self.render_title(frame, step.unwrap_or(TitleStep::Menu(&menu)));
+        };
         let overlay = match &self.state {
             State::Casting(casting) => Some(Overlay::Casting(casting)),
             State::Inventory(screen) => Some(Overlay::Inventory(screen)),
-            State::Playing | State::GameOver | State::Quit => None,
+            _ => None,
         };
         ui::render(
             frame,
-            &self.game,
-            &self.log,
+            &run.game,
+            &run.log,
             &self.content,
             overlay,
             &self.theme,
         );
     }
 
-    /// Returns whether the game screen is shown: `true` when the last frame
+    /// Draws the title screen at `step`, with the saved game beside
+    /// "Continue" and the notices about the files.
+    fn render_title(&self, frame: &mut Frame, step: TitleStep<'_>) {
+        let separator = self.theme.glyphs.separator;
+        let saved = self
+            .saved
+            .as_ref()
+            .map(|game| messages::saved_run(game.depth(), game.player_turns() + 1, separator));
+        let notices: Vec<String> = [&self.save_notice, &self.options_unreadable]
+            .into_iter()
+            .flatten()
+            .cloned()
+            .collect();
+        let screen = MenuScreen::Title {
+            step,
+            saved: saved.as_deref(),
+            notices: &notices,
+        };
+        ui::render_menu(frame, screen, &self.theme);
+    }
+
+    /// Returns whether the screen is shown: `true` when the last frame
     /// drawn was at least 80 × 24, or when no frame has been drawn yet.
-    fn game_is_visible(&self) -> bool {
+    fn screen_is_visible(&self) -> bool {
         self.screen_size.get().is_none_or(ui::fits)
     }
 
-    /// Runs the event loop on `terminal` until the player quits, from the
-    /// game or from the end screen: draw, wait for the next terminal event,
-    /// handle it, repeat.
+    /// Runs the event loop on `terminal` until the player quits, from any
+    /// screen: draw, wait for the next terminal event, handle it, repeat.
     ///
     /// A resize event needs no handling of its own: the next draw adapts to
     /// the new size and records it before any further key is read.
@@ -611,7 +1051,9 @@ mod tests {
 
     mod death_summary;
     mod inventory_screen;
+    mod options_screen;
     mod save_files;
+    mod title_screen;
 
     /// Seed of every test game: its written form, `7F3A-91C2-0B5E-D4A8`,
     /// is the one of the game screen mock-up in `docs/design.md`.
@@ -1161,10 +1603,10 @@ mod tests {
             let help = row_text(&buffer, 23);
 
             assert!(status.starts_with(" Depth 1 - Turn 1 "), "{status:?}");
-            // Eight help entries fill the 80 columns exactly: nothing cut.
+            // Seven help entries fit the 80 columns, one to spare: nothing cut.
             assert_eq!(
                 help,
-                " <^>v/1-9 move   . wait   t trace   g pick up   i inventory   > descend   q quit"
+                " <^>v/1-9 move   . wait   t trace   g take   i pack   > descend   q save & quit "
             );
         }
     }
@@ -1606,7 +2048,10 @@ mod tests {
                 text.contains("Replay this seed: sigilfall --seed 7F3A-91C2-0B5E-D4A8"),
                 "{text}"
             );
-            assert!(row_text(&screen, 23).starts_with(" q quit"), "{text}");
+            assert!(
+                row_text(&screen, 23).starts_with(" Enter title screen   q quit"),
+                "{text}"
+            );
             assert!(!text.contains("Turn "), "no game screen:\n{text}");
             assert_snapshot!(render(&app, 80, 24).backend());
         }
@@ -1626,7 +2071,7 @@ mod tests {
                     KeyCode::Right,
                     KeyCode::Char('.'),
                     KeyCode::Char('5'),
-                    KeyCode::Enter,
+                    KeyCode::Esc,
                 ],
             );
 
@@ -2896,7 +3341,8 @@ mod tests {
             );
         }
 
-        /// Every key but the quit ones, with modifiers that matter.
+        /// Every key but the quit ones and Enter, which goes back to the
+        /// title screen since T26, with modifiers that matter.
         fn all_non_quit_keys() -> Vec<KeyEvent> {
             let mut keys = Vec::new();
             for c in (' '..='~').filter(|&c| c != 'q') {
@@ -2911,7 +3357,6 @@ mod tests {
             keys.push(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::ALT));
             for code in [
                 KeyCode::Esc,
-                KeyCode::Enter,
                 KeyCode::Tab,
                 KeyCode::BackTab,
                 KeyCode::Backspace,

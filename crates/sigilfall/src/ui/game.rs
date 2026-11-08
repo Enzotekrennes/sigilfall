@@ -164,10 +164,10 @@ pub fn render(
 fn status_line(game: &Game, theme: &Theme) -> Line<'static> {
     let current_turn = game.player_turns() + 1;
     Line::from(vec![
-        Span::styled(" Depth ", theme.text_muted),
+        Span::styled(format!(" {} ", messages::DEPTH_LABEL), theme.text_muted),
         Span::styled(game.depth().to_string(), theme.text),
         Span::styled(
-            format!(" {} Turn ", theme.glyphs.separator),
+            format!(" {} {} ", theme.glyphs.separator, messages::TURN_LABEL),
             theme.text_muted,
         ),
         Span::styled(current_turn.to_string(), theme.text),
@@ -182,7 +182,10 @@ fn status_line(game: &Game, theme: &Theme) -> Line<'static> {
 /// `--seed` accepts back to replay the run.
 fn seed_label(seed: Seed, theme: &Theme) -> Line<'static> {
     Line::from(vec![
-        Span::styled("Seed ", theme.text_muted),
+        Span::styled(
+            format!("{} ", messages::STATUS_SEED_LABEL),
+            theme.text_muted,
+        ),
         Span::styled(seed.to_string(), theme.text_title),
     ])
     .right_aligned()
@@ -192,8 +195,8 @@ fn seed_label(seed: Seed, theme: &Theme) -> Line<'static> {
 /// does in the muted style, so keys stand out from their labels.
 ///
 /// The keys are those of the screen in front of the player: the game's
-/// (move, wait, trace, pick up, inventory, descend, quit), which fill the
-/// 80 columns exactly; under the sigil overlay,
+/// (move, wait, trace, take, pack, descend, save & quit), which fit the
+/// 80 columns with one to spare; under the sigil overlay,
 /// the overlay's (link a node, undo, cast, cancel), the direction prompt's
 /// (aim, back) or the verdict's (continue); in the inventory, its own
 /// (choose, use, drop, close), or only close while the player carries
@@ -212,7 +215,7 @@ fn key_help(overlay: Option<Overlay<'_>>, carries_items: bool, theme: &Theme) ->
                 messages::INVENTORY_LABEL,
             ),
             (messages::DESCEND_KEY.to_owned(), messages::DESCEND_LABEL),
-            (messages::QUIT_KEY.to_owned(), messages::QUIT_LABEL),
+            (messages::QUIT_KEY.to_owned(), messages::SAVE_AND_QUIT_LABEL),
         ],
         Some(Overlay::Inventory(_)) if carries_items => vec![
             (
@@ -233,15 +236,7 @@ fn key_help(overlay: Option<Overlay<'_>>, carries_items: bool, theme: &Theme) ->
         }
         Some(Overlay::Casting(casting)) => casting_bindings(casting, directions),
     };
-    let mut spans = vec![Span::raw(" ")];
-    for (index, (key, label)) in bindings.into_iter().enumerate() {
-        if index > 0 {
-            spans.push(Span::raw("   "));
-        }
-        spans.push(Span::styled(key, theme.text));
-        spans.push(Span::styled(format!(" {label}"), theme.text_muted));
-    }
-    Line::from(spans)
+    super::key_help(bindings, theme)
 }
 
 /// The keys of the sigil overlay at the step `casting`, with their labels,

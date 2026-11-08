@@ -1,6 +1,8 @@
-//! Every English sentence and label of the message log, the side panel, the
-//! sigil overlay, the inventory and the end screen, and the translation of
-//! game events into log messages.
+//! Every English sentence and label the player reads: the message log, the
+//! status line, the side panel, the sigil overlay, the inventory, the end
+//! screen, the title screen with its seed entry and confirmation, the
+//! options screen and the resize message; and the translation of game
+//! events into log messages.
 //!
 //! Exposes [`describe`], which turns the events of one `Game::submit` into
 //! [`Message`]s, the opening messages ([`welcome`], [`welcome_back`],
@@ -11,10 +13,12 @@
 //! item does in a few words ([`effect_summary`], [`item_summary`]), the time
 //! a cast takes ([`cast_time`]), why the game refused an item
 //! ([`item_refusal`]), the notices of the sigil overlay and the inventory,
-//! and the fixed labels of those screens and of the key help. Keeping the words here, away from the drawing code, is what
-//! decision D10 asks: a translation would only touch this file. The depth,
-//! turn and seed labels of the status line keep their words in `ui::game`,
-//! beside the turn and seed labels that predate this module.
+//! the words of the title and options screens ([`saved_run`],
+//! [`abandon_warning`], [`invalid_seed`], [`auto_colors`],
+//! [`options_unreadable`], [`options_not_saved`]…), and the fixed labels of
+//! every screen and of the key help. Keeping the words here, away from the
+//! drawing code, is what decision D10 asks: a translation would only touch
+//! this file.
 //!
 //! The game itself never writes text (decision D4): it reports events, and
 //! this module chooses what the player reads about them.
@@ -35,6 +39,7 @@ use sigilfall_core::sigil::{CastQuality, Node};
 use sigilfall_core::stats::CastCounts;
 
 use crate::message_log::{Message, Tone};
+use crate::theme::ColorSupport;
 
 /// Title of the side panel's health block.
 pub const HP_LABEL: &str = "HP";
@@ -173,8 +178,20 @@ pub const ITEMS_USED_LABEL: &str = "Items used";
 /// Key that leaves the game, as the key help shows it.
 pub const QUIT_KEY: &str = "q";
 
-/// What [`QUIT_KEY`] does, as the key help shows it.
+/// What [`QUIT_KEY`] does on the title and end screens, where nothing is
+/// left to save.
 pub const QUIT_LABEL: &str = "quit";
+
+/// What [`QUIT_KEY`] does on the game screen: the game in progress is
+/// saved, then the program ends.
+pub const SAVE_AND_QUIT_LABEL: &str = "save & quit";
+
+/// Key that goes back to the title screen from the end screen, as the key
+/// help shows it.
+pub const TITLE_KEY: &str = "Enter";
+
+/// What [`TITLE_KEY`] does on the end screen.
+pub const TITLE_LABEL: &str = "title screen";
 
 /// What the movement keys do, in the key help of the game screen.
 pub const MOVE_LABEL: &str = "move";
@@ -229,14 +246,16 @@ pub const AIM_LABEL: &str = "aim";
 /// screen; `,` does the same, as in other roguelikes.
 pub const PICK_UP_KEY: &str = "g";
 
-/// What [`PICK_UP_KEY`] does.
-pub const PICK_UP_LABEL: &str = "pick up";
+/// What [`PICK_UP_KEY`] does: "take" rather than "pick up", so the game
+/// screen's help, with "save & quit", fits 80 columns.
+pub const PICK_UP_LABEL: &str = "take";
 
 /// Key that opens the inventory, in the key help of the game screen.
 pub const INVENTORY_KEY: &str = "i";
 
-/// What [`INVENTORY_KEY`] does.
-pub const INVENTORY_LABEL: &str = "inventory";
+/// What [`INVENTORY_KEY`] does: "pack", the word of the log ("Your pack is
+/// full"), short enough for the game screen's help to fit 80 columns.
+pub const INVENTORY_LABEL: &str = "pack";
 
 /// Key that goes down the stairs, in the key help of the game screen; the
 /// alternative `input::DESCEND_ALTERNATIVE_KEY` does the same, but the
@@ -270,6 +289,235 @@ pub const DROP_LABEL: &str = "drop";
 
 /// What [`CANCEL_KEY`] does in the inventory.
 pub const CLOSE_LABEL: &str = "close";
+
+/// Label of the depth on the status line, before its value.
+pub const DEPTH_LABEL: &str = "Depth";
+
+/// Label of the turn on the status line, before its value.
+pub const TURN_LABEL: &str = "Turn";
+
+/// Label of the seed at the right end of the status line, before it.
+pub const STATUS_SEED_LABEL: &str = "Seed";
+
+/// The message shown instead of any screen on a terminal smaller than
+/// `min_width` × `min_height`: what is needed and the `width` × `height`
+/// of now, `times` being the theme's dimension sign.
+pub fn enlarge_terminal(
+    (min_width, min_height): (u16, u16),
+    (width, height): (u16, u16),
+    times: char,
+) -> String {
+    format!(
+        "Enlarge the terminal to {min_width} {times} {min_height} (current: {width} {times} {height})."
+    )
+}
+
+/// Name of the game on the title screen, letter-spaced like the end
+/// screen's title.
+pub const GAME_TITLE: &str = "S I G I L F A L L";
+
+/// Line under the game's name on the title screen.
+pub const TAGLINE: &str = "Trace true. The dungeon listens.";
+
+/// Menu entry that resumes the saved game.
+pub const CONTINUE_ITEM: &str = "Continue";
+
+/// Menu entry that starts a new game on a random seed.
+pub const NEW_GAME_ITEM: &str = "New game";
+
+/// Menu entry that starts a new game on a seed the player types.
+pub const SEED_ITEM: &str = "Seed";
+
+/// Menu entry that opens the options screen.
+pub const OPTIONS_ITEM: &str = "Options";
+
+/// Menu entry that leaves the game.
+pub const QUIT_ITEM: &str = "Quit";
+
+/// What the title screen says of the saved game, beside "Continue": its
+/// depth and the turn it stopped on, such as "depth 3 · turn 412", with
+/// the theme's `separator`.
+pub fn saved_run(depth: u32, turn: u64, separator: char) -> String {
+    format!("depth {depth} {separator} turn {turn}")
+}
+
+/// Key that confirms the chosen menu entry, in the key help of the menus.
+pub const CONFIRM_KEY: &str = "Enter";
+
+/// What [`CONFIRM_KEY`] does in the menus.
+pub const CONFIRM_LABEL: &str = "confirm";
+
+/// The version of the game, as the title screen shows it in its corner:
+/// "v" and the version of this binary, such as "v0.1.0".
+pub fn version() -> String {
+    format!("v{}", env!("CARGO_PKG_VERSION"))
+}
+
+/// What the title screen asks while a seed is typed.
+pub const SEED_PROMPT: &str = "Type the seed of the dungeon, then press Enter.";
+
+/// Label before the field where the seed is typed.
+pub const SEED_FIELD_LABEL: &str = "Seed";
+
+/// The forms a seed is accepted in, under the field.
+pub const SEED_FORMS: &str = "A number such as 42, or the shared form 7F3A-91C2-0B5E-D4A8.";
+
+/// What the seed entry says when Enter is pressed on an empty field.
+pub const EMPTY_SEED: &str = "Type a seed first.";
+
+/// What the seed entry says when `typed` is not a seed: the text as typed
+/// and what to do.
+pub fn invalid_seed(typed: &str) -> String {
+    format!("\"{typed}\" is not a seed: use one of the forms above.")
+}
+
+/// What Enter does in the seed entry.
+pub const START_LABEL: &str = "start";
+
+/// What Backspace does in the seed entry.
+pub const ERASE_LABEL: &str = "erase";
+
+/// What Escape does on the seed entry and the options screen.
+pub const MENU_BACK_LABEL: &str = "back";
+
+/// Question of the confirmation shown before a new game replaces a saved
+/// one.
+pub const ABANDON_QUESTION: &str = "Start a new game?";
+
+/// The warning under [`ABANDON_QUESTION`]: the game in progress, described
+/// by `saved` (see [`saved_run`]), will be abandoned and its save deleted.
+/// Two lines, each within 60 columns.
+pub fn abandon_warning(saved: &str) -> [String; 2] {
+    [
+        format!("The game in progress ({saved}) will be abandoned"),
+        "and its save deleted for good.".to_owned(),
+    ]
+}
+
+/// Choice of the confirmation that keeps the saved game; the one chosen
+/// at first, so Enter pressed by habit loses nothing.
+pub const KEEP_ITEM: &str = "Keep the game in progress";
+
+/// Choice of the confirmation that deletes the saved game and starts the
+/// new one.
+pub const ABANDON_ITEM: &str = "Abandon it and start anew";
+
+/// What Escape does on the confirmation.
+pub const KEEP_LABEL: &str = "keep it";
+
+/// Title of the options screen, letter-spaced like the game's name.
+pub const OPTIONS_TITLE: &str = "O P T I O N S";
+
+/// Label of the glyph option.
+pub const GLYPHS_OPTION: &str = "Glyphs";
+
+/// Label of the colour option.
+pub const COLORS_OPTION: &str = "Colours";
+
+/// Label of the theme option.
+pub const THEME_OPTION: &str = "Theme";
+
+/// Last entry of the options screen, back to the title screen.
+pub const BACK_ITEM: &str = "Back";
+
+/// Value of the glyph option for Unicode glyphs.
+pub const UNICODE_VALUE: &str = "Unicode";
+
+/// Value of the glyph option for ASCII glyphs.
+pub const ASCII_VALUE: &str = "ASCII";
+
+/// Value of the colour option for the 16 ANSI colours.
+pub const ANSI16_VALUE: &str = "16 colours";
+
+/// Value of the colour option for no colour.
+pub const MONOCHROME_VALUE: &str = "Monochrome";
+
+/// Value of the theme option for the dark theme.
+pub const DARK_VALUE: &str = "Dark";
+
+/// Value of the theme option for the light theme.
+pub const LIGHT_VALUE: &str = "Light";
+
+/// Value of the colour option "Auto", with what the terminal was `detected`
+/// to support, so the player knows what Auto gives, such as
+/// "Auto · true colour", with the theme's `separator`.
+pub fn auto_colors(detected: ColorSupport, separator: char) -> String {
+    let detected = match detected {
+        ColorSupport::TrueColor => "true colour",
+        ColorSupport::Ansi16 => "16 colours",
+        ColorSupport::None => "none, NO_COLOR is set",
+    };
+    format!("Auto {separator} {detected}")
+}
+
+/// What each entry of the options screen does, shown under the list for
+/// the chosen one: glyphs, colours, theme, back.
+pub const OPTION_HELP: [&str; 4] = [
+    "Unicode draws stone walls and sigils; ASCII suits any font.",
+    "Auto follows the terminal; 16 colours or none suit plain ones.",
+    "Dark ink or light parchment. Light needs true colour.",
+    "Options are saved as soon as they change.",
+];
+
+/// Label of the sample line of the options screen, which shows a few map
+/// glyphs in the current theme.
+pub const SAMPLE_LABEL: &str = "Sample";
+
+/// Note of the options screen while `--ascii` is given: the glyph option is
+/// kept but not used for this session.
+pub const ASCII_FORCED: &str = "--ascii is on: ASCII glyphs for this session.";
+
+/// Note of the options screen when the light theme is chosen on a terminal
+/// drawn with 16 colours, where it falls back to monochrome.
+pub const LIGHT_IN_MONOCHROME: &str = "Light needs true colour: drawn in monochrome here.";
+
+/// What changes an option on the options screen, in the key help.
+pub const CHANGE_LABEL: &str = "change";
+
+/// The notice of the title screen when the options file could not be read
+/// back: `reason` (see `persist::LoadedOptions::Unreadable`), and what
+/// happens instead.
+pub fn options_unreadable(reason: &str) -> String {
+    format!(
+        "The options file could not be read ({reason}). The default options \
+         are in use; changing one rewrites the file."
+    )
+}
+
+/// The notice of the options screen when the options could not be written:
+/// `error` says which file and what to check.
+pub fn options_not_saved(error: &str) -> String {
+    format!("{error}. The options apply until you quit.")
+}
+
+/// The notice of the title screen when the save could not be read back
+/// at launch: `reason` (a sentence of `persist::Loaded::SetAside`), and
+/// `moved_to`, where the unreadable save was kept.
+pub fn save_set_aside_notice(reason: &str, moved_to: &str) -> String {
+    format!("Your saved game could not be read: {reason}. It was kept as {moved_to}.")
+}
+
+/// The notice of the title screen when the save at `path` could not be
+/// deleted to start a new game, for the reason `cause` (the system's
+/// error). The new game is not started, so the save is never overwritten
+/// without the player knowing; the outcome comes first, so it is read
+/// even when a long path is cut.
+pub fn save_not_deleted_notice(path: &str, cause: &str) -> String {
+    format!(
+        "No new game was started: the save {path} could not be deleted ({cause}). \
+         Check that it is a file you can delete."
+    )
+}
+
+/// The notice of the title screen when the save of the dead character, at
+/// `path`, could still not be deleted on the way back to the title, for
+/// the reason `cause`.
+pub fn dead_save_not_deleted_notice(path: &str, cause: &str) -> String {
+    format!(
+        "The save {path} of the dead character could not be deleted ({cause}). \
+         Delete it by hand so it is not resumed."
+    )
+}
 
 /// The lines the inventory shows while the player carries nothing: that
 /// the pack is empty and how to pick an item up. `{glyph}` stands for the

@@ -15,16 +15,20 @@
 //! These letters are plain ASCII, so they are the same in both sets, and
 //! they alone tell the families apart when the terminal shows no colour.
 
+use serde::{Deserialize, Serialize};
 use sigilfall_core::content::{Family, ItemFamily};
 
-/// Which character set to draw with.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Which character set to draw with. Written as `Unicode` or `Ascii` in
+/// the options file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum GlyphSet {
     /// Unicode glyphs (the default): stone walls, middle dots, arrows.
+    #[default]
     Unicode,
     /// Plain ASCII, for fonts that lack the Unicode glyphs and for
     /// terminals that draw ambiguous-width characters on two cells (CJK
-    /// locales). Selected by the `--ascii` flag.
+    /// locales). Chosen on the options screen, or for one session by the
+    /// `--ascii` flag.
     Ascii,
 }
 

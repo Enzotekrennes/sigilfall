@@ -25,4 +25,4 @@ expression: text(&app)
 "                                                                                "
 "                                                                                "
 "                                                                                "
-" ←↑→↓/1-9 move   . wait   t trace   g pick up   i inventory   > descend   q quit"
+" ←↑→↓/1-9 move   . wait   t trace   g take   i pack   > descend   q save & quit "

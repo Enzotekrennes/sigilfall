@@ -3,9 +3,10 @@
 //! This binary owns everything tied to the terminal: command line, input,
 //! screens and rendering. Game rules live in the `sigilfall-core` crate.
 //!
-//! This file reads the command line ([`cli::Cli`]), prepares the terminal (raw mode, alternate screen, hidden
-//! cursor), runs the [`app::App`], saves the game in progress and puts the
-//! terminal back the way it was.
+//! This file reads the command line ([`cli::Cli`]), detects the terminal's
+//! colours, prepares the terminal (raw mode, alternate screen, hidden
+//! cursor), runs the [`app::App`] from its title screen, saves the game in
+//! progress and puts the terminal back the way it was.
 //! The terminal is restored on a normal exit, when the game returns an error
 //! and when it panics, so the player's shell is never left unusable.
 
@@ -42,7 +43,7 @@ use sigilfall_core::content::Content;
 use crate::app::App;
 use crate::cli::Cli;
 use crate::persist::SaveFile;
-use crate::theme::{Appearance, ColorMode, ColorSupport, GlyphSet, Theme};
+use crate::theme::ColorSupport;
 
 /// Runs the game in the current terminal until the player quits.
 ///
@@ -51,10 +52,11 @@ use crate::theme::{Appearance, ColorMode, ColorSupport, GlyphSet, Theme};
 /// the process with exit code 2, and `--help` or `--version` print and exit
 /// with code 0, all on the normal screen.
 ///
-/// The saved game, if any, is resumed (see `App::launch` for the rules,
-/// including the refusal of `--seed` while a game is saved), and the game
-/// in progress is saved when the player quits (`App::save_on_exit`). The
-/// save lives in the data folder of `persist`, which the environment
+/// The title screen opens, with "Continue" when a game is saved, or a game
+/// of `--seed` starts at once (see `App::launch` for the rules, including
+/// the refusal of `--seed` while a game is saved), and the game in progress
+/// is saved when the player quits (`App::save_on_exit`). The save and the
+/// options live in the data folder of `persist`, which the environment
 /// variable `SIGILFALL_DATA_DIR` replaces.
 ///
 /// # Errors
@@ -73,8 +75,7 @@ fn main() -> anyhow::Result<()> {
     install_panic_hook();
 
     let content = Content::load().context("the game data built into this binary is invalid")?;
-    let theme = startup_theme(cli.glyph_set());
-    let mut app = App::launch(theme, &cli, &content, SaveFile::locate()?)?;
+    let mut app = App::launch(ColorSupport::detect(), &cli, &content, SaveFile::locate()?)?;
     let outcome = enter_terminal().and_then(|mut terminal| app.run(&mut terminal));
     // Restore even when the game failed, so the error is printed on the
     // normal screen; the game's own error is the more useful one to report.
@@ -128,17 +129,6 @@ fn require_terminal_output() -> anyhow::Result<()> {
         "standard output is not a terminal: Sigilfall draws on the screen, \
          so start it without redirecting its output (no `>` or `|`)"
     )
-}
-
-/// Chooses the theme from the terminal's colour support, read from the
-/// environment (see `ColorSupport::from_env`), before the screen changes,
-/// drawn with the `glyphs` chosen on the command line.
-///
-/// The dark theme is the default of `docs/design.md`; the light theme
-/// arrives with the options screen (T26).
-fn startup_theme(glyphs: GlyphSet) -> Theme {
-    let mode = ColorMode::for_terminal(ColorSupport::detect(), Appearance::Dark);
-    Theme::new(mode, glyphs)
 }
 
 /// Switches the terminal to raw mode, enters the alternate screen, hides the

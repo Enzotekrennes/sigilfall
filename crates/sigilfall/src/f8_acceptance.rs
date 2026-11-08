@@ -797,9 +797,9 @@ fn the_key_help_names_the_descent_and_still_fits_in_80_columns() {
     let screen = rows(&app);
     let help = screen.last().expect("a last row");
     assert!(help.contains("> descend"), "{help:?}");
-    assert!(help.contains("q quit"), "{help:?}");
+    assert!(help.contains("q save & quit"), "{help:?}");
     assert_eq!(help.chars().count(), 80);
-    assert!(help.trim_end().ends_with("q quit"), "{help:?}");
+    assert!(help.trim_end().ends_with("q save & quit"), "{help:?}");
 }
 
 #[test]

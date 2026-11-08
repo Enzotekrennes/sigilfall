@@ -4,9 +4,11 @@
 //! `docs/design.md` (one [`Style`] each) plus the [`Glyphs`] to draw with,
 //! the four rendering modes ([`ColorMode`]), terminal colour detection
 //! ([`ColorSupport::detect`]) and the player's preferences that feed it
-//! ([`Appearance`], [`GlyphSet`]). This module is the only place where a
-//! colour or a glyph is written down: screens ask for a token by name and
-//! never pick a colour themselves.
+//! ([`Appearance`], [`GlyphSet`], [`ColorChoice`], gathered in the
+//! [`Options`] the options screen edits), resolved into a theme by
+//! [`Settings`]. This module is the only place where a colour or a glyph is
+//! written down: screens ask for a token by name and never pick a colour
+//! themselves. Reading and writing the options is left to `persist`.
 //!
 //! Token styles carry a foreground and emphasis only. The background is the
 //! [`Theme::bg`] token, painted once over the whole screen before anything
@@ -18,6 +20,7 @@ use std::env;
 use std::ffi::OsString;
 
 use ratatui::style::{Color, Modifier, Style};
+use serde::{Deserialize, Serialize};
 use sigilfall_core::content::Family;
 
 pub use self::glyphs::{GlyphSet, Glyphs};
@@ -78,17 +81,98 @@ impl ColorSupport {
 }
 
 /// The player's choice between the dark theme and the light "parchment"
-/// theme.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// theme. Written as `Dark` or `Light` in the options file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Appearance {
     /// Light text on ink (the default).
+    #[default]
     Dark,
-    /// Dark text on parchment.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "chosen in the options screen, added with T26")
-    )]
+    /// Dark text on parchment. Needs 24-bit colour: with 16 colours it is
+    /// drawn in monochrome (see [`ColorMode::for_terminal`]).
     Light,
+}
+
+/// The player's choice of colours, in the options screen. Written as
+/// `Auto`, `Ansi16` or `Monochrome` in the options file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ColorChoice {
+    /// What the terminal supports, as detected at start-up
+    /// ([`ColorSupport::detect`], which honours `NO_COLOR`). The default.
+    #[default]
+    Auto,
+    /// The 16 ANSI colours, even on a terminal that announces 24-bit
+    /// colour, for colour schemes whose shades the player prefers.
+    Ansi16,
+    /// No colour at all: the terminal's own foreground and background,
+    /// hierarchy by emphasis only.
+    Monochrome,
+}
+
+impl ColorChoice {
+    /// Returns the colour support to draw with when the terminal was
+    /// detected as `detected`: `detected` itself for [`ColorChoice::Auto`],
+    /// otherwise the player's explicit choice, which wins over the
+    /// detection (and over `NO_COLOR`, as the convention at
+    /// <https://no-color.org> lets a program's own settings do).
+    pub const fn support(self, detected: ColorSupport) -> ColorSupport {
+        match self {
+            Self::Auto => detected,
+            Self::Ansi16 => ColorSupport::Ansi16,
+            Self::Monochrome => ColorSupport::None,
+        }
+    }
+}
+
+/// The display options the player chooses on the options screen and keeps
+/// between runs (`persist::OptionsFile`). The default is Unicode glyphs,
+/// automatic colours and the dark theme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Options {
+    /// Characters to draw with.
+    pub glyphs: GlyphSet,
+    /// Colours to draw with.
+    pub colors: ColorChoice,
+    /// Dark or light theme.
+    pub appearance: Appearance,
+}
+
+/// Everything that decides the theme of a session: the player's
+/// [`Options`], the colour support detected at start-up, and the `--ascii`
+/// flag of the command line, which wins over the glyph option for the
+/// session without changing it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Settings {
+    /// The player's options, as saved.
+    pub options: Options,
+    /// What the terminal supports, as detected at start-up.
+    pub detected: ColorSupport,
+    /// Whether `--ascii` was given: ASCII glyphs whatever the option says.
+    pub forced_ascii: bool,
+}
+
+impl Settings {
+    /// Returns the glyph set to draw with: ASCII when `--ascii` was given,
+    /// the option's otherwise.
+    pub const fn glyph_set(&self) -> GlyphSet {
+        if self.forced_ascii {
+            GlyphSet::Ascii
+        } else {
+            self.options.glyphs
+        }
+    }
+
+    /// Returns the rendering mode: the colour option applied to the
+    /// detected support, then the theme option (see
+    /// [`ColorMode::for_terminal`]).
+    pub const fn color_mode(&self) -> ColorMode {
+        let support = self.options.colors.support(self.detected);
+        ColorMode::for_terminal(support, self.options.appearance)
+    }
+
+    /// Builds the theme these settings call for.
+    pub fn theme(&self) -> Theme {
+        Theme::new(self.color_mode(), self.glyph_set())
+    }
 }
 
 /// One of the four rendering modes of `docs/design.md`.
@@ -132,14 +216,6 @@ impl ColorMode {
 /// instead. Some tokens share a value in a mode but stay separate, so they
 /// can diverge without touching the screens.
 #[derive(Debug, Clone)]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the full token set of docs/design.md; the remaining tokens are drawn by the \
-                  screens of T21, T25 and T26"
-    )
-)]
 pub struct Theme {
     /// Background of the whole screen, painted on every cell.
     pub bg: Style,
@@ -163,6 +239,13 @@ pub struct Theme {
     /// Explored wall out of view.
     pub wall_remembered: Style,
     /// Arch or passage.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "part of the token set of docs/design.md; the generator makes no arches yet"
+        )
+    )]
     pub door: Style,
     /// Stairs down in view.
     pub stairs: Style,

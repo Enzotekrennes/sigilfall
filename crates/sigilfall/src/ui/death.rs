@@ -80,11 +80,13 @@ pub fn render(frame: &mut Frame, area: Rect, game: &Game, content: &Content, the
         text_area,
     );
 
-    let help = Line::from(vec![
-        Span::raw(" "),
-        Span::styled(messages::QUIT_KEY, theme.text),
-        Span::styled(format!(" {}", messages::QUIT_LABEL), theme.text_muted),
-    ]);
+    let help = super::key_help(
+        vec![
+            (messages::TITLE_KEY.to_owned(), messages::TITLE_LABEL),
+            (messages::QUIT_KEY.to_owned(), messages::QUIT_LABEL),
+        ],
+        theme,
+    );
     let help_area = Rect {
         y: area.bottom().saturating_sub(1),
         height: area.height.min(1),

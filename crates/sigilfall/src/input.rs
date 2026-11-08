@@ -4,14 +4,21 @@
 //! screen ([`Command`]), [`trace_command_for`] while a sigil is traced
 //! ([`TraceCommand`]), [`aim_command_for`] while its direction is asked
 //! ([`AimCommand`]), [`verdict_command_for`] while the verdict of a cast
-//! is shown ([`VerdictCommand`]) and [`inventory_command_for`] while the
-//! inventory is open ([`InventoryCommand`]). Only key presses count: crossterm also
-//! reports key releases on Windows, and treating them as input would play
-//! every key twice. Ctrl+C quits from every screen, since raw mode turns it
-//! into a plain key; `q` quits from the game and end screens only. Escape
-//! never quits: it closes an overlay or a verdict, and does nothing on the
-//! game screen, so a second press after closing one loses nothing. This module decides nothing about the game itself; the
-//! `app` module submits the resulting actions to `sigilfall_core`.
+//! is shown ([`VerdictCommand`]), [`inventory_command_for`] while the
+//! inventory is open ([`InventoryCommand`]), [`end_command_for`] on the end
+//! screen ([`EndCommand`]), and for the screens before a game:
+//! [`title_command_for`] on the title menu and [`confirm_command_for`] on
+//! the confirmation before a saved game is abandoned ([`MenuCommand`]),
+//! [`seed_command_for`] while a seed is typed ([`SeedCommand`]) and
+//! [`options_command_for`] on the options screen ([`OptionsCommand`]).
+//! Only key presses count: crossterm also reports key releases on Windows,
+//! and treating them as input would play every key twice. Ctrl+C quits from
+//! every screen, since raw mode turns it into a plain key; `q` quits from
+//! the game, end and title screens only. Escape never quits: it closes an
+//! overlay, a verdict or a sub-screen of the title, and does nothing on the
+//! game, end and title screens, so a second press after closing one loses
+//! nothing. This module decides nothing about the game itself; the `app`
+//! module submits the resulting actions to `sigilfall_core`.
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use sigilfall_core::action::Action;
@@ -100,6 +107,73 @@ pub enum InventoryCommand {
 pub enum VerdictCommand {
     /// Close the verdict and go back to the game.
     Continue,
+    /// Leave the game.
+    Quit,
+}
+
+/// What the player asked for with one key press on the end screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EndCommand {
+    /// Go back to the title screen.
+    Title,
+    /// Leave the game.
+    Quit,
+}
+
+/// What the player asked for with one key press on a menu: the title menu
+/// or the confirmation before a saved game is abandoned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuCommand {
+    /// Choose the entry above, or the last from the first.
+    Previous,
+    /// Choose the entry below, or the first from the last.
+    Next,
+    /// Choose the first entry.
+    First,
+    /// Choose the last entry.
+    Last,
+    /// Do what the chosen entry says.
+    Confirm,
+    /// Leave the menu without choosing (the confirmation only).
+    Back,
+    /// Leave the game.
+    Quit,
+}
+
+/// What the player asked for with one key press while typing a seed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeedCommand {
+    /// Add this character at the end of the seed.
+    Type(char),
+    /// Remove the last character.
+    Erase,
+    /// Start a game on the seed typed.
+    Submit,
+    /// Go back to the title menu.
+    Back,
+    /// Leave the game.
+    Quit,
+}
+
+/// What the player asked for with one key press on the options screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OptionsCommand {
+    /// Choose the entry above, or the last from the first.
+    Previous,
+    /// Choose the entry below, or the first from the last.
+    Next,
+    /// Choose the first entry.
+    First,
+    /// Choose the last entry.
+    Last,
+    /// Give the chosen option its previous value, wrapping around.
+    PreviousValue,
+    /// Give the chosen option its next value, wrapping around.
+    NextValue,
+    /// Next value on an option; back to the title on "Back".
+    Confirm,
+    /// Go back to the title menu.
+    Back,
     /// Leave the game.
     Quit,
 }
@@ -233,6 +307,113 @@ pub fn inventory_command_for(key: KeyEvent) -> Option<InventoryCommand> {
         KeyCode::Enter | KeyCode::Char('u') => InventoryCommand::Use,
         KeyCode::Char('d') => InventoryCommand::Drop,
         KeyCode::Esc => InventoryCommand::Close,
+        _ => return None,
+    };
+    Some(command)
+}
+
+/// Returns the command bound to `key` on the end screen, or `None` when
+/// the key does nothing there.
+///
+/// Bindings: Enter goes back to the title screen; `q` and Ctrl+C quit.
+/// Escape does nothing, like every other key, so a press left over from
+/// the game never leaves the summary. Releases, repeats and keys with Alt
+/// or Ctrl, Ctrl+C aside, give `None`.
+pub fn end_command_for(key: KeyEvent) -> Option<EndCommand> {
+    match plain_press(key)? {
+        Press::Quit | Press::Code(KeyCode::Char('q')) => Some(EndCommand::Quit),
+        Press::Code(KeyCode::Enter) => Some(EndCommand::Title),
+        Press::Code(_) => None,
+    }
+}
+
+/// Returns the command bound to `key` on the title menu, or `None` when
+/// the key does nothing there.
+///
+/// Bindings: Up and Down (or `k` and `j`), which wrap around the menu;
+/// Home and End; Enter confirms the chosen entry; `q` and Ctrl+C quit.
+/// Escape does nothing: the title is the first screen, there is nothing to
+/// go back to. Releases, repeats and keys with Alt or Ctrl, Ctrl+C aside,
+/// give `None`.
+pub fn title_command_for(key: KeyEvent) -> Option<MenuCommand> {
+    match plain_press(key)? {
+        Press::Quit | Press::Code(KeyCode::Char('q')) => Some(MenuCommand::Quit),
+        Press::Code(KeyCode::Esc) => None,
+        Press::Code(code) => menu_move_for(code),
+    }
+}
+
+/// Returns the command bound to `key` on the confirmation shown before a
+/// saved game is abandoned, or `None` when the key does nothing there.
+///
+/// Bindings: the moves of [`title_command_for`] and Enter; Escape goes back
+/// and keeps the saved game; Ctrl+C quits, but not `q`, which a player
+/// could press meaning "no".
+pub fn confirm_command_for(key: KeyEvent) -> Option<MenuCommand> {
+    match plain_press(key)? {
+        Press::Quit => Some(MenuCommand::Quit),
+        Press::Code(KeyCode::Esc) => Some(MenuCommand::Back),
+        Press::Code(code) => menu_move_for(code),
+    }
+}
+
+/// Returns the command bound to `key` while a seed is typed, or `None`
+/// when the key does nothing there.
+///
+/// Bindings: any character, Shift included, is typed (letters such as `q`
+/// too, so nothing typed quits); Backspace erases the last one; Enter
+/// starts the game; Escape goes back to the title menu; Ctrl+C quits.
+/// Releases, repeats and keys with Alt or Ctrl, Ctrl+C aside, give `None`.
+pub fn seed_command_for(key: KeyEvent) -> Option<SeedCommand> {
+    let code = match plain_press(key)? {
+        Press::Quit => return Some(SeedCommand::Quit),
+        Press::Code(code) => code,
+    };
+    match code {
+        KeyCode::Char(typed) => Some(SeedCommand::Type(typed)),
+        KeyCode::Backspace => Some(SeedCommand::Erase),
+        KeyCode::Enter => Some(SeedCommand::Submit),
+        KeyCode::Esc => Some(SeedCommand::Back),
+        _ => None,
+    }
+}
+
+/// Returns the command bound to `key` on the options screen, or `None`
+/// when the key does nothing there.
+///
+/// Bindings: Up and Down (or `k` and `j`), Home and End choose an entry;
+/// Left and Right (or `h` and `l`) change the chosen option's value, as do
+/// Enter and Space, which go back to the title on "Back"; Escape goes back
+/// to the title; Ctrl+C quits, but not `q`. Releases, repeats and keys with
+/// Alt or Ctrl, Ctrl+C aside, give `None`.
+pub fn options_command_for(key: KeyEvent) -> Option<OptionsCommand> {
+    let code = match plain_press(key)? {
+        Press::Quit => return Some(OptionsCommand::Quit),
+        Press::Code(code) => code,
+    };
+    let command = match code {
+        KeyCode::Up | KeyCode::Char('k') => OptionsCommand::Previous,
+        KeyCode::Down | KeyCode::Char('j') => OptionsCommand::Next,
+        KeyCode::Home => OptionsCommand::First,
+        KeyCode::End => OptionsCommand::Last,
+        KeyCode::Left | KeyCode::Char('h') => OptionsCommand::PreviousValue,
+        KeyCode::Right | KeyCode::Char('l') => OptionsCommand::NextValue,
+        KeyCode::Enter | KeyCode::Char(' ') => OptionsCommand::Confirm,
+        KeyCode::Esc => OptionsCommand::Back,
+        _ => return None,
+    };
+    Some(command)
+}
+
+/// The moves and the confirmation shared by the menus: Up and Down (or `k`
+/// and `j`), Home, End and Enter; `None` for any other key.
+const fn menu_move_for(code: KeyCode) -> Option<MenuCommand> {
+    let command = match code {
+        KeyCode::Up | KeyCode::Char('k') => MenuCommand::Previous,
+        KeyCode::Down | KeyCode::Char('j') => MenuCommand::Next,
+        KeyCode::Home => MenuCommand::First,
+        KeyCode::End => MenuCommand::Last,
+        KeyCode::Enter => MenuCommand::Confirm,
         _ => return None,
     };
     Some(command)
@@ -628,5 +809,117 @@ mod tests {
         ] {
             assert_eq!(command_for(key), None, "{key:?}");
         }
+    }
+
+    /// Ctrl+C, which quits from every screen.
+    fn ctrl_c() -> KeyEvent {
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)
+    }
+
+    #[test]
+    fn the_end_screen_goes_back_to_the_title_on_enter_and_quits_on_q() {
+        assert_eq!(
+            end_command_for(press(KeyCode::Enter)),
+            Some(EndCommand::Title)
+        );
+        assert_eq!(
+            end_command_for(press(KeyCode::Char('q'))),
+            Some(EndCommand::Quit)
+        );
+        assert_eq!(end_command_for(ctrl_c()), Some(EndCommand::Quit));
+        for code in [KeyCode::Esc, KeyCode::Char('.'), KeyCode::Right] {
+            assert_eq!(end_command_for(press(code)), None, "{code:?}");
+        }
+    }
+
+    #[test]
+    fn the_title_menu_moves_confirms_and_quits_on_q_but_not_on_escape() {
+        for (code, command) in [
+            (KeyCode::Up, MenuCommand::Previous),
+            (KeyCode::Char('k'), MenuCommand::Previous),
+            (KeyCode::Down, MenuCommand::Next),
+            (KeyCode::Char('j'), MenuCommand::Next),
+            (KeyCode::Home, MenuCommand::First),
+            (KeyCode::End, MenuCommand::Last),
+            (KeyCode::Enter, MenuCommand::Confirm),
+            (KeyCode::Char('q'), MenuCommand::Quit),
+        ] {
+            assert_eq!(title_command_for(press(code)), Some(command), "{code:?}");
+        }
+        assert_eq!(title_command_for(ctrl_c()), Some(MenuCommand::Quit));
+        assert_eq!(title_command_for(press(KeyCode::Esc)), None);
+    }
+
+    #[test]
+    fn the_confirmation_goes_back_on_escape_and_ignores_q() {
+        assert_eq!(
+            confirm_command_for(press(KeyCode::Esc)),
+            Some(MenuCommand::Back)
+        );
+        assert_eq!(
+            confirm_command_for(press(KeyCode::Enter)),
+            Some(MenuCommand::Confirm)
+        );
+        assert_eq!(confirm_command_for(press(KeyCode::Char('q'))), None);
+        assert_eq!(confirm_command_for(ctrl_c()), Some(MenuCommand::Quit));
+    }
+
+    #[test]
+    fn every_character_is_typed_into_the_seed_even_q() {
+        for typed in ['7', 'F', 'a', '-', 'q', ' '] {
+            assert_eq!(
+                seed_command_for(press(KeyCode::Char(typed))),
+                Some(SeedCommand::Type(typed))
+            );
+        }
+        let shifted = KeyEvent::new(KeyCode::Char('F'), KeyModifiers::SHIFT);
+        assert_eq!(seed_command_for(shifted), Some(SeedCommand::Type('F')));
+        assert_eq!(
+            seed_command_for(press(KeyCode::Backspace)),
+            Some(SeedCommand::Erase)
+        );
+        assert_eq!(
+            seed_command_for(press(KeyCode::Enter)),
+            Some(SeedCommand::Submit)
+        );
+        assert_eq!(
+            seed_command_for(press(KeyCode::Esc)),
+            Some(SeedCommand::Back)
+        );
+        assert_eq!(seed_command_for(ctrl_c()), Some(SeedCommand::Quit));
+        assert_eq!(seed_command_for(press(KeyCode::Left)), None);
+    }
+
+    #[test]
+    fn the_options_screen_moves_changes_values_and_goes_back() {
+        for (code, command) in [
+            (KeyCode::Up, OptionsCommand::Previous),
+            (KeyCode::Down, OptionsCommand::Next),
+            (KeyCode::Home, OptionsCommand::First),
+            (KeyCode::End, OptionsCommand::Last),
+            (KeyCode::Left, OptionsCommand::PreviousValue),
+            (KeyCode::Char('h'), OptionsCommand::PreviousValue),
+            (KeyCode::Right, OptionsCommand::NextValue),
+            (KeyCode::Char('l'), OptionsCommand::NextValue),
+            (KeyCode::Enter, OptionsCommand::Confirm),
+            (KeyCode::Char(' '), OptionsCommand::Confirm),
+            (KeyCode::Esc, OptionsCommand::Back),
+        ] {
+            assert_eq!(options_command_for(press(code)), Some(command), "{code:?}");
+        }
+        assert_eq!(options_command_for(press(KeyCode::Char('q'))), None);
+        assert_eq!(options_command_for(ctrl_c()), Some(OptionsCommand::Quit));
+    }
+
+    #[test]
+    fn the_menu_keymaps_ignore_releases() {
+        let release =
+            KeyEvent::new_with_kind(KeyCode::Enter, KeyModifiers::NONE, KeyEventKind::Release);
+
+        assert_eq!(title_command_for(release), None);
+        assert_eq!(confirm_command_for(release), None);
+        assert_eq!(seed_command_for(release), None);
+        assert_eq!(options_command_for(release), None);
+        assert_eq!(end_command_for(release), None);
     }
 }

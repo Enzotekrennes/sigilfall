@@ -1,0 +1,28 @@
+---
+source: crates/sigilfall/src/app/tests/title_screen.rs
+expression: text
+---
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                 ●─────●─────●                                  "
+"                                           ╱                                    "
+"                                         ╱                                      "
+"                                 ○     ●     ○                                  "
+"                                     ╱                                          "
+"                                   ╱                                            "
+"                                 ●─────●─────●                                  "
+"                                                                                "
+"                               S I G I L F A L L                                "
+"                        Trace true. The dungeon listens.                        "
+"                                                                                "
+"                      › Continue    depth 1 · turn 7                            "
+"                        New game                                                "
+"                        Seed                                                    "
+"                        Options                                                 "
+"                        Quit                                                    "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+" ↑↓ choose   Enter confirm   q quit                                      v0.1.0 "

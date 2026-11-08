@@ -9,17 +9,16 @@
 use clap::Parser;
 use sigilfall_core::rng::Seed;
 
-use crate::theme::GlyphSet;
-
 /// Terminal roguelike where spells are cast by tracing sigils on the
 /// keyboard.
 #[derive(Debug, Clone, PartialEq, Eq, Parser)]
 #[command(version, about)]
 pub struct Cli {
     /// Seed of the run, to replay or share a dungeon: a number such as 42,
-    /// or the seed shown in the game, such as 7F3A-91C2-0B5E-D4A8. Without
-    /// it, the saved game goes on, or a new game starts on a random seed.
-    /// Refused while a game is saved, so that game is never lost.
+    /// or the seed shown in the game, such as 7F3A-91C2-0B5E-D4A8. The game
+    /// starts at once, without the title screen. Refused while a game is
+    /// saved, so that game is never lost: continue or abandon it from the
+    /// title screen first.
     // A value that looks like a negative number, such as `--seed -1`, is
     // taken as the seed, so it is refused with the accepted forms instead of
     // being reported as an unknown option.
@@ -27,31 +26,19 @@ pub struct Cli {
     pub seed: Option<Seed>,
 
     /// Draw with plain ASCII characters instead of Unicode glyphs, for fonts
-    /// that lack them or terminals that draw them on two cells.
+    /// that lack them or terminals that draw them on two cells. Applies to
+    /// this session only, whatever the glyph option says.
     #[arg(long)]
     pub ascii: bool,
 }
 
-impl Cli {
-    /// Returns the seed given with `--seed`, or else a new random seed.
-    ///
-    /// The random seed comes from `rand::random`, whose generator is seeded
-    /// by the operating system's entropy source (through `getrandom`), so
-    /// two games started without `--seed` get different dungeons. Each call
-    /// without `--seed` draws a new seed: call it once per run.
-    pub fn seed_or_random(&self) -> Seed {
-        self.seed.unwrap_or_else(|| Seed::new(rand::random()))
-    }
-
-    /// Returns the character set chosen on the command line: ASCII with
-    /// `--ascii`, Unicode otherwise.
-    pub const fn glyph_set(&self) -> GlyphSet {
-        if self.ascii {
-            GlyphSet::Ascii
-        } else {
-            GlyphSet::Unicode
-        }
-    }
+/// Returns a new random seed, for a new game started without a seed.
+///
+/// The seed comes from `rand::random`, whose generator is seeded by the
+/// operating system's entropy source (through `getrandom`), so two games
+/// started this way get different dungeons.
+pub fn random_seed() -> Seed {
+    Seed::new(rand::random())
 }
 
 #[cfg(test)]
@@ -72,13 +59,17 @@ mod tests {
     }
 
     #[test]
-    fn no_argument_gives_a_random_seed_and_unicode_glyphs() {
+    fn no_argument_gives_no_seed_and_no_ascii() {
         let cli = parse(&[]).unwrap();
 
         assert_eq!(cli.seed, None);
-        assert_eq!(cli.glyph_set(), GlyphSet::Unicode);
+        assert!(!cli.ascii);
+    }
+
+    #[test]
+    fn random_seeds_differ() {
         // Two draws of 64 random bits are equal once in 2^64 runs.
-        assert_ne!(cli.seed_or_random(), cli.seed_or_random());
+        assert_ne!(random_seed(), random_seed());
     }
 
     #[test]
@@ -86,8 +77,6 @@ mod tests {
         let cli = parse(&["--seed", "42"]).unwrap();
 
         assert_eq!(cli.seed, Some(Seed::new(42)));
-        assert_eq!(cli.seed_or_random(), Seed::new(42));
-        assert_eq!(cli.seed_or_random(), Seed::new(42), "never redrawn");
     }
 
     #[test]
@@ -96,7 +85,7 @@ mod tests {
 
         let cli = parse(&["--seed", &shown]).unwrap();
 
-        assert_eq!(cli.seed_or_random(), Seed::new(0x7F3A_91C2_0B5E_D4A8));
+        assert_eq!(cli.seed, Some(Seed::new(0x7F3A_91C2_0B5E_D4A8)));
         assert_eq!(parse(&[&format!("--seed={shown}")]).unwrap(), cli);
     }
 
@@ -143,11 +132,10 @@ mod tests {
     }
 
     #[test]
-    fn ascii_selects_the_ascii_glyphs() {
+    fn ascii_is_read_alone() {
         let cli = parse(&["--ascii"]).unwrap();
 
         assert!(cli.ascii);
-        assert_eq!(cli.glyph_set(), GlyphSet::Ascii);
         assert_eq!(cli.seed, None);
     }
 

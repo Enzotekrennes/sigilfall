@@ -1,0 +1,28 @@
+---
+source: crates/sigilfall/src/app/tests/title_screen.rs
+expression: text
+---
+"                                                                                "
+"                                                                                "
+"                                                                                "
+"                                 ●─────●─────●                                  "
+"                                           ╱                                    "
+"                                         ╱                                      "
+"                                 ○     ●     ○                                  "
+"                                     ╱                                          "
+"                                   ╱                                            "
+"                                 ●─────●─────●                                  "
+"                                                                                "
+"                               S I G I L F A L L                                "
+"                        Trace true. The dungeon listens.                        "
+"                                                                                "
+"                               Start a new game?                                "
+"           The game in progress (depth 1 · turn 7) will be abandoned            "
+"                         and its save deleted for good.                         "
+"                                                                                "
+"                      › Keep the game in progress                               "
+"                        Abandon it and start anew                               "
+"                                                                                "
+"                                                                                "
+"                                                                                "
+" ↑↓ choose   Enter confirm   Esc keep it                                        "
