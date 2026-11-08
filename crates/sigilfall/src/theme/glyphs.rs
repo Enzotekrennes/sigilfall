@@ -5,8 +5,15 @@
 //! "Glyphes" of `docs/design.md`; every Unicode glyph there is present in
 //! Cascadia Mono, the default font of Windows Terminal. Only the glyphs of
 //! elements the game already has are listed: the others (arches,
-//! engravings, creatures, items, sigil grid, frames) join this table with
-//! the tasks that bring them to the screen.
+//! engravings, items, sigil grid, frames) join this table with the tasks
+//! that bring them to the screen.
+//!
+//! Creatures are drawn with the letter of their family, lower case for the
+//! common form and upper case for the elite one ([`Glyphs::creature`]).
+//! These letters are plain ASCII, so they are the same in both sets, and
+//! they alone tell the families apart when the terminal shows no colour.
+
+use sigilfall_core::content::Family;
 
 /// Which character set to draw with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,6 +37,16 @@ pub struct Glyphs {
     pub player: char,
     /// Stairs down: `▼`, or `>` in ASCII.
     pub stairs: char,
+    /// Common vermin: `v` in both sets; `V` for the elite form.
+    pub vermin: char,
+    /// Common acolyte: `a` in both sets; `A` for the elite form.
+    pub acolyte: char,
+    /// Common homunculus: `h` in both sets; `H` for the elite form.
+    pub homunculus: char,
+    /// Common eye: `e` in both sets; `E` for the elite form.
+    pub eye: char,
+    /// Common spectre: `s` in both sets; `S` for the elite form.
+    pub spectre: char,
     /// Left arrow of the key help: `←`, or `<` in ASCII.
     pub arrow_left: char,
     /// Up arrow of the key help: `↑`, or `^` in ASCII.
@@ -52,6 +69,11 @@ impl Glyphs {
                 wall: '▒',
                 player: '@',
                 stairs: '▼',
+                vermin: 'v',
+                acolyte: 'a',
+                homunculus: 'h',
+                eye: 'e',
+                spectre: 's',
                 arrow_left: '←',
                 arrow_up: '↑',
                 arrow_right: '→',
@@ -63,12 +85,35 @@ impl Glyphs {
                 wall: '#',
                 player: '@',
                 stairs: '>',
+                vermin: 'v',
+                acolyte: 'a',
+                homunculus: 'h',
+                eye: 'e',
+                spectre: 's',
                 arrow_left: '<',
                 arrow_up: '^',
                 arrow_right: '>',
                 arrow_down: 'v',
                 dimension: 'x',
             },
+        }
+    }
+
+    /// Returns the letter a creature of `family` is drawn with: the
+    /// family's lower-case letter for the common form, the same letter in
+    /// upper case when `elite` is true (`docs/design.md`, "Créatures").
+    pub const fn creature(&self, family: Family, elite: bool) -> char {
+        let common = match family {
+            Family::Vermin => self.vermin,
+            Family::Acolyte => self.acolyte,
+            Family::Homunculus => self.homunculus,
+            Family::Eye => self.eye,
+            Family::Spectre => self.spectre,
+        };
+        if elite {
+            common.to_ascii_uppercase()
+        } else {
+            common
         }
     }
 
@@ -91,12 +136,17 @@ mod tests {
     use super::*;
 
     /// Every glyph of `glyphs`, with its field name for failure messages.
-    fn all(glyphs: Glyphs) -> [(&'static str, char); 9] {
+    fn all(glyphs: Glyphs) -> [(&'static str, char); 14] {
         [
             ("floor", glyphs.floor),
             ("wall", glyphs.wall),
             ("player", glyphs.player),
             ("stairs", glyphs.stairs),
+            ("vermin", glyphs.vermin),
+            ("acolyte", glyphs.acolyte),
+            ("homunculus", glyphs.homunculus),
+            ("eye", glyphs.eye),
+            ("spectre", glyphs.spectre),
             ("arrow_left", glyphs.arrow_left),
             ("arrow_up", glyphs.arrow_up),
             ("arrow_right", glyphs.arrow_right),
@@ -114,6 +164,11 @@ mod tests {
             ("wall", '\u{2592}'),
             ("player", '\u{0040}'),
             ("stairs", '\u{25BC}'),
+            ("vermin", 'v'),
+            ("acolyte", 'a'),
+            ("homunculus", 'h'),
+            ("eye", 'e'),
+            ("spectre", 's'),
             ("arrow_left", '\u{2190}'),
             ("arrow_up", '\u{2191}'),
             ("arrow_right", '\u{2192}'),
@@ -130,13 +185,44 @@ mod tests {
         }
     }
 
+    /// The five creature families, in the order of `docs/design.md`.
+    const FAMILIES: [Family; 5] = [
+        Family::Vermin,
+        Family::Acolyte,
+        Family::Homunculus,
+        Family::Eye,
+        Family::Spectre,
+    ];
+
     #[test]
     fn map_glyphs_are_distinct_in_both_sets() {
         for set in [GlyphSet::Unicode, GlyphSet::Ascii] {
             let glyphs = Glyphs::new(set);
-            let map = [glyphs.floor, glyphs.wall, glyphs.player, glyphs.stairs];
+            let mut map = vec![glyphs.floor, glyphs.wall, glyphs.player, glyphs.stairs];
+            for family in FAMILIES {
+                map.push(glyphs.creature(family, false));
+                map.push(glyphs.creature(family, true));
+            }
             for (i, a) in map.iter().enumerate() {
                 assert!(!map[i + 1..].contains(a), "{set:?}: {a:?} used twice");
+            }
+        }
+    }
+
+    #[test]
+    fn creatures_take_their_family_letter_upper_case_when_elite() {
+        let expected = [
+            (Family::Vermin, 'v', 'V'),
+            (Family::Acolyte, 'a', 'A'),
+            (Family::Homunculus, 'h', 'H'),
+            (Family::Eye, 'e', 'E'),
+            (Family::Spectre, 's', 'S'),
+        ];
+        for set in [GlyphSet::Unicode, GlyphSet::Ascii] {
+            let glyphs = Glyphs::new(set);
+            for (family, common, elite) in expected {
+                assert_eq!(glyphs.creature(family, false), common, "{set:?}");
+                assert_eq!(glyphs.creature(family, true), elite, "{set:?}");
             }
         }
     }

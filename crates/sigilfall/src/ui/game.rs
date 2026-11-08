@@ -1,5 +1,5 @@
 //! The main game screen: status line with the turn and the run's seed, map
-//! with the player, key help.
+//! with the monsters in view and the player, key help.
 //!
 //! Exposes [`render`]. The layout follows the game screen of
 //! `docs/design.md`: status line on the first row, map below it on the
@@ -10,13 +10,15 @@
 //! [`Camera`] that follows the player, and each map cell is drawn according
 //! to what the player knows of it ([`Sight`]): in full when in view, only
 //! its landmarks when explored but out of view, not at all when never seen.
+//! Monsters are drawn only on cells in view, with their family's letter and
+//! colour, and the player is drawn over everything else.
 
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Position as ScreenPosition, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use sigilfall_core::game::Game;
+use sigilfall_core::game::{Game, VisibleMonster};
 use sigilfall_core::geometry::Position;
 use sigilfall_core::map::Tile;
 use sigilfall_core::rng::Seed;
@@ -193,14 +195,31 @@ const fn cell_look(tile: Tile, sight: Sight, theme: &Theme) -> Option<(char, Sty
     }
 }
 
-/// Draws the part of the map the camera shows in `area`, then the player
-/// on top, into `buffer`.
+/// Returns the character and style `monster` is drawn with: its family's
+/// letter, upper case for an elite, in its family's colour (see
+/// [`Glyphs::creature`](crate::theme::Glyphs::creature) and
+/// [`Theme::creature`]).
+///
+/// The letter alone names the family and the case alone tells the elite
+/// apart, so the monster stays legible without colour, in every mode and in
+/// the ASCII fallback, whose letters are the same.
+const fn monster_look(monster: &VisibleMonster<'_>, theme: &Theme) -> (char, Style) {
+    let glyph = theme.glyphs.creature(monster.family, monster.elite);
+    (glyph, theme.creature(monster.family))
+}
+
+/// Draws the part of the map the camera shows in `area`, then the monsters
+/// in view, then the player on top of everything, into `buffer`.
 ///
 /// Each cell is drawn by [`cell_look`] from what the player knows of it.
-/// The camera follows the player (see [`Camera::new`]) and the player's own
-/// cell is always in view, so the player is always drawn. Cells of `area`
-/// that show nothing (never seen, remembered floor, or outside a map smaller
-/// than the area) keep the background painted beforehand.
+/// Monsters come from [`Game::visible_monsters`], which only lists those on
+/// a cell in view: a monster out of view is never drawn, not even on a
+/// remembered cell, where only the landmarks show. Each one replaces the
+/// floor of its cell ([`monster_look`]); one outside the camera's view is
+/// skipped. The camera follows the player (see [`Camera::new`]) and the
+/// player's own cell is always in view, so the player is always drawn. Cells
+/// of `area` that show nothing (never seen, remembered floor, or outside a
+/// map smaller than the area) keep the background painted beforehand.
 fn render_map(buffer: &mut Buffer, area: Rect, game: &Game, theme: &Theme) {
     let map = game.map();
     let player = game.player_actor().position();
@@ -211,6 +230,11 @@ fn render_map(buffer: &mut Buffer, area: Rect, game: &Game, theme: &Theme) {
             .and_then(|tile| cell_look(tile, Sight::of(game, position), theme));
         if let Some(look) = look {
             draw_cell(buffer, screen, look);
+        }
+    }
+    for monster in game.visible_monsters() {
+        if let Some(screen) = camera.screen_position(monster.position) {
+            draw_cell(buffer, screen, monster_look(&monster, theme));
         }
     }
     if let Some(screen) = camera.screen_position(player) {
@@ -234,16 +258,20 @@ fn draw_cell(buffer: &mut Buffer, screen: ScreenPosition, (glyph, style): (char,
 
 #[cfg(test)]
 mod tests {
-    //! Layout of the game screen, and the three states of a map cell
-    //! (visible, remembered, unknown) checked on the styles of the rendered
-    //! buffer in every rendering mode: the text snapshots of the application
-    //! tests do not carry styles.
+    //! Layout of the game screen, the three states of a map cell (visible,
+    //! remembered, unknown) and the monsters in view, checked on the styles
+    //! of the rendered buffer in every rendering mode: text snapshots do not
+    //! carry styles. Two snapshots show monsters on a generated floor and
+    //! every creature form side by side.
 
+    use insta::assert_snapshot;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Cell;
     use sigilfall_core::action::Action;
+    use sigilfall_core::content::{Content, MonsterDef};
     use sigilfall_core::game::PLAYER_START;
+    use sigilfall_core::generation::{FIRST_DEPTH, generate};
     use sigilfall_core::geometry::Direction;
     use sigilfall_core::map::FIXED_ROOM_PILLAR;
 
@@ -504,5 +532,307 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Monster file with the common and the elite form of every family, so
+    /// the tests can draw forms the shipped content does not have yet (no
+    /// elite vermin, eye or spectre).
+    const EVERY_FORM: &str = r#"[
+        Monster(id: "vermin", name: "vermin", family: Vermin, elite: false,
+            speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
+        Monster(id: "vermin_elite", name: "elite vermin", family: Vermin, elite: true,
+            speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
+        Monster(id: "acolyte", name: "acolyte", family: Acolyte, elite: false,
+            speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
+        Monster(id: "acolyte_elite", name: "elite acolyte", family: Acolyte, elite: true,
+            speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
+        Monster(id: "homunculus", name: "homunculus", family: Homunculus, elite: false,
+            speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
+        Monster(id: "homunculus_elite", name: "elite homunculus", family: Homunculus,
+            elite: true, speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
+        Monster(id: "eye", name: "eye", family: Eye, elite: false,
+            speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
+        Monster(id: "eye_elite", name: "elite eye", family: Eye, elite: true,
+            speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
+        Monster(id: "spectre", name: "spectre", family: Spectre, elite: false,
+            speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
+        Monster(id: "spectre_elite", name: "elite spectre", family: Spectre, elite: true,
+            speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
+    ]"#;
+
+    /// Which colour token a family is drawn with, as `docs/design.md`
+    /// assigns it: written out here rather than taken from
+    /// [`Theme::creature`], so a wrong mapping there fails the tests.
+    #[derive(Debug, Clone, Copy)]
+    enum Token {
+        /// `monster_hostile`: creatures of flesh.
+        Hostile,
+        /// `monster_arcane`: creatures of spirit.
+        Arcane,
+    }
+
+    impl Token {
+        /// The style of this token in `theme`.
+        const fn style(self, theme: &Theme) -> Style {
+            match self {
+                Self::Hostile => theme.monster_hostile,
+                Self::Arcane => theme.monster_arcane,
+            }
+        }
+    }
+
+    /// Every form of [`EVERY_FORM`], with the letter and the token
+    /// `docs/design.md` gives it ("Créatures") and the cell
+    /// [`room_with_every_form`] places it on.
+    ///
+    /// The cells form two rows of five, two rows above and below the player
+    /// of [`explored_fixed_room`] at (19, 5), east of the pillar so nothing
+    /// hides them: commons on the upper row, elites under them.
+    const FORMS: [(&str, char, Token, Position); 10] = [
+        ("vermin", 'v', Token::Hostile, Position::new(17, 3)),
+        ("acolyte", 'a', Token::Hostile, Position::new(18, 3)),
+        ("homunculus", 'h', Token::Hostile, Position::new(19, 3)),
+        ("eye", 'e', Token::Arcane, Position::new(20, 3)),
+        ("spectre", 's', Token::Arcane, Position::new(21, 3)),
+        ("vermin_elite", 'V', Token::Hostile, Position::new(17, 7)),
+        ("acolyte_elite", 'A', Token::Hostile, Position::new(18, 7)),
+        (
+            "homunculus_elite",
+            'H',
+            Token::Hostile,
+            Position::new(19, 7),
+        ),
+        ("eye_elite", 'E', Token::Arcane, Position::new(20, 7)),
+        ("spectre_elite", 'S', Token::Arcane, Position::new(21, 7)),
+    ];
+
+    /// The parsed [`EVERY_FORM`] file.
+    fn every_form() -> Content {
+        Content::parse(EVERY_FORM).expect("the test monster file is valid")
+    }
+
+    /// The definition `id` of `content`.
+    fn definition<'content>(content: &'content Content, id: &str) -> &'content MonsterDef {
+        content
+            .monster(id)
+            .unwrap_or_else(|| panic!("no monster {id:?} in the content"))
+    }
+
+    /// [`explored_fixed_room`] with every form of [`FORMS`] standing on its
+    /// cell, all in view.
+    fn room_with_every_form() -> Game {
+        let content = every_form();
+        let mut game = explored_fixed_room();
+        for (id, _, _, position) in FORMS {
+            game.spawn_monster(position, definition(&content, id));
+        }
+        game
+    }
+
+    /// [`explored_fixed_room`] with a monster on the remembered floor and
+    /// another on the floor never seen: neither is in view.
+    fn room_with_hidden_monsters() -> Game {
+        let content = every_form();
+        let mut game = explored_fixed_room();
+        game.spawn_monster(REMEMBERED_FLOOR, definition(&content, "acolyte"));
+        game.spawn_monster(UNKNOWN_FLOOR, definition(&content, "spectre_elite"));
+        game
+    }
+
+    #[test]
+    fn every_form_stands_in_view_and_hidden_monsters_do_not() {
+        let game = room_with_every_form();
+        for (id, _, _, position) in FORMS {
+            assert!(game.is_visible(position), "{id} at {position:?}");
+        }
+        assert_eq!(game.visible_monsters().count(), FORMS.len());
+
+        let game = room_with_hidden_monsters();
+        assert_eq!(game.visible_monsters().count(), 0);
+    }
+
+    #[test]
+    fn monsters_in_view_take_their_family_letter_and_colour_in_every_mode() {
+        let game = room_with_every_form();
+        for mode in MODES {
+            for glyph_set in GLYPH_SETS {
+                let theme = Theme::new(mode, glyph_set);
+                let screen = draw(&game, &theme);
+                for (id, letter, token, position) in FORMS {
+                    let cell = cell_at(&screen, &game, position);
+                    let what = format!("{mode:?}, {glyph_set:?}: {id}");
+                    assert_drawn(cell, letter, token.style(&theme), &what);
+                }
+                let player = cell_at(&screen, &game, game.player_actor().position());
+                assert_drawn(player, '@', theme.player, &format!("{mode:?}: player"));
+            }
+        }
+    }
+
+    #[test]
+    fn an_elite_differs_from_its_common_form_by_case_only() {
+        let game = room_with_every_form();
+        let (commons, elites) = FORMS.split_at(FORMS.len() / 2);
+        for mode in MODES {
+            let screen = draw(&game, &Theme::new(mode, GlyphSet::Unicode));
+            for (common, elite) in commons.iter().zip(elites) {
+                let common_cell = cell_at(&screen, &game, common.3);
+                let elite_cell = cell_at(&screen, &game, elite.3);
+                let what = format!("{mode:?}: {} and {}", common.0, elite.0);
+
+                assert_eq!(
+                    elite_cell.symbol(),
+                    common_cell.symbol().to_uppercase(),
+                    "{what}"
+                );
+                assert!(
+                    common_cell.symbol().chars().all(|c| c.is_ascii_lowercase()),
+                    "{what}"
+                );
+                assert_eq!(look_of(elite_cell), look_of(common_cell), "{what}");
+            }
+        }
+    }
+
+    #[test]
+    fn monster_colours_take_the_values_of_the_design_in_every_mode() {
+        // "monster_hostile" and "monster_arcane" rows of docs/design.md.
+        let expected = [
+            (
+                ColorMode::TrueColorDark,
+                Color::Rgb(0xEC, 0x6A, 0x50),
+                Color::Rgb(0xB7, 0x94, 0xF0),
+            ),
+            (
+                ColorMode::TrueColorLight,
+                Color::Rgb(0xA8, 0x2C, 0x1A),
+                Color::Rgb(0x6A, 0x3F, 0xB0),
+            ),
+            (ColorMode::Ansi16, Color::LightRed, Color::LightRed),
+            (ColorMode::Monochrome, Color::Reset, Color::Reset),
+        ];
+        let game = room_with_every_form();
+        for (mode, hostile, arcane) in expected {
+            let screen = draw(&game, &Theme::new(mode, GlyphSet::Unicode));
+            for (id, _, token, position) in FORMS {
+                let colour = match token {
+                    Token::Hostile => hostile,
+                    Token::Arcane => arcane,
+                };
+                let cell = cell_at(&screen, &game, position);
+                assert_eq!(look_of(cell), (colour, Modifier::empty()), "{mode:?}: {id}");
+            }
+        }
+    }
+
+    #[test]
+    fn monsters_out_of_view_are_never_drawn_in_every_mode() {
+        let game = room_with_hidden_monsters();
+        for mode in MODES {
+            for glyph_set in GLYPH_SETS {
+                let theme = Theme::new(mode, glyph_set);
+                let screen = draw(&game, &theme);
+                let cell = |position| cell_at(&screen, &game, position);
+                let case = |what: &str| format!("{mode:?}, {glyph_set:?}: {what}");
+
+                assert_blank(
+                    cell(REMEMBERED_FLOOR),
+                    &theme,
+                    &case("monster on a remembered cell"),
+                );
+                assert_blank(
+                    cell(UNKNOWN_FLOOR),
+                    &theme,
+                    &case("monster on a cell never seen"),
+                );
+                assert_drawn(
+                    cell(REMEMBERED_WALL),
+                    theme.glyphs.wall,
+                    theme.wall_remembered,
+                    &case("landmark next to the hidden monster"),
+                );
+            }
+        }
+    }
+
+    /// Seed of the generated floor of the snapshot: the one of the game
+    /// screen mock-up in `docs/design.md`, as in the application tests.
+    const GENERATED_SEED: Seed = Seed::new(0x7F3A_91C2_0B5E_D4A8);
+
+    /// Offsets from the start cell of [`GENERATED_SEED`]'s first floor to
+    /// the two monsters placed in view: floor cells of the start room (see
+    /// the snapshot of the application tests).
+    const RAT_OFFSET: (i32, i32) = (-4, -2);
+    /// See [`RAT_OFFSET`].
+    const HIEROPHANT_OFFSET: (i32, i32) = (3, -1);
+
+    /// The first floor of [`GENERATED_SEED`] with, from the shipped
+    /// content, a common ossuary rat and an elite hierophant in view near
+    /// the player, and a shade on the first floor cell out of view.
+    fn generated_floor_with_monsters() -> Game {
+        let content = Content::load().expect("the shipped content is valid");
+        let floor = generate(GENERATED_SEED, FIRST_DEPTH);
+        let start = floor.start();
+        let mut game = Game::on_floor(GENERATED_SEED, floor);
+        let near = |(dx, dy): (i32, i32)| Position::new(start.x + dx, start.y + dy);
+        game.spawn_monster(near(RAT_OFFSET), definition(&content, "ossuary_rat"));
+        game.spawn_monster(near(HIEROPHANT_OFFSET), definition(&content, "hierophant"));
+        let hidden = first_floor_cell_out_of_view(&game);
+        game.spawn_monster(hidden, definition(&content, "shade"));
+        game
+    }
+
+    /// The first walkable cell of `game`'s map, row by row, that the player
+    /// does not see.
+    fn first_floor_cell_out_of_view(game: &Game) -> Position {
+        let map = game.map();
+        let width = i32::try_from(map.width()).unwrap();
+        let height = i32::try_from(map.height()).unwrap();
+        (0..height)
+            .flat_map(|y| (0..width).map(move |x| Position::new(x, y)))
+            .find(|&position| map.is_walkable(position) && !game.is_visible(position))
+            .expect("a generated floor is larger than the field of view")
+    }
+
+    /// The text of `buffer`, one quoted line per row, as the snapshots of
+    /// the application tests show it.
+    fn screen_text(buffer: &Buffer) -> String {
+        (0..buffer.area.height)
+            .map(|y| {
+                let row: String = (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect();
+                format!("\"{row}\"\n")
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_generated_floor_shows_the_monsters_in_view_only() {
+        let game = generated_floor_with_monsters();
+        let shown: Vec<_> = game.visible_monsters().map(|m| m.definition).collect();
+        assert_eq!(shown, ["ossuary_rat", "hierophant"]);
+
+        let theme = Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode);
+        let screen = draw(&game, &theme);
+        let hidden = first_floor_cell_out_of_view(&game);
+        let camera = Camera::new(
+            map_area(Rect::new(0, 0, 80, 24)),
+            game.map(),
+            game.player_actor().position(),
+        );
+        if let Some(cell) = camera.screen_position(hidden) {
+            assert_blank(&screen[cell], &theme, "shade out of view");
+        }
+
+        assert_snapshot!(screen_text(&screen));
+    }
+
+    #[test]
+    fn every_form_in_view_in_ascii() {
+        let game = room_with_every_form();
+        let screen = draw(&game, &Theme::new(ColorMode::Monochrome, GlyphSet::Ascii));
+
+        assert_snapshot!(screen_text(&screen));
     }
 }

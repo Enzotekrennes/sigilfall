@@ -18,6 +18,7 @@ use std::env;
 use std::ffi::OsString;
 
 use ratatui::style::{Color, Modifier, Style};
+use sigilfall_core::content::Family;
 
 pub use self::glyphs::{GlyphSet, Glyphs};
 
@@ -219,6 +220,22 @@ impl Theme {
             ColorMode::TrueColorLight => Self::true_color_light(glyphs),
             ColorMode::Ansi16 => Self::ansi16(glyphs),
             ColorMode::Monochrome => Self::monochrome(glyphs),
+        }
+    }
+
+    /// Returns the style a creature of `family` is drawn with on the map:
+    /// [`Theme::monster_hostile`] for the creatures of flesh (vermin,
+    /// acolytes, homunculi), [`Theme::monster_arcane`] for the creatures of
+    /// spirit (eyes, spectres), as `docs/design.md` assigns them.
+    ///
+    /// Common and elite forms share their family's style: the case of the
+    /// letter tells them apart. In 16 colours both tokens are the same red
+    /// and in monochrome they have no colour at all, so the family is read
+    /// from the letter there.
+    pub const fn creature(&self, family: Family) -> Style {
+        match family {
+            Family::Vermin | Family::Acolyte | Family::Homunculus => self.monster_hostile,
+            Family::Eye | Family::Spectre => self.monster_arcane,
         }
     }
 
