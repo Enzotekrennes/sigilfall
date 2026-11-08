@@ -1132,6 +1132,7 @@ mod tests {
     use crate::ui::camera::Camera;
 
     mod death_summary;
+    mod demo_tape;
     mod inventory_screen;
     mod options_screen;
     mod save_files;

@@ -1,0 +1,40 @@
+# Release configuration read by `dist` (cargo-dist): which binaries are built
+# for which platforms when a version tag such as v0.1.0 is pushed, and how
+# players install them. `dist generate` writes .github/workflows/release.yml
+# from this file; edit this file, then run it again, rather than editing the
+# workflow by hand. The download URLs come from `repository` in Cargo.toml.
+
+[workspace]
+members = ["cargo:."]
+
+[dist]
+# Version of dist the release workflow installs (Cargo.toml SemVer syntax).
+cargo-dist-version = "0.34.0"
+# Generate the GitHub Actions workflow, triggered by a pushed version tag.
+ci = "github"
+# A shell script for Linux and macOS, a PowerShell script for Windows: each
+# downloads the right archive from the GitHub release and puts the binary on
+# the PATH.
+installers = ["shell", "powershell"]
+# Windows (MSVC), Linux (glibc, x86_64), macOS Intel and Apple Silicon.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+]
+# Installers place the binary where `cargo install` would, already on the
+# PATH of anyone with a Rust toolchain, and in ~/.cargo/bin otherwise.
+install-path = "CARGO_HOME"
+# No self-updater: one binary, updated by running the installer again.
+install-updater = false
+# release.yml follows the template of `dist generate` but was written by hand,
+# so dist must not refuse it as out of date. Once `dist generate` has
+# rewritten it, remove this line so dist checks the workflow again.
+allow-dirty = ["ci"]
+
+# dist picks a runner for each target; the Intel macOS runners are being
+# retired, so the Intel binary is cross-compiled on Apple Silicon instead.
+[dist.github-custom-runners]
+x86_64-apple-darwin = "macos-14"
+aarch64-apple-darwin = "macos-14"
