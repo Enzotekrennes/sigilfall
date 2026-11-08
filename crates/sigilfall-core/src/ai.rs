@@ -2,15 +2,15 @@
 //!
 //! Exposes [`choose_action`]. A monster chases the player it can see by the
 //! shortest path ([`find_path`], A*), walks to where it last saw the player
-//! once the player is out of sight, then waits there. Monsters have no
-//! attack yet: one standing next to the player waits.
+//! once the player is out of sight, then waits there. A monster next to the
+//! player it sees attacks it, by moving into its cell.
 //!
 //! This module only decides. Whether the monster sees the player is given
 //! by the caller (the `game` module), and the chosen action is applied, or
 //! refused, by the caller too.
 
 use crate::action::Action;
-use crate::geometry::Position;
+use crate::geometry::{Direction, Position};
 use crate::map::Map;
 use crate::path::find_path;
 
@@ -31,7 +31,8 @@ use crate::path::find_path;
 ///
 /// 1. A monster that sees the player remembers the player's cell.
 /// 2. With nothing remembered, it waits.
-/// 3. Next to the player it sees, it waits: attacking comes with combat.
+/// 3. Next to the player it sees, it moves into the player's cell, which
+///    the caller turns into an attack (see the `game` module).
 /// 4. On the remembered cell, or next to it while another actor holds it,
 ///    it forgets the cell and waits: the player is gone.
 /// 5. Otherwise it steps along a shortest path to the remembered cell (the
@@ -52,8 +53,8 @@ pub fn choose_action(
     let Some(target) = *last_seen else {
         return Action::Wait;
     };
-    if sees_player && are_adjacent(monster, player) {
-        return Action::Wait;
+    if sees_player && let Some(direction) = direction_between(monster, player) {
+        return Action::Move(direction);
     }
     if monster == target || (are_adjacent(monster, target) && occupied(target)) {
         *last_seen = None;
@@ -68,6 +69,14 @@ pub fn choose_action(
 /// included.
 fn are_adjacent(a: Position, b: Position) -> bool {
     a != b && a.x.abs_diff(b.x) <= 1 && a.y.abs_diff(b.y) <= 1
+}
+
+/// Returns the direction of the single step from `from` to `to`, or `None`
+/// when the two cells are not adjacent.
+fn direction_between(from: Position, to: Position) -> Option<Direction> {
+    Direction::ALL
+        .into_iter()
+        .find(|&direction| from.step(direction) == to)
 }
 
 #[cfg(test)]
@@ -122,17 +131,46 @@ mod tests {
     }
 
     #[test]
-    fn a_monster_next_to_the_player_waits() {
+    fn a_monster_next_to_the_player_moves_into_it_to_attack() {
         let map = room();
+        let player = at(2, 2);
         let mut memory = None;
 
         for direction in Direction::ALL {
-            let monster = at(2, 2).step(direction);
-            let action = choose_action(&map, monster, at(2, 2), true, &mut memory, nobody);
+            let monster = player.step(direction);
+            // The player's cell is occupied, which must not stop the blow.
+            let occupied = |p: Position| p == player;
+            let action = choose_action(&map, monster, player, true, &mut memory, occupied);
 
-            assert_eq!(action, Action::Wait, "{direction:?}");
-            assert_eq!(memory, Some(at(2, 2)));
+            let Action::Move(towards) = action else {
+                panic!("expected a move into the player, got {action:?}");
+            };
+            assert_eq!(monster.step(towards), player, "from {direction:?}");
+            assert_eq!(memory, Some(player));
         }
+    }
+
+    #[test]
+    fn a_monster_next_to_a_player_it_does_not_see_does_not_attack() {
+        // Only reachable if sight said no; the monster then acts on memory.
+        let map = room();
+        let mut memory = None;
+
+        let action = choose_action(&map, at(3, 2), at(2, 2), false, &mut memory, nobody);
+
+        assert_eq!(action, Action::Wait);
+    }
+
+    #[test]
+    fn the_direction_between_two_cells_is_the_single_step_joining_them() {
+        for direction in Direction::ALL {
+            assert_eq!(
+                direction_between(at(4, 4), at(4, 4).step(direction)),
+                Some(direction)
+            );
+        }
+        assert_eq!(direction_between(at(4, 4), at(4, 4)), None);
+        assert_eq!(direction_between(at(4, 4), at(6, 4)), None);
     }
 
     #[test]

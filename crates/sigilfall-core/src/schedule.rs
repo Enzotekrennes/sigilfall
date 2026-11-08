@@ -34,9 +34,17 @@ pub const MOVE_COST: i32 = 100;
 /// creature pass.
 pub const WAIT_COST: i32 = 100;
 
-/// Returns the energy `action` costs when it is performed.
+/// Energy spent by striking a foe on a neighbouring cell.
 ///
-/// A blocked action costs nothing; that rule is applied by the caller, which
+/// The normal cost, so a blow takes as long as the step it replaces: a
+/// creature of speed 200 strikes twice per normal action of the player.
+pub const ATTACK_COST: i32 = 100;
+
+/// Returns the energy `action` costs when it is performed as such.
+///
+/// A move into a foe is not a step but a blow, which costs [`ATTACK_COST`]
+/// instead; the `game` module, which finds the foe, charges that cost. A
+/// blocked action costs nothing; that rule is applied by the caller, which
 /// simply does not call [`spend_energy`] for it.
 pub const fn action_cost(action: Action) -> i32 {
     match action {
@@ -45,12 +53,13 @@ pub const fn action_cost(action: Action) -> i32 {
     }
 }
 
-/// Charges `actor` the energy cost of performing `action`.
+/// Charges `actor` `cost` energy for what it just did: [`action_cost`] of
+/// its action, or [`ATTACK_COST`] for a blow.
 ///
 /// The actor's energy may become negative when the cost exceeds what it had
 /// stored; it then waits longer before its next turn.
-pub fn spend_energy(actor: &mut Actor, action: Action) {
-    actor.energy -= action_cost(action);
+pub fn spend_energy(actor: &mut Actor, cost: i32) {
+    actor.energy -= cost;
 }
 
 /// Keeps the turn order of the actors and the time elapsed.
@@ -72,6 +81,20 @@ impl Scheduler {
     /// before it.
     pub fn enrol(&mut self, actor: ActorId) {
         self.turn_order.push(actor);
+    }
+
+    /// Takes `actor` out of the turn order, for good; the others keep their
+    /// order. Nothing happens if it was not enrolled.
+    ///
+    /// Called when an actor leaves the game, such as a monster that dies, so
+    /// that [`Scheduler::next_actor`] never looks for it again.
+    pub fn remove(&mut self, actor: ActorId) {
+        self.turn_order.retain(|&id| id != actor);
+    }
+
+    /// Returns whether `actor` is in the turn order.
+    pub fn is_enrolled(&self, actor: ActorId) -> bool {
+        self.turn_order.contains(&actor)
     }
 
     /// Returns the number of ticks elapsed since the scheduler was created.
@@ -146,11 +169,18 @@ fn scheduled_mut(actors: &mut SlotMap<ActorId, Actor>, id: ActorId) -> &mut Acto
 mod tests {
     use super::*;
     use crate::actor::ActorKind;
+    use crate::combat::PLAYER_STATS;
     use crate::geometry::{Direction, Position};
+
+    /// Creates an actor moving at `speed`; its other values do not matter
+    /// to the schedule.
+    fn actor(speed: i32) -> Actor {
+        Actor::new(Position::new(1, 1), speed, PLAYER_STATS, ActorKind::Player)
+    }
 
     /// Creates an actor of the given speed, stores it and enrols it.
     fn add(actors: &mut SlotMap<ActorId, Actor>, scheduler: &mut Scheduler, speed: i32) -> ActorId {
-        let id = actors.insert(Actor::new(Position::new(1, 1), speed, ActorKind::Player));
+        let id = actors.insert(actor(speed));
         scheduler.enrol(id);
         id
     }
@@ -168,7 +198,7 @@ mod tests {
             if scheduler.ticks() > ticks {
                 return turns;
             }
-            spend_energy(&mut actors[id], Action::Wait);
+            spend_energy(&mut actors[id], action_cost(Action::Wait));
             turns.push(id);
         }
     }
@@ -222,11 +252,7 @@ mod tests {
         let mut scheduler = Scheduler::default();
         // Free the first slot so the next insertion reuses it: slot order
         // and creation order now disagree.
-        let removed = actors.insert(Actor::new(
-            Position::new(1, 1),
-            NORMAL_SPEED,
-            ActorKind::Player,
-        ));
+        let removed = actors.insert(actor(NORMAL_SPEED));
         let older = add(&mut actors, &mut scheduler, NORMAL_SPEED);
         actors.remove(removed);
         let newer = add(&mut actors, &mut scheduler, NORMAL_SPEED);
@@ -252,16 +278,36 @@ mod tests {
     }
 
     #[test]
-    fn normal_actions_cost_the_threshold() {
+    fn a_removed_actor_never_acts_again_and_the_others_keep_their_order() {
+        let mut actors = SlotMap::with_key();
+        let mut scheduler = Scheduler::default();
+        let first = add(&mut actors, &mut scheduler, NORMAL_SPEED);
+        let second = add(&mut actors, &mut scheduler, NORMAL_SPEED);
+        let third = add(&mut actors, &mut scheduler, NORMAL_SPEED);
+
+        scheduler.remove(second);
+        actors.remove(second);
+
+        assert!(!scheduler.is_enrolled(second));
+        assert!(scheduler.is_enrolled(first) && scheduler.is_enrolled(third));
+        let turns = run_for(&mut actors, &mut scheduler, 2);
+        assert_eq!(turns, [first, third, first, third]);
+    }
+
+    #[test]
+    fn normal_actions_and_blows_cost_the_threshold() {
         assert_eq!(action_cost(Action::Wait), ACTION_THRESHOLD);
         assert_eq!(
             action_cost(Action::Move(Direction::North)),
             ACTION_THRESHOLD
         );
+        assert_eq!(ATTACK_COST, ACTION_THRESHOLD);
 
-        let mut actor = Actor::new(Position::new(1, 1), NORMAL_SPEED, ActorKind::Player);
-        spend_energy(&mut actor, Action::Move(Direction::East));
+        let mut actor = actor(NORMAL_SPEED);
+        spend_energy(&mut actor, action_cost(Action::Move(Direction::East)));
         assert_eq!(actor.energy(), -MOVE_COST);
+        spend_energy(&mut actor, ATTACK_COST);
+        assert_eq!(actor.energy(), -MOVE_COST - ATTACK_COST);
     }
 
     #[test]

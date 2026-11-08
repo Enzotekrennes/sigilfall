@@ -1,13 +1,16 @@
 //! Creatures that take turns on the map, the player included.
 //!
 //! Exposes [`ActorId`], a generational key that never points to a removed
-//! actor, [`Actor`], which holds where an actor stands, how fast it acts and
-//! what it is, [`ActorKind`] and [`Monster`]. Hit points and attacks are not
-//! modelled yet. How energy turns into turns is decided by the `schedule`
-//! module, what a monster does by the `ai` module.
+//! actor, [`Actor`], which holds where an actor stands, how fast it acts,
+//! how it fights, how hurt it is and what it is, [`ActorKind`] and
+//! [`Monster`]. How energy turns into turns is decided by the `schedule`
+//! module, what a monster does by the `ai` module, and how much a blow hurts
+//! by the `combat` module.
 
+use crate::combat::{CombatStats, PLAYER_STATS};
 use crate::content::{Family, MonsterDef};
 use crate::geometry::Position;
+use crate::schedule::NORMAL_SPEED;
 
 slotmap::new_key_type! {
     /// Identifies one actor in the game.
@@ -28,27 +31,39 @@ pub struct Actor {
     /// Energy stored towards the next turn. It can drop below zero when an
     /// action costs more than the actor had stored.
     pub(crate) energy: i32,
+    /// Fixed fighting values: hit points when unhurt, attack and defense.
+    stats: CombatStats,
+    /// Hit points left, from 0 to `stats.max_hp`; 0 means dead.
+    hp: i32,
     /// Whether this is the player or a monster, and which one.
     pub(crate) kind: ActorKind,
 }
 
 impl Actor {
-    /// Creates an actor of the given `kind` standing at `position` with no
-    /// stored energy.
+    /// Creates an unhurt actor of the given `kind` standing at `position`
+    /// with no stored energy.
     ///
     /// `speed` is the energy gained per tick: `schedule::NORMAL_SPEED` acts
     /// once per tick with actions at the normal cost, twice that speed acts
-    /// twice as often.
+    /// twice as often. `stats` are its fighting values; it starts with
+    /// `stats.max_hp` hit points.
     ///
     /// # Panics
     ///
-    /// Panics if `speed` is zero or negative: such an actor would never act
-    /// and the scheduler would wait for it forever, so it is a bug in the code
-    /// creating it.
-    pub fn new(position: Position, speed: i32, kind: ActorKind) -> Self {
+    /// Panics if `speed` or `stats.max_hp` is zero or negative: such an actor
+    /// would never act, or would be dead from the start, so it is a bug in
+    /// the code creating it.
+    pub fn new(position: Position, speed: i32, stats: CombatStats, kind: ActorKind) -> Self {
         assert!(
             speed > 0,
             "actor speed must be positive, got {speed} for the actor at ({}, {})",
+            position.x,
+            position.y
+        );
+        assert!(
+            stats.max_hp > 0,
+            "actor hit points must be positive, got {} for the actor at ({}, {})",
+            stats.max_hp,
             position.x,
             position.y
         );
@@ -56,12 +71,21 @@ impl Actor {
             position,
             speed,
             energy: 0,
+            stats,
+            hp: stats.max_hp,
             kind,
         }
     }
 
+    /// Creates the player, unhurt, standing at `position`, at normal speed
+    /// and with the starting values of `combat::PLAYER_STATS`.
+    pub fn player(position: Position) -> Self {
+        Self::new(position, NORMAL_SPEED, PLAYER_STATS, ActorKind::Player)
+    }
+
     /// Creates a monster of kind `definition` standing at `position`, with
-    /// the definition's speed and `energy` already stored.
+    /// the definition's speed, hit points, attack and defense, and `energy`
+    /// already stored.
     ///
     /// `energy` is a head start towards the monster's first turn: `0` for
     /// none, and below `schedule::ACTION_THRESHOLD` for monsters placed on a
@@ -71,6 +95,7 @@ impl Actor {
         let mut actor = Self::new(
             position,
             definition.speed(),
+            CombatStats::of_monster(definition),
             ActorKind::Monster(Monster::new(definition)),
         );
         actor.energy = energy;
@@ -93,9 +118,48 @@ impl Actor {
         self.energy
     }
 
+    /// Returns the hit points left: from 0 (dead) to [`Actor::max_hp`].
+    pub const fn hp(&self) -> i32 {
+        self.hp
+    }
+
+    /// Returns the hit points of the actor when unhurt; always positive.
+    pub const fn max_hp(&self) -> i32 {
+        self.stats.max_hp
+    }
+
+    /// Returns the attack value, which raises the damage of its blows.
+    pub const fn attack(&self) -> i32 {
+        self.stats.attack
+    }
+
+    /// Returns the defense value, which lowers the damage of the blows it
+    /// takes.
+    pub const fn defense(&self) -> i32 {
+        self.stats.defense
+    }
+
+    /// Returns whether the actor still has hit points left.
+    pub const fn is_alive(&self) -> bool {
+        self.hp > 0
+    }
+
+    /// Takes `damage` hit points off the actor, stopping at 0.
+    ///
+    /// `damage` is expected positive (see `combat::damage`). Removing a dead
+    /// monster or ending the game is up to the caller.
+    pub(crate) fn take_damage(&mut self, damage: i32) {
+        self.hp = (self.hp - damage).max(0);
+    }
+
     /// Returns whether this is the player or a monster, and which one.
     pub const fn kind(&self) -> &ActorKind {
         &self.kind
+    }
+
+    /// Returns whether this actor is the player.
+    pub const fn is_player(&self) -> bool {
+        matches!(self.kind, ActorKind::Player)
     }
 
     /// Returns the monster's own data, or `None` for the player.
@@ -174,15 +238,54 @@ mod tests {
 
     use crate::content::Content;
 
+    /// Fighting values of the test actors.
+    const STATS: CombatStats = CombatStats {
+        max_hp: 7,
+        attack: 3,
+        defense: 1,
+    };
+
     #[test]
-    fn new_actor_starts_without_energy() {
-        let actor = Actor::new(Position::new(2, 3), 150, ActorKind::Player);
+    fn new_actor_starts_unhurt_and_without_energy() {
+        let actor = Actor::new(Position::new(2, 3), 150, STATS, ActorKind::Player);
 
         assert_eq!(actor.position(), Position::new(2, 3));
         assert_eq!(actor.speed(), 150);
         assert_eq!(actor.energy(), 0);
+        assert_eq!(actor.hp(), 7);
+        assert_eq!(actor.max_hp(), 7);
+        assert_eq!(actor.attack(), 3);
+        assert_eq!(actor.defense(), 1);
+        assert!(actor.is_alive());
         assert_eq!(actor.kind(), &ActorKind::Player);
+        assert!(actor.is_player());
         assert!(actor.as_monster().is_none());
+    }
+
+    #[test]
+    fn the_player_starts_with_the_player_values() {
+        let player = Actor::player(Position::new(1, 2));
+
+        assert_eq!(player.position(), Position::new(1, 2));
+        assert_eq!(player.speed(), NORMAL_SPEED);
+        assert_eq!(player.hp(), PLAYER_STATS.max_hp);
+        assert_eq!(player.attack(), PLAYER_STATS.attack);
+        assert_eq!(player.defense(), PLAYER_STATS.defense);
+        assert!(player.is_player());
+    }
+
+    #[test]
+    fn damage_lowers_hit_points_down_to_zero_only() {
+        let mut actor = Actor::new(Position::new(1, 1), NORMAL_SPEED, STATS, ActorKind::Player);
+
+        actor.take_damage(3);
+        assert_eq!(actor.hp(), 4);
+        assert!(actor.is_alive());
+
+        actor.take_damage(10);
+        assert_eq!(actor.hp(), 0);
+        assert!(!actor.is_alive());
+        assert_eq!(actor.max_hp(), 7, "the maximum is untouched");
     }
 
     #[test]
@@ -195,6 +298,11 @@ mod tests {
         assert_eq!(actor.position(), Position::new(4, 1));
         assert_eq!(actor.speed(), definition.speed());
         assert_eq!(actor.energy(), 37);
+        assert_eq!(actor.hp(), definition.hp());
+        assert_eq!(actor.max_hp(), definition.hp());
+        assert_eq!(actor.attack(), definition.attack());
+        assert_eq!(actor.defense(), definition.defense());
+        assert!(!actor.is_player());
         let monster = actor.as_monster().expect("a monster");
         assert_eq!(monster.definition(), "ossuary_rat");
         assert_eq!(monster.family(), definition.family());
@@ -205,6 +313,13 @@ mod tests {
     #[test]
     #[should_panic(expected = "actor speed must be positive, got 0")]
     fn zero_speed_is_rejected() {
-        Actor::new(Position::new(1, 1), 0, ActorKind::Player);
+        Actor::new(Position::new(1, 1), 0, STATS, ActorKind::Player);
+    }
+
+    #[test]
+    #[should_panic(expected = "actor hit points must be positive, got 0")]
+    fn zero_hit_points_are_rejected() {
+        let stats = CombatStats { max_hp: 0, ..STATS };
+        Actor::new(Position::new(1, 1), NORMAL_SPEED, stats, ActorKind::Player);
     }
 }

@@ -1,31 +1,42 @@
 //! A game in progress and its single entry point, [`Game::submit`].
 //!
-//! Exposes [`Game`], [`VisibleMonster`] and [`PLAYER_START`]. The game owns
-//! the run's seed, the map, the actors and the scheduler. A new game starts
-//! on the first generated floor of its seed, with its monsters (see the
-//! `generation` module). The player's action is applied, then the other
-//! actors take their turns until the player may act again, and everything
-//! that happened is returned as [`Event`]s. The game produces no text and
-//! draws nothing.
+//! Exposes [`Game`], [`Status`], [`VisibleMonster`] and [`PLAYER_START`].
+//! The game owns the run's seed, the map, the actors, the scheduler and the
+//! gameplay random stream. A new game starts on the first generated floor of
+//! its seed, with its monsters (see the `generation` module). The player's
+//! action is applied, then the other actors take their turns until the
+//! player may act again, and everything that happened is returned as
+//! [`Event`]s. The game produces no text and draws nothing.
 //!
 //! The game also keeps the player's field of view up to date: it is computed
 //! when the game starts and again after each action of the player, and the
 //! cells seen are remembered on the map. Monsters choose their actions with
-//! the `ai` module. Going down the stairs is not handled yet.
+//! the `ai` module.
+//!
+//! Fights are bump attacks: an actor that moves into a foe strikes it
+//! instead of stepping, for [`ATTACK_COST`] energy. The player and the
+//! monsters are foes; monsters never strike each other. Damage follows the
+//! `combat` module, drawn from the run's `Purpose::Gameplay` stream. A
+//! monster whose hit points fall to 0 leaves the map and the turn order; when
+//! the player's do, the game is over ([`Status::GameOver`]) and
+//! [`Game::submit`] no longer does anything. Going down the stairs is not
+//! handled yet.
 
+use rand_chacha::ChaCha8Rng;
 use slotmap::SlotMap;
 
 use crate::action::{self, Action, ActionOutcome};
 use crate::actor::{Actor, ActorId, ActorKind};
 use crate::ai;
+use crate::combat::{self, Combatant};
 use crate::content::{Content, Family, MonsterDef};
 use crate::event::Event;
 use crate::fov::{self, SIGHT_RADIUS};
 use crate::generation::{self, FIRST_DEPTH, Floor, MonsterSpawn};
 use crate::geometry::Position;
 use crate::map::Map;
-use crate::rng::Seed;
-use crate::schedule::{NORMAL_SPEED, Scheduler, spend_energy};
+use crate::rng::{Purpose, Seed};
+use crate::schedule::{ATTACK_COST, Scheduler, action_cost, spend_energy};
 
 /// Cell where the player starts in the fixed room of
 /// [`Game::in_fixed_room`].
@@ -37,7 +48,8 @@ pub const PLAYER_START: Position = Position::new(5, 5);
 
 /// A game in progress: the map, the actors on it and the flow of time.
 ///
-/// Between two calls to [`Game::submit`], it is always the player's turn.
+/// Between two calls to [`Game::submit`], it is always the player's turn,
+/// unless the game is over.
 #[derive(Debug, Clone)]
 pub struct Game {
     /// The seed every random choice of this run follows from.
@@ -52,6 +64,24 @@ pub struct Game {
     scheduler: Scheduler,
     /// Number of player actions that took time since the game started.
     player_turns: u64,
+    /// Stream of every random choice made while playing, such as the damage
+    /// of each blow: `seed.stream(FIRST_DEPTH, Purpose::Gameplay)`.
+    gameplay_rng: ChaCha8Rng,
+    /// Whether the player is still alive.
+    status: Status,
+}
+
+/// Whether a game can still be played.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Status {
+    /// The player is alive: [`Game::submit`] takes its next action.
+    Playing,
+    /// The player died; the game is finished and [`Game::submit`] does
+    /// nothing any more.
+    GameOver {
+        /// Who dealt the killing blow, for the end-of-run summary.
+        killed_by: Combatant,
+    },
 }
 
 /// A monster the player sees right now, as the binary needs it to draw it.
@@ -73,8 +103,9 @@ pub struct VisibleMonster<'game> {
 impl Game {
     /// Starts a game of the run identified by `seed`, on its first floor
     /// (`generation::generate_with_monsters(seed, FIRST_DEPTH, content)`),
-    /// with the player on that floor's start cell, moving at normal speed,
-    /// and the floor's monsters.
+    /// with the player on that floor's start cell, moving at normal speed
+    /// with the starting values of `combat::PLAYER_STATS`, and the floor's
+    /// monsters.
     ///
     /// `content` is the validated game data, normally `Content::load()`; the
     /// monsters are drawn from its spawn table for the first floor. The
@@ -117,7 +148,7 @@ impl Game {
         Self::start(seed, Map::fixed_room(), PLAYER_START, &[])
     }
 
-    /// Starts a game on `map` with the player at `start`, at normal speed,
+    /// Starts a game on `map` with the player at `start` (`Actor::player`),
     /// and one monster per entry of `monsters`, computes what the player
     /// sees from there and runs the clock to the player's first turn.
     ///
@@ -125,7 +156,7 @@ impl Game {
     /// cells; the callers guarantee it.
     fn start(seed: Seed, map: Map, start: Position, monsters: &[MonsterSpawn]) -> Self {
         let mut actors = SlotMap::with_key();
-        let player = actors.insert(Actor::new(start, NORMAL_SPEED, ActorKind::Player));
+        let player = actors.insert(Actor::player(start));
         let mut scheduler = Scheduler::default();
         scheduler.enrol(player);
         for spawn in monsters {
@@ -144,6 +175,8 @@ impl Game {
             player,
             scheduler,
             player_turns: 0,
+            gameplay_rng: seed.stream(FIRST_DEPTH, Purpose::Gameplay),
+            status: Status::Playing,
         };
         game.update_field_of_view();
         // The player is first in turn order and every monster starts below
@@ -181,23 +214,43 @@ impl Game {
     /// Applies the player's `action`, then lets the other actors act until
     /// it is the player's turn again, and returns what happened in order.
     ///
-    /// A move into a wall, the edge of the map or another actor is refused:
-    /// the only event is [`Event::MoveBlocked`], the player spends no energy,
-    /// no time passes and no other actor acts. Otherwise the first event is
-    /// the player's own, followed by those of every actor that acted before
-    /// the player's next turn, and [`Game::player_turns`] grows by one.
+    /// A move into a monster is a blow ([`Event::Attacked`], followed by
+    /// [`Event::Died`] if it kills). A move into a wall or the edge of the
+    /// map is refused: the only event is [`Event::MoveBlocked`], the player
+    /// spends no energy, no time passes and no other actor acts. Otherwise
+    /// the first events are the player's own, followed by those of every
+    /// actor that acted before the player's next turn, and
+    /// [`Game::player_turns`] grows by one.
     ///
     /// After an action that took time, the field of view is computed again
     /// from the player's position (see [`Game::is_visible`]) before the other
     /// actors act.
+    ///
+    /// If the player dies, the list ends with its [`Event::Died`], no other
+    /// actor acts and the game is over ([`Game::status`]). Once the game is
+    /// over, this function changes nothing and returns no event.
     pub fn submit(&mut self, action: Action) -> Vec<Event> {
         let mut events = Vec::new();
+        if self.is_over() {
+            return events;
+        }
         if self.perform(self.player, action, &mut events) {
             self.player_turns += 1;
             self.update_field_of_view();
             self.run_until_player_turn(&mut events);
         }
         events
+    }
+
+    /// Returns whether the game can still be played and, if not, who killed
+    /// the player.
+    pub const fn status(&self) -> &Status {
+        &self.status
+    }
+
+    /// Returns whether the player has died, which ends the game.
+    pub const fn is_over(&self) -> bool {
+        matches!(self.status, Status::GameOver { .. })
     }
 
     /// Returns the seed of this run, as given to [`Game::new`] or
@@ -217,11 +270,15 @@ impl Game {
     }
 
     /// Returns the player's actor.
+    ///
+    /// The player is never removed: after its death, it stays on its cell
+    /// with 0 hit points, so the final screen can still show it.
     pub fn player_actor(&self) -> &Actor {
         &self.actors[self.player]
     }
 
-    /// Returns the actor with key `id`, or `None` if it does not exist.
+    /// Returns the actor with key `id`, or `None` if it does not exist, such
+    /// as a monster that died.
     pub fn actor(&self, id: ActorId) -> Option<&Actor> {
         self.actors.get(id)
     }
@@ -311,9 +368,9 @@ impl Game {
     }
 
     /// Lets non-player actors take their turns, in schedule order, until the
-    /// player may act. Their events are appended to `events`.
+    /// player may act or has died. Their events are appended to `events`.
     fn run_until_player_turn(&mut self, events: &mut Vec<Event>) {
-        loop {
+        while !self.is_over() {
             let id = self.scheduler.next_actor(&mut self.actors);
             if id == self.player {
                 return;
@@ -361,20 +418,28 @@ impl Game {
         action
     }
 
-    /// Applies `action` for actor `id` and appends the resulting event to
+    /// Applies `action` for actor `id` and appends the resulting events to
     /// `events`.
     ///
-    /// On success the actor moves (if the action is a move), spends the
-    /// action's energy cost and `true` is returned. A move towards a cell
-    /// that is not walkable or holds another actor is refused: the actor
-    /// keeps its position and energy, [`Event::MoveBlocked`] is appended and
-    /// `false` is returned.
+    /// A move into a foe (see [`Game::foe_at`]) strikes it instead (see
+    /// [`Game::strike`]) and `true` is returned. Otherwise, on success the
+    /// actor moves (if the action is a move), spends the action's energy cost
+    /// and `true` is returned. A move towards a cell that is not walkable or
+    /// holds another actor that is not a foe is refused: the actor keeps its
+    /// position and energy, [`Event::MoveBlocked`] is appended and `false` is
+    /// returned.
     fn perform(&mut self, id: ActorId, action: Action, events: &mut Vec<Event>) -> bool {
         let from = self.actors[id].position;
         let target = match action {
             Action::Move(direction) => from.step(direction),
             Action::Wait => from,
         };
+        if let Action::Move(_) = action
+            && let Some(foe) = self.foe_at(id, target)
+        {
+            self.strike(id, foe, events);
+            return true;
+        }
         let occupied = self.actor_at(target).is_some_and(|other| other != id);
         let outcome = match action::resolve(action, from, &self.map) {
             ActionOutcome::Performed { .. } if occupied => ActionOutcome::Blocked,
@@ -393,7 +458,7 @@ impl Game {
             ActionOutcome::Performed { position } => {
                 let actor = &mut self.actors[id];
                 actor.position = position;
-                spend_energy(actor, action);
+                spend_energy(actor, action_cost(action));
                 events.push(match action {
                     Action::Move(_) => Event::Moved {
                         actor: id,
@@ -406,17 +471,87 @@ impl Game {
             }
         }
     }
+
+    /// Returns the actor at `position` that `id` fights, if any.
+    ///
+    /// The player and the monsters are foes; two monsters are not, so they
+    /// block each other instead of fighting. An actor is never its own foe.
+    fn foe_at(&self, id: ActorId, position: Position) -> Option<ActorId> {
+        let other = self.actor_at(position).filter(|&other| other != id)?;
+        (self.actors[id].is_player() != self.actors[other].is_player()).then_some(other)
+    }
+
+    /// Makes `attacker` strike `target`, charging it [`ATTACK_COST`], and
+    /// appends [`Event::Attacked`] to `events`.
+    ///
+    /// The damage is `combat::roll_damage` of the attacker's attack against
+    /// the target's defense, drawn from the gameplay stream. A target left
+    /// with no hit points dies (see [`Game::kill`]).
+    fn strike(&mut self, attacker: ActorId, target: ActorId, events: &mut Vec<Event>) {
+        let damage = combat::roll_damage(
+            self.actors[attacker].attack(),
+            self.actors[target].defense(),
+            &mut self.gameplay_rng,
+        );
+        let struck = &mut self.actors[target];
+        struck.take_damage(damage);
+        let hp_left = struck.hp();
+        spend_energy(&mut self.actors[attacker], ATTACK_COST);
+        events.push(Event::Attacked {
+            attacker,
+            target,
+            damage,
+            hp_left,
+        });
+        if hp_left == 0 {
+            self.kill(target, attacker, events);
+        }
+    }
+
+    /// Records the death of `victim` at the hands of `killer` and appends
+    /// [`Event::Died`] to `events`.
+    ///
+    /// A monster leaves the map and the turn order, which frees its cell. The
+    /// player stays where it is, and the game is over.
+    fn kill(&mut self, victim: ActorId, killer: ActorId, events: &mut Vec<Event>) {
+        let who = self.combatant(victim);
+        let killed_by = self.combatant(killer);
+        if victim == self.player {
+            self.status = Status::GameOver {
+                killed_by: killed_by.clone(),
+            };
+        } else {
+            self.actors.remove(victim);
+            self.scheduler.remove(victim);
+        }
+        events.push(Event::Died {
+            actor: victim,
+            who,
+            killed_by,
+        });
+    }
+
+    /// Returns who the actor `id` is, as events record it.
+    fn combatant(&self, id: ActorId) -> Combatant {
+        match &self.actors[id].kind {
+            ActorKind::Player => Combatant::Player,
+            ActorKind::Monster(monster) => Combatant::Monster {
+                definition: monster.definition().to_owned(),
+            },
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::combat::{PLAYER_ATTACK, PLAYER_DEFENSE, PLAYER_MAX_HP};
     use crate::generation::MONSTERS_PER_FLOOR;
     use crate::geometry::Direction;
     use crate::map::Tile;
     use crate::path::DijkstraMap;
     use crate::path::test_maps::from_rows;
-    use crate::schedule::ACTION_THRESHOLD;
+    use crate::schedule::{ACTION_THRESHOLD, NORMAL_SPEED};
 
     /// Seed of every test game; the fixed room does not depend on it.
     const SEED: Seed = Seed::new(42);
@@ -437,14 +572,46 @@ mod tests {
     }
 
     /// A monster definition moving at `speed`, for tests that need a given
-    /// pace.
+    /// pace: 5 hit points, attack 1, no defense.
     fn creature(speed: i32) -> MonsterDef {
+        fighter(speed, 5, 1, 0)
+    }
+
+    /// A monster definition with the given speed and fighting values, for
+    /// tests of fights.
+    fn fighter(speed: i32, hp: i32, attack: i32, defense: i32) -> MonsterDef {
         let source = format!(
             "[Monster(id: \"test_creature\", name: \"test creature\", family: Vermin, \
-             elite: false, speed: {speed}, hp: 5, attack: 1, defense: 0, min_depth: 1)]"
+             elite: false, speed: {speed}, hp: {hp}, attack: {attack}, defense: {defense}, \
+             min_depth: 1)]"
         );
         let content = Content::parse(&source).expect("valid test monster");
         content.monsters()[0].clone()
+    }
+
+    /// The blows a fresh game of seed [`SEED`] deals, in order, for an
+    /// attacker with `attack` against a target with `defense`: the gameplay
+    /// stream of the first floor, read independently of the game.
+    fn expected_blows(attack: i32, defense: i32, count: usize) -> Vec<i32> {
+        let mut rng = SEED.stream(FIRST_DEPTH, Purpose::Gameplay);
+        (0..count)
+            .map(|_| combat::roll_damage(attack, defense, &mut rng))
+            .collect()
+    }
+
+    /// The monster combatant of the test definitions, as events name it.
+    fn test_creature() -> Combatant {
+        Combatant::Monster {
+            definition: "test_creature".to_owned(),
+        }
+    }
+
+    /// Returns the `Attacked` events of `events` dealt by `attacker`.
+    fn blows_by(events: &[Event], attacker: ActorId) -> Vec<&Event> {
+        events
+            .iter()
+            .filter(|e| matches!(e, Event::Attacked { attacker: a, .. } if *a == attacker))
+            .collect()
     }
 
     /// A game on the map drawn by `rows` (see `path::test_maps::from_rows`)
@@ -603,25 +770,323 @@ mod tests {
     }
 
     #[test]
-    fn another_actor_blocks_the_player() {
+    fn the_player_attacks_a_monster_by_moving_into_it() {
         let mut game = fixed_room_game();
         let player = game.player();
         let east = PLAYER_START.step(Direction::East);
-        game.spawn_monster(east, &creature(NORMAL_SPEED));
-        let ticks = game.ticks();
+        let monster = game.spawn_monster(east, &fighter(NORMAL_SPEED, 50, 1, 2));
+        let energy = game.player_actor().energy();
 
         let events = game.submit(Action::Move(Direction::East));
 
+        let damage = expected_blows(PLAYER_ATTACK, 2, 1)[0];
         assert_eq!(
             events,
-            [Event::MoveBlocked {
+            [Event::Attacked {
+                attacker: player,
+                target: monster,
+                damage,
+                hp_left: 50 - damage,
+            }],
+            "the monster had no energy yet, so it did not strike back"
+        );
+        assert_eq!(game.player_actor().position(), PLAYER_START, "no step");
+        assert_eq!(position_of(&game, monster), east);
+        assert_eq!(game.actor(monster).map(Actor::hp), Some(50 - damage));
+        assert_eq!(game.player_turns(), 1, "a blow takes the player's turn");
+        // One tick has given back a normal speed's worth of energy.
+        assert_eq!(
+            game.player_actor().energy(),
+            energy - ATTACK_COST + NORMAL_SPEED
+        );
+    }
+
+    #[test]
+    fn the_damage_of_every_blow_follows_the_gameplay_stream_of_the_seed() {
+        let play = || {
+            let mut game = fixed_room_game();
+            let east = PLAYER_START.step(Direction::East);
+            // Too slow to strike back during the test, and too tough to die.
+            let monster = game.spawn_monster(east, &fighter(1, 999, 1, 1));
+            let events: Vec<Event> = (0..20)
+                .flat_map(|_| game.submit(Action::Move(Direction::East)))
+                .collect();
+            (game, monster, events)
+        };
+
+        let (game, monster, events) = play();
+
+        let damages: Vec<i32> = events
+            .iter()
+            .map(|event| match event {
+                Event::Attacked { damage, .. } => *damage,
+                other => panic!("only the player's blows expected, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(damages, expected_blows(PLAYER_ATTACK, 1, 20));
+        assert_eq!(
+            game.actor(monster).map(Actor::hp),
+            Some(999 - damages.iter().sum::<i32>())
+        );
+        // A second game of the same seed replays the same fight.
+        assert_eq!(play().2, events);
+    }
+
+    #[test]
+    fn a_monster_next_to_the_player_attacks_instead_of_waiting() {
+        let mut game = fixed_room_game();
+        let player = game.player();
+        let monster = game.spawn_monster(
+            PLAYER_START.step(Direction::North),
+            &fighter(NORMAL_SPEED, 10, 3, 0),
+        );
+        // The new monster first acts after the player's second action.
+        assert_eq!(game.submit(Action::Wait), [Event::Waited { actor: player }]);
+
+        let events = game.submit(Action::Wait);
+
+        let damage = expected_blows(3, PLAYER_DEFENSE, 1)[0];
+        assert_eq!(
+            events,
+            [
+                Event::Waited { actor: player },
+                Event::Attacked {
+                    attacker: monster,
+                    target: player,
+                    damage,
+                    hp_left: PLAYER_MAX_HP - damage,
+                },
+            ]
+        );
+        assert_eq!(game.player_actor().hp(), PLAYER_MAX_HP - damage);
+        assert_eq!(
+            position_of(&game, monster),
+            PLAYER_START.step(Direction::North),
+            "it stays on its cell"
+        );
+        assert_eq!(game.status(), &Status::Playing);
+    }
+
+    #[test]
+    fn a_killed_monster_leaves_the_world_and_the_turn_order_and_frees_its_cell() {
+        let mut game = fixed_room_game();
+        let player = game.player();
+        let east = PLAYER_START.step(Direction::East);
+        // One hit point: the first blow kills, whatever the roll.
+        let monster = game.spawn_monster(east, &fighter(NORMAL_SPEED, 1, 1, 0));
+
+        let events = game.submit(Action::Move(Direction::East));
+
+        let damage = expected_blows(PLAYER_ATTACK, 0, 1)[0];
+        assert_eq!(
+            events,
+            [
+                Event::Attacked {
+                    attacker: player,
+                    target: monster,
+                    damage,
+                    hp_left: 0,
+                },
+                Event::Died {
+                    actor: monster,
+                    who: test_creature(),
+                    killed_by: Combatant::Player,
+                },
+            ]
+        );
+        assert!(game.actor(monster).is_none(), "removed from the world");
+        assert!(!game.scheduler.is_enrolled(monster), "and from turn order");
+        assert_eq!(game.actor_at(east), None);
+        assert_eq!(game.visible_monsters().count(), 0);
+        assert_eq!(game.status(), &Status::Playing);
+
+        // The cell is free: the next move steps onto it, and turns go on
+        // without the dead monster.
+        let events = game.submit(Action::Move(Direction::East));
+        assert_eq!(
+            events,
+            [Event::Moved {
                 actor: player,
                 from: PLAYER_START,
                 to: east,
             }]
         );
-        assert_eq!(game.player_actor().position(), PLAYER_START);
+        assert_eq!(wait_turns(&mut game, 3).len(), 3);
+    }
+
+    #[test]
+    fn the_death_of_the_player_ends_the_game_and_submit_does_nothing_after() {
+        let mut game = fixed_room_game();
+        let player = game.player();
+        // Each blow kills: attack 99 against defense 1 deals at least 97.
+        let killer = game.spawn_monster(
+            PLAYER_START.step(Direction::North),
+            &fighter(NORMAL_SPEED, 10, 99, 0),
+        );
+        let other = game.spawn_monster(
+            PLAYER_START.step(Direction::South),
+            &fighter(NORMAL_SPEED, 10, 99, 0),
+        );
+        game.submit(Action::Wait);
+
+        let events = game.submit(Action::Wait);
+
+        let damage = expected_blows(99, PLAYER_DEFENSE, 1)[0];
+        assert_eq!(
+            events,
+            [
+                Event::Waited { actor: player },
+                Event::Attacked {
+                    attacker: killer,
+                    target: player,
+                    damage,
+                    hp_left: 0,
+                },
+                Event::Died {
+                    actor: player,
+                    who: Combatant::Player,
+                    killed_by: test_creature(),
+                },
+            ],
+            "the second monster no longer acts once the player is dead"
+        );
+        assert_eq!(
+            game.status(),
+            &Status::GameOver {
+                killed_by: test_creature()
+            }
+        );
+        assert!(game.is_over());
+        assert_eq!(game.player_actor().hp(), 0);
+        assert!(!game.player_actor().is_alive());
+        assert_eq!(game.player_actor().position(), PLAYER_START, "still drawn");
+
+        // Nothing changes any more, whatever the action.
+        let ticks = game.ticks();
+        let turns = game.player_turns();
+        let energy = energies(&game);
+        let map = game.map().clone();
+        for action in [
+            Action::Wait,
+            Action::Move(Direction::West),
+            Action::Move(Direction::North),
+        ] {
+            assert_eq!(game.submit(action), [], "{action:?}");
+        }
         assert_eq!(game.ticks(), ticks);
+        assert_eq!(game.player_turns(), turns);
+        assert_eq!(energies(&game), energy);
+        assert_eq!(game.map(), &map);
+        assert_eq!(game.player_actor().position(), PLAYER_START);
+        assert_eq!(game.actor(killer).map(Actor::hp), Some(10));
+        assert_eq!(game.actor(other).map(Actor::hp), Some(10));
+    }
+
+    #[test]
+    fn a_monster_of_speed_200_strikes_twice_per_normal_player_action() {
+        let mut game = fixed_room_game();
+        let player = game.player();
+        // Attack 1 against defense 1 always deals the minimum of 1, so the
+        // player survives every blow of the test.
+        let fast = game.spawn_monster(
+            PLAYER_START.step(Direction::East),
+            &fighter(2 * NORMAL_SPEED, 50, 1, 0),
+        );
+        game.submit(Action::Wait);
+
+        for turn in 0..5 {
+            let events = game.submit(Action::Wait);
+
+            assert_eq!(events[0], Event::Waited { actor: player }, "turn {turn}");
+            assert_eq!(blows_by(&events, fast).len(), 2, "turn {turn}");
+            assert_eq!(events.len(), 3, "turn {turn}: {events:?}");
+        }
+        assert_eq!(game.player_actor().hp(), PLAYER_MAX_HP - 10);
+    }
+
+    #[test]
+    fn monsters_never_attack_each_other() {
+        let mut game = fixed_room_game();
+        let first = game.spawn_monster(FAR_CELLS[0], &creature(NORMAL_SPEED));
+        let beside = FAR_CELLS[0].step(Direction::East);
+        let second = game.spawn_monster(beside, &creature(NORMAL_SPEED));
+        let mut events = Vec::new();
+
+        let performed = game.perform(first, Action::Move(Direction::East), &mut events);
+
+        assert!(!performed);
+        assert_eq!(
+            events,
+            [Event::MoveBlocked {
+                actor: first,
+                from: FAR_CELLS[0],
+                to: beside,
+            }]
+        );
+        assert_eq!(game.actor(second).map(Actor::hp), Some(5));
+        assert_eq!(game.actor(first).map(Actor::energy), Some(0));
+    }
+
+    #[test]
+    fn events_of_generated_games_keep_their_promises() {
+        // Over real floors and fights: hit points stay within bounds, every
+        // key in a turn's events names a live actor or one whose death is
+        // reported in that turn, and a dead player ends the game.
+        let content = content();
+        let (mut blows, mut deaths) = (0, 0);
+        for value in 0..20 {
+            let mut game = Game::new(Seed::new(value), &content);
+            let stairs = generation::generate(Seed::new(value), FIRST_DEPTH).stairs();
+            for _ in 0..150 {
+                let distances = DijkstraMap::new(game.map(), [stairs]);
+                let action = distances
+                    .downhill(game.player_actor().position())
+                    .map_or(Action::Wait, Action::Move);
+                let events = game.submit(action);
+
+                let died: Vec<ActorId> = events
+                    .iter()
+                    .filter_map(|e| match e {
+                        Event::Died { actor, .. } => Some(*actor),
+                        _ => None,
+                    })
+                    .collect();
+                deaths += died.len();
+                for event in &events {
+                    if let Event::Attacked {
+                        attacker,
+                        target,
+                        damage,
+                        hp_left,
+                    } = event
+                    {
+                        blows += 1;
+                        assert!(*damage >= combat::MIN_DAMAGE);
+                        assert!(*hp_left >= 0);
+                        assert!(game.actor(*attacker).is_some());
+                        assert!(game.actor(*target).is_some() || died.contains(target));
+                        assert_ne!(
+                            game.actor(*attacker).map(Actor::is_player),
+                            game.actor(*target).map(Actor::is_player),
+                            "only foes fight, seed {value}"
+                        );
+                    }
+                }
+                for (_, actor) in game.actors() {
+                    assert!((0..=actor.max_hp()).contains(&actor.hp()), "seed {value}");
+                }
+                assert_eq!(
+                    game.is_over(),
+                    !game.player_actor().is_alive(),
+                    "seed {value}"
+                );
+                if game.is_over() {
+                    assert_eq!(game.submit(Action::Wait), []);
+                    break;
+                }
+            }
+        }
+        assert!(blows > 0 && deaths > 0, "the walks met no fight to check");
     }
 
     #[test]
@@ -895,17 +1360,11 @@ mod tests {
             distance -= 1;
         }
 
-        // Next to the player, it has no attack yet: it waits there.
+        // Next to the player, it stays there and strikes every turn.
         let at_contact = position_of(&game, monster);
         let events = wait_turns(&mut game, 3);
         assert_eq!(position_of(&game, monster), at_contact);
-        assert_eq!(
-            events
-                .iter()
-                .filter(|e| **e == Event::Waited { actor: monster })
-                .count(),
-            3
-        );
+        assert_eq!(blows_by(&events, monster).len(), 3);
     }
 
     #[test]
