@@ -9,6 +9,7 @@ pub mod action;
 pub mod actor;
 pub mod content;
 pub mod event;
+pub mod fov;
 pub mod game;
 pub mod generation;
 pub mod geometry;

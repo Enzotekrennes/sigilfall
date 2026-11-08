@@ -1,11 +1,14 @@
 //! Dungeon floor layout: a rectangular grid of tiles.
 //!
 //! Exposes [`Tile`] and [`Map`], with bounds-checked access where anything
-//! outside the grid counts as impassable, [`Map::can_step`], the one rule
-//! deciding which single steps are allowed, and [`Map::fixed_room`], a
-//! hand-made room kept for tests. Building generated floors is the job of the
-//! `generation` module. Field of view, remembered cells and engraved glyphs
-//! are not handled here yet.
+//! outside the grid counts as impassable and opaque, [`Map::can_step`], the
+//! one rule deciding which single steps are allowed, [`Map::blocks_sight`],
+//! and [`Map::fixed_room`], a hand-made room kept for tests.
+//!
+//! The map also keeps the player's sight: which cells are visible right now
+//! and which have been seen at least once (remembered). Computing what is
+//! visible is the job of the `fov` module, building generated floors that of
+//! the `generation` module. Engraved glyphs are not handled here yet.
 
 use crate::geometry::{Direction, Position};
 
@@ -47,9 +50,22 @@ impl Tile {
             Self::Wall => false,
         }
     }
+
+    /// Returns whether this tile stops sight: walls do, floor and stairs do
+    /// not.
+    pub const fn blocks_sight(self) -> bool {
+        match self {
+            Self::Wall => true,
+            Self::Floor | Self::StairsDown => false,
+        }
+    }
 }
 
-/// A rectangular grid of [`Tile`]s, stored row by row.
+/// A rectangular grid of [`Tile`]s, stored row by row, with what the player
+/// sees and remembers of it.
+///
+/// Two maps are equal when both their tiles and the player's sight of them
+/// are equal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Map {
     /// Number of columns.
@@ -59,15 +75,24 @@ pub struct Map {
     /// `width * height` tiles, row-major: the tile at `(x, y)` is at index
     /// `y * width + x`.
     tiles: Vec<Tile>,
+    /// One flag per cell, indexed like `tiles`: whether the player sees the
+    /// cell right now.
+    visible: Vec<bool>,
+    /// One flag per cell, indexed like `tiles`: whether the player has seen
+    /// the cell at least once on this floor. Never cleared.
+    remembered: Vec<bool>,
 }
 
 impl Map {
-    /// Creates a `width` × `height` map where every cell is `fill`.
+    /// Creates a `width` × `height` map where every cell is `fill`, none of
+    /// them visible or remembered yet.
     pub(crate) fn new(width: usize, height: usize, fill: Tile) -> Self {
         Self {
             width,
             height,
             tiles: vec![fill; width * height],
+            visible: vec![false; width * height],
+            remembered: vec![false; width * height],
         }
     }
 
@@ -128,6 +153,58 @@ impl Map {
     /// from `b`.
     pub fn can_step(&self, from: Position, direction: Direction) -> bool {
         self.is_walkable(from.step(direction))
+    }
+
+    /// Returns whether `position` stops sight.
+    ///
+    /// Walls do, floor and stairs do not ([`Tile::blocks_sight`]). Cells
+    /// outside the map always block sight, so nothing is ever seen past the
+    /// edge of the map.
+    pub fn blocks_sight(&self, position: Position) -> bool {
+        self.tile(position).is_none_or(Tile::blocks_sight)
+    }
+
+    /// Returns whether the player sees `position` right now.
+    ///
+    /// Cells outside the map are never visible. Only the field of view last
+    /// recorded with `Map::set_visible` counts.
+    pub fn is_visible(&self, position: Position) -> bool {
+        self.index(position)
+            .is_some_and(|index| self.visible[index])
+    }
+
+    /// Returns whether the player has seen `position` at least once on this
+    /// floor, whether or not it is visible now.
+    ///
+    /// Every visible cell is remembered, and a remembered cell stays so for
+    /// the rest of the floor. Cells outside the map are never remembered.
+    pub fn is_remembered(&self, position: Position) -> bool {
+        self.index(position)
+            .is_some_and(|index| self.remembered[index])
+    }
+
+    /// Records `cells` as the player's whole field of view: they become the
+    /// only visible cells, and each of them is remembered for good.
+    ///
+    /// Cells visible before and missing from `cells` stop being visible but
+    /// stay remembered.
+    ///
+    /// # Panics
+    ///
+    /// Panics if one of `cells` lies outside the map: a field of view only
+    /// holds cells of its map, so that would be a bug in the caller.
+    pub(crate) fn set_visible(&mut self, cells: impl IntoIterator<Item = Position>) {
+        self.visible.fill(false);
+        for position in cells {
+            let index = self.index(position).unwrap_or_else(|| {
+                panic!(
+                    "cannot see ({}, {}): outside the {}x{} map",
+                    position.x, position.y, self.width, self.height
+                )
+            });
+            self.visible[index] = true;
+            self.remembered[index] = true;
+        }
     }
 
     /// Returns every position of the map in reading order: row by row from
@@ -279,6 +356,51 @@ mod tests {
         for (index, &position) in positions.iter().enumerate() {
             assert_eq!(map.index(position), Some(index));
         }
+    }
+
+    #[test]
+    fn walls_and_the_outside_block_sight_floor_and_stairs_do_not() {
+        let mut map = Map::new(3, 1, Tile::Floor);
+        map.set_tile(Position::new(1, 0), Tile::Wall);
+        map.set_tile(Position::new(2, 0), Tile::StairsDown);
+
+        assert!(!map.blocks_sight(Position::new(0, 0)));
+        assert!(map.blocks_sight(Position::new(1, 0)));
+        assert!(!map.blocks_sight(Position::new(2, 0)));
+        assert!(map.blocks_sight(Position::new(3, 0)));
+        assert!(map.blocks_sight(Position::new(0, -1)));
+    }
+
+    #[test]
+    fn a_new_map_shows_and_remembers_nothing() {
+        let map = Map::fixed_room();
+
+        assert!(
+            map.positions()
+                .all(|p| !map.is_visible(p) && !map.is_remembered(p))
+        );
+    }
+
+    #[test]
+    fn seen_cells_stay_remembered_after_they_leave_the_view() {
+        let mut map = Map::new(4, 1, Tile::Floor);
+        let [a, b, c, d] = [0, 1, 2, 3].map(|x| Position::new(x, 0));
+
+        map.set_visible([a, b]);
+        map.set_visible([c]);
+
+        assert!(!map.is_visible(a) && !map.is_visible(b));
+        assert!(map.is_visible(c));
+        assert!(map.is_remembered(a) && map.is_remembered(b) && map.is_remembered(c));
+        assert!(!map.is_visible(d) && !map.is_remembered(d), "never seen");
+        assert!(!map.is_visible(Position::new(-1, 0)));
+        assert!(!map.is_remembered(Position::new(4, 0)));
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot see (5, 0): outside the 4x1 map")]
+    fn seeing_outside_the_map_panics() {
+        Map::new(4, 1, Tile::Floor).set_visible([Position::new(5, 0)]);
     }
 
     #[test]

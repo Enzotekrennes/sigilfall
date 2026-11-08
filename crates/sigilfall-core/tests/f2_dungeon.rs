@@ -90,6 +90,11 @@ fn positions(map: &Map) -> impl Iterator<Item = Position> {
     (0..height).flat_map(move |y| (0..width).map(move |x| Position::new(x, y)))
 }
 
+/// Every tile of `map`, in reading order.
+fn tiles(map: &Map) -> Vec<Option<Tile>> {
+    positions(map).map(|p| map.tile(p)).collect()
+}
+
 /// Every open cell of `map`.
 fn open_cells(map: &Map) -> Vec<Position> {
     positions(map).filter(|&p| open(map, p)).collect()
@@ -276,7 +281,9 @@ fn scenario_1_the_same_seed_gives_identical_dungeons() {
 
         let (game_a, game_b) = (Game::new(seed), Game::new(seed));
         assert_eq!(game_a.map(), game_b.map(), "seed {seed}");
-        assert_eq!(game_a.map(), first.map(), "seed {seed}");
+        // The game's map also holds what the player has seen, so only the
+        // tiles are compared with the generated floor.
+        assert_eq!(tiles(game_a.map()), tiles(first.map()), "seed {seed}");
         assert_eq!(
             game_a.player_actor().position(),
             game_b.player_actor().position(),

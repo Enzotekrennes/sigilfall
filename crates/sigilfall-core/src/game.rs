@@ -5,14 +5,19 @@
 //! generated floor of its seed (see the `generation` module). The player's
 //! action is applied, then the other actors take their turns until the
 //! player may act again, and everything that happened is returned as
-//! [`Event`]s. The game produces no text and draws nothing. Going down the
-//! stairs is not handled yet.
+//! [`Event`]s. The game produces no text and draws nothing.
+//!
+//! The game also keeps the player's field of view up to date: it is computed
+//! when the game starts and again after each action of the player, and the
+//! cells seen are remembered on the map. Going down the stairs is not handled
+//! yet.
 
 use slotmap::SlotMap;
 
 use crate::action::{self, Action, ActionOutcome};
 use crate::actor::{Actor, ActorId};
 use crate::event::Event;
+use crate::fov::{self, SIGHT_RADIUS};
 use crate::generation::{self, FIRST_DEPTH};
 use crate::geometry::Position;
 use crate::map::Map;
@@ -70,7 +75,8 @@ impl Game {
     }
 
     /// Starts a game on `map` with the player alone at `start`, at normal
-    /// speed, and runs the clock to the player's first turn.
+    /// speed, computes what the player sees from there and runs the clock to
+    /// the player's first turn.
     ///
     /// `start` is expected to be walkable; both callers guarantee it.
     fn start(seed: Seed, map: Map, start: Position) -> Self {
@@ -87,6 +93,7 @@ impl Game {
             scheduler,
             player_turns: 0,
         };
+        game.update_field_of_view();
         // Only the player exists, so no event can be produced here.
         game.run_until_player_turn(&mut Vec::new());
         game
@@ -124,10 +131,15 @@ impl Game {
     /// no time passes and no other actor acts. Otherwise the first event is
     /// the player's own, followed by those of every actor that acted before
     /// the player's next turn, and [`Game::player_turns`] grows by one.
+    ///
+    /// After an action that took time, the field of view is computed again
+    /// from the player's position (see [`Game::is_visible`]) before the other
+    /// actors act.
     pub fn submit(&mut self, action: Action) -> Vec<Event> {
         let mut events = Vec::new();
         if self.perform(self.player, action, &mut events) {
             self.player_turns += 1;
+            self.update_field_of_view();
             self.run_until_player_turn(&mut events);
         }
         events
@@ -185,6 +197,33 @@ impl Game {
     /// change it.
     pub const fn player_turns(&self) -> u64 {
         self.player_turns
+    }
+
+    /// Returns whether the player sees `position` right now.
+    ///
+    /// The field of view reaches [`SIGHT_RADIUS`] cells and is blocked by
+    /// walls (see the `fov` module). It is computed when the game starts and
+    /// after every action of the player that took time. The player's own
+    /// cell is always visible; cells outside the map never are.
+    pub fn is_visible(&self, position: Position) -> bool {
+        self.map.is_visible(position)
+    }
+
+    /// Returns whether the player has seen `position` at least once on this
+    /// floor, whether or not it is visible now.
+    ///
+    /// Every visible cell is remembered, and stays so after the player walks
+    /// away. Cells outside the map are never remembered.
+    pub fn is_remembered(&self, position: Position) -> bool {
+        self.map.is_remembered(position)
+    }
+
+    /// Computes what the player sees from its current position and records
+    /// it on the map, which also remembers those cells.
+    fn update_field_of_view(&mut self) {
+        let origin = self.actors[self.player].position;
+        let field = fov::visible_cells(&self.map, origin, SIGHT_RADIUS);
+        self.map.set_visible(field);
     }
 
     /// Returns the key of the actor standing at `position`, if any.
@@ -449,7 +488,8 @@ mod tests {
 
             let game = Game::new(seed);
 
-            assert_eq!(game.map(), floor.map());
+            let tiles = |map: &Map| map.positions().map(|p| map.tile(p)).collect::<Vec<_>>();
+            assert_eq!(tiles(game.map()), tiles(floor.map()));
             assert_eq!(game.player_actor().position(), floor.start());
             assert_eq!(game.actors().count(), 1);
             assert!(game.player_actor().energy() >= ACTION_THRESHOLD);
@@ -542,6 +582,100 @@ mod tests {
         };
         assert!(turns_of(fast) > 8, "the fast actor acted more often");
         assert!(turns_of(slow) < 8, "the slow actor acted less often");
+    }
+
+    #[test]
+    fn a_new_game_already_shows_what_the_player_sees() {
+        let game = fixed_room_game();
+
+        assert!(game.is_visible(PLAYER_START));
+        assert!(game.is_remembered(PLAYER_START));
+        assert!(game.is_visible(Position::new(0, 5)), "the wall to the left");
+        assert_eq!(
+            game.map()
+                .positions()
+                .filter(|&p| game.is_visible(p))
+                .collect::<Vec<_>>(),
+            fov::visible_cells(game.map(), PLAYER_START, SIGHT_RADIUS)
+        );
+        // Nine cells to the right is beyond the radius of eight.
+        assert!(!game.is_visible(Position::new(14, 5)));
+        assert!(!game.is_remembered(Position::new(14, 5)));
+    }
+
+    #[test]
+    fn the_field_of_view_follows_the_player() {
+        let mut game = fixed_room_game();
+        let far_right = Position::new(14, 5);
+
+        for _ in 0..3 {
+            game.submit(Action::Move(Direction::East));
+        }
+
+        let player = game.player_actor().position();
+        assert_eq!(player, Position::new(8, 5));
+        assert!(game.is_visible(player));
+        assert!(game.is_visible(far_right));
+        assert_eq!(
+            game.map()
+                .positions()
+                .filter(|&p| game.is_visible(p))
+                .collect::<Vec<_>>(),
+            fov::visible_cells(game.map(), player, SIGHT_RADIUS)
+        );
+    }
+
+    #[test]
+    fn a_refused_move_leaves_the_field_of_view_unchanged() {
+        let mut game = fixed_room_game();
+        for _ in 0..4 {
+            game.submit(Action::Move(Direction::West));
+        }
+        let before = game.map().clone();
+
+        game.submit(Action::Move(Direction::West));
+
+        assert_eq!(game.map(), &before);
+    }
+
+    #[test]
+    fn cells_seen_once_stay_remembered_after_the_player_leaves() {
+        let mut game = fixed_room_game();
+        let left_wall = Position::new(0, 5);
+        let seen_at_start: Vec<Position> = game
+            .map()
+            .positions()
+            .filter(|&p| game.is_visible(p))
+            .collect();
+
+        for _ in 0..12 {
+            game.submit(Action::Move(Direction::East));
+        }
+
+        assert_eq!(game.player_actor().position(), Position::new(17, 5));
+        assert!(!game.is_visible(left_wall), "now out of range");
+        assert!(game.is_remembered(left_wall));
+        assert!(seen_at_start.iter().all(|&p| game.is_remembered(p)));
+        // Visible cells are always remembered.
+        assert!(
+            game.map()
+                .positions()
+                .all(|p| !game.is_visible(p) || game.is_remembered(p))
+        );
+    }
+
+    #[test]
+    fn a_new_generated_floor_shows_the_view_from_its_start() {
+        let game = Game::new(SEED);
+        let map = game.map();
+        let start = game.player_actor().position();
+
+        let visible: Vec<Position> = map.positions().filter(|&p| game.is_visible(p)).collect();
+
+        assert_eq!(visible, fov::visible_cells(map, start, SIGHT_RADIUS));
+        assert!(visible.contains(&start));
+        // The rest of the floor lies behind walls or beyond the radius.
+        assert!(visible.len() < map.positions().count());
     }
 
     #[test]
