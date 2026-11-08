@@ -17,8 +17,9 @@ use crate::theme::GlyphSet;
 #[command(version, about)]
 pub struct Cli {
     /// Seed of the run, to replay or share a dungeon: a number such as 42,
-    /// or the seed shown in the game, such as 7F3A-91C2-0B5E-D4A8. A random
-    /// seed is used when it is left out.
+    /// or the seed shown in the game, such as 7F3A-91C2-0B5E-D4A8. Without
+    /// it, the saved game goes on, or a new game starts on a random seed.
+    /// Refused while a game is saved, so that game is never lost.
     // A value that looks like a negative number, such as `--seed -1`, is
     // taken as the seed, so it is refused with the accepted forms instead of
     // being reported as an unknown option.

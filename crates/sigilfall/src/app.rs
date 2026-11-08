@@ -39,6 +39,13 @@
 //! one around the player with the depth on the status line, and the log
 //! keeps the floors above. Off the stairs the game refuses it at no cost,
 //! and the log says so.
+//!
+//! The application started by `main` ([`App::launch`]) is tied to the
+//! player's save file (`persist::SaveFile`): it resumes the saved game if
+//! there is one, the save is deleted the moment the player dies, before the
+//! end screen is drawn, and [`App::save_on_exit`] writes the game in
+//! progress when the event loop ends. The rules of the launch are given at
+//! [`App::launch`].
 
 use std::cell::Cell;
 
@@ -52,13 +59,14 @@ use sigilfall_core::event::Event as GameEvent;
 use sigilfall_core::game::Game;
 use sigilfall_core::geometry::Direction;
 use sigilfall_core::item::ItemId;
-use sigilfall_core::rng::Seed;
 use sigilfall_core::sigil::{CastQuality, ESSENCE_COST, Recognition, Trace, recognize};
 
 use crate::casting::{Casting, Drawing, Verdict};
+use crate::cli::Cli;
 use crate::input::{self, AimCommand, Command, InventoryCommand, TraceCommand, VerdictCommand};
-use crate::message_log::MessageLog;
+use crate::message_log::{Message, MessageLog};
 use crate::messages;
+use crate::persist::{Loaded, SaveFile};
 use crate::theme::Theme;
 use crate::ui::inventory::InventoryScreen;
 use crate::ui::{self, Overlay};
@@ -101,30 +109,116 @@ pub struct App {
     /// A `Cell` so that rendering, which only reads the game, can still
     /// note the size it drew at.
     screen_size: Cell<Option<Size>>,
+    /// The save file the game is kept in between runs, or `None` for an
+    /// application that saves nothing, such as most test ones.
+    save: Option<SaveFile>,
 }
 
 impl App {
+    /// Starts the application of a run of the game, tied to the player's
+    /// `save` file, drawn with `theme`, with the monsters, items and sigils
+    /// of `content`.
+    ///
+    /// - A save of a game in progress and no `--seed` in `cli`: the saved
+    ///   game goes on exactly where it stopped, random stream included, and
+    ///   the log opens with "Welcome back" (`messages::welcome_back`).
+    /// - A save of a game in progress and a `--seed`: the launch is refused,
+    ///   so a seed typed out of habit never wipes a run; the error says how
+    ///   to continue it (no `--seed`) or abandon it (delete the save). The
+    ///   title menu of T26 will offer this choice on screen.
+    /// - No save: a new game of the seed of `cli` (`Cli::seed_or_random`).
+    /// - A save that could not be read back (corrupt, another format
+    ///   version, content changed): `SaveFile::load` set it aside, and a new
+    ///   game starts, its log opening with why and where the old save went
+    ///   (`messages::save_set_aside`).
+    /// - A save of a finished game, left by a deletion that failed: it is
+    ///   deleted and a new game starts.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error, before anything is drawn, when the launch is
+    /// refused as above, or when the save cannot be read, set aside or
+    /// deleted (see `SaveFile::load` and `SaveFile::delete`). A saved game
+    /// is never overwritten by a launch.
+    pub fn launch(
+        theme: Theme,
+        cli: &Cli,
+        content: &Content,
+        save: SaveFile,
+    ) -> anyhow::Result<Self> {
+        let (game, opening) = match save.load(content)? {
+            Loaded::Game(game) if game.is_over() => {
+                save.delete()?;
+                (
+                    Game::new(cli.seed_or_random(), content),
+                    vec![messages::welcome()],
+                )
+            }
+            Loaded::Game(game) => {
+                if let Some(seed) = cli.seed {
+                    anyhow::bail!(
+                        "a game in progress is saved in {}: start the game without \
+                         --seed to continue it, or delete that file to abandon it \
+                         and play the seed {seed}",
+                        save.path().display()
+                    );
+                }
+                (*game, vec![messages::welcome_back()])
+            }
+            Loaded::Missing => (
+                Game::new(cli.seed_or_random(), content),
+                vec![messages::welcome()],
+            ),
+            Loaded::SetAside { reason, moved_to } => (
+                Game::new(cli.seed_or_random(), content),
+                vec![
+                    messages::save_set_aside(&reason, &moved_to.display().to_string()),
+                    messages::welcome(),
+                ],
+            ),
+        };
+        let mut app = Self::start(theme, game, content.clone(), opening);
+        app.save = Some(save);
+        Ok(app)
+    }
+
     /// Starts the application on a new game of the run identified by
     /// `seed`, peopled from `content`, in [`State::Playing`], drawn with
-    /// `theme`. The log opens with the welcome message.
-    pub fn new(theme: Theme, seed: Seed, content: &Content) -> Self {
-        Self::start(theme, Game::new(seed, content), content.clone())
+    /// `theme`, with no save file. The log opens with the welcome message.
+    #[cfg(test)]
+    pub fn new(theme: Theme, seed: sigilfall_core::rng::Seed, content: &Content) -> Self {
+        Self::start(
+            theme,
+            Game::new(seed, content),
+            content.clone(),
+            vec![messages::welcome()],
+        )
     }
 
     /// Starts the application on `game` instead of a new game of a seed,
     /// so tests can play in a map they know, such as the fixed room of
-    /// `Game::in_fixed_room`; `content` names its monsters.
+    /// `Game::in_fixed_room`; `content` names its monsters. No save file is
+    /// used.
     #[cfg(test)]
     pub fn with_game(theme: Theme, game: Game, content: Content) -> Self {
-        Self::start(theme, game, content)
+        Self::start(theme, game, content, vec![messages::welcome()])
     }
 
-    /// Builds the application around `game`: the log holds the welcome
-    /// message, and the screen is [`State::GameOver`] if the game is already
-    /// over, [`State::Playing`] otherwise.
-    fn start(theme: Theme, game: Game, content: Content) -> Self {
+    /// Ties the application to `save`, as [`App::launch`] does, so tests
+    /// can check when an application built by [`App::with_game`] saves and
+    /// deletes.
+    #[cfg(test)]
+    pub fn saving_to(mut self, save: SaveFile) -> Self {
+        self.save = Some(save);
+        self
+    }
+
+    /// Builds the application around `game`, with no save file: the log
+    /// holds the `opening` messages, and the screen is [`State::GameOver`]
+    /// if the game is already over, [`State::Playing`] otherwise.
+    fn start(theme: Theme, game: Game, content: Content, opening: Vec<Message>) -> Self {
         let mut log = MessageLog::default();
-        log.push(messages::welcome());
+        log.extend(opening);
         let state = if game.is_over() {
             State::GameOver
         } else {
@@ -137,6 +231,7 @@ impl App {
             state,
             theme,
             screen_size: Cell::new(None),
+            save: None,
         }
     }
 
@@ -385,14 +480,57 @@ impl App {
     /// Submits the player's `action` to the game, adds what happened to the
     /// log, moves to [`State::GameOver`] if the player died, and returns the
     /// events.
+    ///
+    /// The death of the player deletes the save at once, before the end
+    /// screen is drawn, so the dead character cannot be resumed even if the
+    /// game is killed rather than quit.
     fn play(&mut self, action: Action) -> Vec<GameEvent> {
         let events = self.game.submit(action);
         self.log
             .extend(messages::describe(&events, &self.game, &self.content));
         if self.game.is_over() {
             self.state = State::GameOver;
+            self.delete_save();
         }
         events
+    }
+
+    /// Deletes the save of the dead character, if the application has one.
+    ///
+    /// A failure is not lost: the log says so, and [`App::save_on_exit`]
+    /// tries again and reports a second failure when the game ends.
+    fn delete_save(&mut self) {
+        let Some(save) = &self.save else {
+            return;
+        };
+        if save.delete().is_err() {
+            self.log.push(messages::save_not_deleted());
+        }
+    }
+
+    /// Keeps the run between launches, once the event loop has ended: the
+    /// game in progress is written to the save file (`SaveFile::write`),
+    /// and the save of a finished game is deleted if it is still there, so
+    /// quitting from the end screen never brings a save back. Does nothing
+    /// for an application without a save file.
+    ///
+    /// Meant to be called once, after [`App::run`] returned, whatever it
+    /// returned: a game whose screen failed is still saved.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error of `SaveFile::write` or `SaveFile::delete`, which
+    /// says which file failed and what to check; the game in progress is then
+    /// not saved, and the caller must tell the player.
+    pub fn save_on_exit(&self) -> anyhow::Result<()> {
+        let Some(save) = &self.save else {
+            return Ok(());
+        };
+        if self.game.is_over() {
+            save.delete()
+        } else {
+            save.write(&self.game)
+        }
     }
 
     /// Draws the active screen over the whole frame, with the application's
@@ -465,12 +603,14 @@ mod tests {
     use sigilfall_core::generation::{self, FIRST_DEPTH};
     use sigilfall_core::geometry::{Direction, Position};
     use sigilfall_core::path::DijkstraMap;
+    use sigilfall_core::rng::Seed;
 
     use super::*;
     use crate::theme::{ColorMode, GlyphSet};
     use crate::ui::camera::Camera;
 
     mod inventory_screen;
+    mod save_files;
 
     /// Seed of every test game: its written form, `7F3A-91C2-0B5E-D4A8`,
     /// is the one of the game screen mock-up in `docs/design.md`.

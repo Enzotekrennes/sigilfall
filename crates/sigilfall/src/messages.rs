@@ -3,8 +3,9 @@
 //! game events into log messages.
 //!
 //! Exposes [`describe`], which turns the events of one `Game::submit` into
-//! [`Message`]s, the opening message ([`welcome`]), the cause of death of
-//! the end screen ([`cause_of_death`]), monster, sigil and item names
+//! [`Message`]s, the opening messages ([`welcome`], [`welcome_back`],
+//! [`save_set_aside`]), the save notice [`save_not_deleted`], the cause of
+//! death of the end screen ([`cause_of_death`]), monster, sigil and item names
 //! ([`monster_name`], [`sigil_name`], [`item_name`]), what a sigil or an
 //! item does in a few words ([`effect_summary`], [`item_summary`]), the time
 //! a cast takes ([`cast_time`]), why the game refused an item
@@ -252,6 +253,36 @@ pub fn empty_inventory() -> [String; 3] {
 /// where the player stands.
 pub fn welcome() -> Message {
     Message::new(Tone::Info, "You enter the dungeon.")
+}
+
+/// The first message of a run resumed from its save, in place of
+/// [`welcome`], so the player knows the game went on where it stopped.
+pub fn welcome_back() -> Message {
+    Message::new(Tone::Info, "Welcome back. The dungeon is as you left it.")
+}
+
+/// The message that opens a new run when the save could not be read back:
+/// `reason` is why (a sentence of `persist::Loaded::SetAside`), and
+/// `moved_to` the path the save was renamed to, where it can still be
+/// looked at.
+pub fn save_set_aside(reason: &str, moved_to: &str) -> Message {
+    Message::new(
+        Tone::Danger,
+        format!(
+            "Your saved game could not be read: {reason}. It was kept as \
+             {moved_to}, and a new game begins."
+        ),
+    )
+}
+
+/// The message logged when the save of the dead character could not be
+/// deleted: deleting it is tried again when the player quits, and a failure
+/// then is reported on leaving.
+pub fn save_not_deleted() -> Message {
+    Message::new(
+        Tone::Danger,
+        "The save of this character could not be deleted; it will be tried again on quitting.",
+    )
 }
 
 /// Turns `events`, the result of one `Game::submit` on `game`, into the

@@ -4,7 +4,8 @@
 //! screens and rendering. Game rules live in the `sigilfall-core` crate.
 //!
 //! This file reads the command line ([`cli::Cli`]), prepares the terminal (raw mode, alternate screen, hidden
-//! cursor), runs the [`app::App`] and puts the terminal back the way it was.
+//! cursor), runs the [`app::App`], saves the game in progress and puts the
+//! terminal back the way it was.
 //! The terminal is restored on a normal exit, when the game returns an error
 //! and when it panics, so the player's shell is never left unusable.
 
@@ -18,6 +19,7 @@ mod f7_acceptance;
 mod input;
 mod message_log;
 mod messages;
+mod persist;
 mod theme;
 mod ui;
 
@@ -37,6 +39,7 @@ use sigilfall_core::content::Content;
 
 use crate::app::App;
 use crate::cli::Cli;
+use crate::persist::SaveFile;
 use crate::theme::{Appearance, ColorMode, ColorSupport, GlyphSet, Theme};
 
 /// Runs the game in the current terminal until the player quits.
@@ -46,13 +49,22 @@ use crate::theme::{Appearance, ColorMode, ColorSupport, GlyphSet, Theme};
 /// the process with exit code 2, and `--help` or `--version` print and exit
 /// with code 0, all on the normal screen.
 ///
+/// The saved game, if any, is resumed (see `App::launch` for the rules,
+/// including the refusal of `--seed` while a game is saved), and the game
+/// in progress is saved when the player quits (`App::save_on_exit`). The
+/// save lives in the data folder of `persist`, which the environment
+/// variable `SIGILFALL_DATA_DIR` replaces.
+///
 /// # Errors
 ///
 /// Returns an error, printed on standard error with exit code 1, if
 /// standard output is not a terminal (see [`require_terminal_output`]), if
-/// the terminal cannot be prepared, if reading input or drawing fails
-/// during the game, or if the terminal cannot be restored afterwards. The
-/// terminal is restored before any error is reported.
+/// the save cannot be found, read or set aside or the launch is refused
+/// (before the terminal is touched), if the terminal cannot be prepared, if
+/// reading input or drawing fails during the game, if the game cannot be
+/// saved on leaving, or if the terminal cannot be restored afterwards. The
+/// terminal is restored before any error is reported, and every error met
+/// on leaving is printed (see [`conclude`]).
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     require_terminal_output()?;
@@ -60,15 +72,38 @@ fn main() -> anyhow::Result<()> {
 
     let content = Content::load().context("the game data built into this binary is invalid")?;
     let theme = startup_theme(cli.glyph_set());
-    let mut app = App::new(theme, cli.seed_or_random(), &content);
+    let mut app = App::launch(theme, &cli, &content, SaveFile::locate()?)?;
     let outcome = enter_terminal().and_then(|mut terminal| app.run(&mut terminal));
     // Restore even when the game failed, so the error is printed on the
     // normal screen; the game's own error is the more useful one to report.
     let restored = restore_terminal().context(
         "cannot restore the terminal; run `reset` (Unix) or reopen the window if it misbehaves",
     );
-    outcome?;
-    restored
+    // Saved even when the game failed, so a broken screen does not lose
+    // the run.
+    let saved = app.save_on_exit();
+    conclude([outcome, saved, restored])
+}
+
+/// Turns the results of leaving the game into the result of the process:
+/// `Ok` if all of them succeeded, otherwise the first error, in the order
+/// given (the game, the save, the terminal), with every later error printed
+/// on standard error first, so a failed save is never hidden by another
+/// failure.
+///
+/// # Errors
+///
+/// Returns the first error of `results`, which `main` turns into exit
+/// code 1 and an `Error:` line on standard error.
+fn conclude<const N: usize>(results: [anyhow::Result<()>; N]) -> anyhow::Result<()> {
+    let mut errors = results.into_iter().filter_map(Result::err);
+    let Some(first) = errors.next() else {
+        return Ok(());
+    };
+    for other in errors {
+        eprintln!("Error: {other:?}");
+    }
+    Err(first)
 }
 
 /// Refuses to start the game when standard output is not a terminal, as
