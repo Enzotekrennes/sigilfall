@@ -136,7 +136,7 @@ impl ColorMode {
     expect(
         dead_code,
         reason = "the full token set of docs/design.md; the remaining tokens are drawn by the \
-                  screens of T12, T16, T19, T21, T25 and T26"
+                  screens of T16, T19, T21, T25 and T26"
     )
 )]
 pub struct Theme {
@@ -163,8 +163,12 @@ pub struct Theme {
     pub wall_remembered: Style,
     /// Arch or passage.
     pub door: Style,
-    /// Stairs down.
+    /// Stairs down in view.
     pub stairs: Style,
+    /// Explored stairs down out of view: dimmer than [`Theme::stairs`] and
+    /// without its emphasis, yet still at text contrast, since the glyph
+    /// marks the way down.
+    pub stairs_remembered: Style,
     /// Engraved glyph not read yet.
     pub engraving_unread: Style,
     /// Engraved glyph already deciphered.
@@ -233,6 +237,7 @@ impl Theme {
             wall_remembered: fg(0x6E6878),
             door: fg(0xC4915A),
             stairs: fg(0xF2EADB).add_modifier(Modifier::BOLD),
+            stairs_remembered: fg(0x968F84),
             engraving_unread: fg(0x5ED6B8),
             engraving_read: fg(0x4F8F82),
             player: fg(0xF5C451).add_modifier(Modifier::BOLD),
@@ -271,6 +276,7 @@ impl Theme {
             wall_remembered: fg(0x85796C),
             door: fg(0x8A5428),
             stairs: fg(0x1E1824).add_modifier(Modifier::BOLD),
+            stairs_remembered: fg(0x6B6258),
             engraving_unread: fg(0x0B6E58),
             engraving_read: fg(0x4F7D73),
             player: fg(0x7A4E00).add_modifier(Modifier::BOLD),
@@ -312,6 +318,7 @@ impl Theme {
             wall_remembered: named(Color::DarkGray),
             door: named(Color::Yellow),
             stairs: named(Color::LightYellow).add_modifier(Modifier::BOLD),
+            stairs_remembered: named(Color::Gray),
             engraving_unread: named(Color::LightCyan),
             engraving_read: named(Color::Cyan),
             player: named(Color::LightYellow).add_modifier(Modifier::BOLD),
@@ -338,8 +345,10 @@ impl Theme {
     /// with hierarchy carried by emphasis only.
     ///
     /// Bold marks what `docs/design.md` emphasises in every mode (player,
-    /// stairs, titles, the sigil pen); dim fades the floor and remembered
-    /// walls, never text; the selection is reversed. Every piece of
+    /// stairs in view, titles, the sigil pen); dim fades the floor and
+    /// remembered walls, never text; the selection is reversed. Remembered
+    /// stairs lose the bold of stairs in view but are not dimmed: they still
+    /// mark the way down. Every piece of
     /// information is also carried by a glyph, a word or a prefix, so
     /// nothing is lost.
     fn monochrome(glyphs: Glyphs) -> Self {
@@ -359,6 +368,7 @@ impl Theme {
             wall_remembered: dim,
             door: plain,
             stairs: bold,
+            stairs_remembered: plain,
             engraving_unread: plain,
             engraving_read: plain,
             player: bold,

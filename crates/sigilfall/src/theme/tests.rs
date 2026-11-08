@@ -35,7 +35,7 @@ const PANEL_TOKENS: [&str; 9] = [
 ];
 
 /// Every foreground token of `theme`, with its name.
-fn foreground_tokens(theme: &Theme) -> [(&'static str, Style); 27] {
+fn foreground_tokens(theme: &Theme) -> [(&'static str, Style); 28] {
     [
         ("text", theme.text),
         ("text_muted", theme.text_muted),
@@ -46,6 +46,7 @@ fn foreground_tokens(theme: &Theme) -> [(&'static str, Style); 27] {
         ("wall_remembered", theme.wall_remembered),
         ("door", theme.door),
         ("stairs", theme.stairs),
+        ("stairs_remembered", theme.stairs_remembered),
         ("engraving_unread", theme.engraving_unread),
         ("engraving_read", theme.engraving_read),
         ("player", theme.player),
@@ -290,6 +291,7 @@ fn monochrome_uses_the_terminal_colours_only() {
     assert!(theme.floor.add_modifier.contains(Modifier::DIM));
     assert!(theme.wall_remembered.add_modifier.contains(Modifier::DIM));
     assert!(!theme.wall_seen.add_modifier.contains(Modifier::DIM));
+    assert!(!theme.stairs_remembered.add_modifier.contains(Modifier::DIM));
 }
 
 #[test]
