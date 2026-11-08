@@ -1,18 +1,22 @@
-//! The game's data: creature, sigil and item definitions read from RON files
-//! and validated.
+//! The game's data: creature, sigil and item definitions and the spawn
+//! tables, read from RON files and validated.
 //!
 //! Exposes [`Content`], with [`Content::load`] for the files built into the
-//! game, [`Content::parse`], [`Content::parse_files`] and
-//! [`Content::parse_all`] for any text, [`MonsterDef`] and [`Family`],
-//! [`SigilDef`], [`Effect`] and [`Targeting`], [`ItemDef`], [`ItemEffect`]
-//! and [`ItemFamily`], the bounds of a definition, and the errors
-//! [`ContentError`] and [`FieldProblem`]. The files are embedded in the
-//! binary at compile time (`include_str!`), so an installed game needs no
-//! asset folder.
+//! game, [`Content::parse`], [`Content::parse_files`],
+//! [`Content::parse_all`] and [`Content::parse_with_spawns`] for any text,
+//! [`MonsterDef`] and [`Family`], [`SigilDef`], [`Effect`] and
+//! [`Targeting`], [`ItemDef`], [`ItemEffect`] and [`ItemFamily`], the bounds
+//! of a definition ([`MAX_DEPTH`] for every floor number, [`MAX_WEIGHT`]),
+//! and the errors [`ContentError`] and [`FieldProblem`]. The files are
+//! embedded in the binary at compile time (`include_str!`), so an installed
+//! game needs no asset folder.
 //!
 //! This module only reads and checks data, references between files
-//! included: an item teaching a sigil must name a sigil of the sigil file.
-//! Spawning monsters or placing items on a floor, recognising a trace
+//! included: an item teaching a sigil must name a sigil of the sigil file,
+//! and a spawn rule a monster or an item of theirs. The spawn tables give,
+//! floor by floor, the weight of each creature and item
+//! ([`Content::monster_weights`], [`Content::item_weights`]); drawing
+//! monsters or placing items on a floor, recognising a trace
 //! (`sigil` module of the crate), casting a sigil and using an item are not
 //! done here.
 
@@ -25,11 +29,26 @@ mod monster;
 mod monster_file;
 mod sigil;
 mod sigil_file;
+mod spawn;
+mod spawn_file;
 
 pub use error::{ContentError, FieldProblem};
 pub use item::{ItemDef, ItemEffect, ItemFamily};
 pub use monster::{Family, MAX_ATTACK, MAX_DEFENSE, MAX_HP, MAX_SPEED, MonsterDef};
 pub use sigil::{Effect, MAX_POWER, SigilDef, Targeting};
+pub use spawn::MAX_WEIGHT;
+
+use spawn::SpawnTable;
+
+/// Deepest floor the content is written for: the highest `min_depth` of a
+/// monster, a sigil or an item, and the last floor a spawn rule may cover.
+///
+/// A run is planned to last about ten floors: the balance aims at a
+/// reckless player dying between floors 2 and 4 and a careful one going
+/// some floors further, so an entry first found below floor 10 would almost
+/// never be seen, and a larger value is most likely a typo. The dungeon
+/// itself has no bottom: floors deeper than this one use its spawn weights.
+pub const MAX_DEPTH: u32 = 10;
 
 /// Most characters in the name of a monster, a sigil or an item.
 ///
@@ -53,6 +72,10 @@ pub const SIGILS_FILE: &str = "content/sigils.ron";
 /// error messages.
 pub const ITEMS_FILE: &str = "content/items.ron";
 
+/// Path of the spawn file relative to the `sigilfall-core` crate, as named
+/// in error messages.
+pub const SPAWNS_FILE: &str = "content/spawns.ron";
+
 /// The monster file shipped with the game.
 const MONSTERS_RON: &str = include_str!("../../content/monsters.ron");
 
@@ -61,6 +84,9 @@ const SIGILS_RON: &str = include_str!("../../content/sigils.ron");
 
 /// The item file shipped with the game.
 const ITEMS_RON: &str = include_str!("../../content/items.ron");
+
+/// The spawn file shipped with the game.
+const SPAWNS_RON: &str = include_str!("../../content/spawns.ron");
 
 /// An item file that defines no item, for [`Content::parse_files`].
 const NO_ITEMS_RON: &str = "[]";
@@ -71,10 +97,13 @@ const NO_ITEMS_RON: &str = "[]";
 /// identifiers, values within bounds, at least one monster for the first
 /// floor, names of at most [`MAX_NAME_LENGTH`] characters, and at least one
 /// sigil, one of them found on the first floor, each with a pattern the
-/// player can draw
-/// and far enough from the others (`sigil::MIN_PATTERN_DISTANCE`), and a
-/// targeting suited to its effect (`Effect::targetings`). Items may be
-/// absent; every sigil an item teaches is one of the sigils.
+/// player can draw and far enough from the others
+/// (`sigil::MIN_PATTERN_DISTANCE`), and a targeting suited to its effect
+/// (`Effect::targetings`). Items may be absent; every sigil an item teaches
+/// is one of the sigils, and its page is never found shallower than its
+/// glyph. Every `min_depth` lies from `generation::FIRST_DEPTH` to
+/// [`MAX_DEPTH`], and every floor holds at least one monster with a
+/// positive weight.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Content {
     /// Monster definitions, in file order.
@@ -83,10 +112,13 @@ pub struct Content {
     sigils: Vec<SigilDef>,
     /// Item definitions, in file order.
     items: Vec<ItemDef>,
+    /// Weight of each monster and item, floor by floor.
+    spawns: SpawnTable,
 }
 
 impl Content {
-    /// Parses and validates the content files built into the game.
+    /// Parses and validates the content files built into the game, spawn
+    /// tables included.
     ///
     /// Called once at start-up. A test checks that the shipped files are
     /// valid, so an error here means the data was edited without running the
@@ -94,9 +126,9 @@ impl Content {
     ///
     /// # Errors
     ///
-    /// Same as [`Content::parse_all`].
+    /// Same as [`Content::parse_with_spawns`].
     pub fn load() -> Result<Self, ContentError> {
-        Self::parse_all(MONSTERS_RON, SIGILS_RON, ITEMS_RON)
+        Self::parse_with_spawns(MONSTERS_RON, SIGILS_RON, ITEMS_RON, SPAWNS_RON)
     }
 
     /// Parses and validates `monsters`, the text of a monster file, with the
@@ -137,6 +169,12 @@ impl Content {
     /// `content/items.ron` for the fields and their meaning. The item file
     /// may be an empty list.
     ///
+    /// No spawn file is read: every monster and item gets the same weight on
+    /// every floor from its `min_depth` on, so the entries allowed on a floor
+    /// are equally likely. The shipped spawn file refers to the shipped
+    /// entries, which test files replace; to give weights, use
+    /// [`Content::parse_with_spawns`].
+    ///
     /// # Errors
     ///
     /// The first fault found, naming its file:
@@ -144,11 +182,14 @@ impl Content {
     ///   field when the text is not valid RON, uses an unknown or repeated
     ///   field, or a value of the wrong type;
     /// - [`ContentError::InvalidField`] naming the entry and the field when a
-    ///   field is missing, out of bounds, an identifier is malformed or
-    ///   repeated, a pattern cannot be drawn as written or is too close to
-    ///   the pattern of an earlier sigil, a targeting cannot aim the
-    ///   sigil's effect, or an item teaches a sigil that `sigils` does not
-    ///   define ([`FieldProblem::UnknownReference`]);
+    ///   field is missing, out of bounds (a `min_depth` beyond
+    ///   [`MAX_DEPTH`] included), an identifier is malformed or repeated, a
+    ///   pattern cannot be drawn as written or is too close to the pattern
+    ///   of an earlier sigil, a targeting cannot aim the sigil's effect, an
+    ///   item teaches a sigil that `sigils` does not define
+    ///   ([`FieldProblem::UnknownReference`]), or a page can be found
+    ///   shallower than the glyph of its sigil
+    ///   ([`FieldProblem::ShallowerThanReference`] on `min_depth`);
     /// - [`ContentError::NoMonster`] or [`ContentError::NoMonsterAtFirstDepth`]
     ///   when the first floor would have no creature;
     /// - [`ContentError::NoSigil`] when the sigil file defines none, or
@@ -158,11 +199,50 @@ impl Content {
         let monsters = monster::validate(entry_file::read(monsters)?)?;
         let sigils = sigil::validate(entry_file::read(sigils)?)?;
         let items = item::validate(entry_file::read(items)?, &sigils)?;
+        let spawns = SpawnTable::uniform(&monsters, &items);
         Ok(Self {
             monsters,
             sigils,
             items,
+            spawns,
         })
+    }
+
+    /// Parses and validates `monsters`, `sigils`, `items` and `spawns`, the
+    /// texts of a monster file, a sigil file, an item file and a spawn file,
+    /// in that order.
+    ///
+    /// The first three are read as by [`Content::parse_all`]. `spawns` is a
+    /// RON list of `Spawn(...)` rules giving each monster and item a weight
+    /// on a band of floors; see `content/spawns.ron` for the fields and how
+    /// weights are used.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Content::parse_all`] for the first three texts, then the
+    /// first fault of `spawns`, naming the spawn file:
+    /// - [`ContentError::Syntax`] as for the other files;
+    /// - [`ContentError::InvalidField`] naming the rule, by the identifier
+    ///   it places and its position, and the field, when a field is
+    ///   missing, a floor or the weight is out of bounds, the target is not
+    ///   defined ([`FieldProblem::UnknownReference`]), the band starts above
+    ///   the target's `min_depth` ([`FieldProblem::ShallowerThanReference`])
+    ///   or shares a floor with an earlier rule of the same target
+    ///   ([`FieldProblem::Overlap`]);
+    /// - [`ContentError::NoSpawnRule`] when a monster or an item has no
+    ///   rule;
+    /// - [`ContentError::NoMonsterAtDepth`] when a floor up to [`MAX_DEPTH`]
+    ///   has no monster.
+    pub fn parse_with_spawns(
+        monsters: &str,
+        sigils: &str,
+        items: &str,
+        spawns: &str,
+    ) -> Result<Self, ContentError> {
+        let mut content = Self::parse_all(monsters, sigils, items)?;
+        content.spawns =
+            spawn::validate(entry_file::read(spawns)?, &content.monsters, &content.items)?;
+        Ok(content)
     }
 
     /// Returns every monster definition, in file order.
@@ -175,14 +255,32 @@ impl Content {
         self.monsters.iter().find(|monster| monster.id() == id)
     }
 
-    /// Returns the monsters that may appear on floor `depth`, in file order.
+    /// Returns the monsters that may appear on floor `depth`, in file
+    /// order: those with a positive weight there (see
+    /// [`Content::monster_weights`]).
     ///
     /// Never empty for the first floor (`generation::FIRST_DEPTH`), nor for
     /// any deeper one.
     pub fn monsters_at(&self, depth: u32) -> impl Iterator<Item = &MonsterDef> {
+        self.monster_weights(depth).map(|(monster, _)| monster)
+    }
+
+    /// Returns the monsters that may appear on floor `depth`, in file order,
+    /// each with its weight there: its chance of being drawn for a monster
+    /// of the floor is its weight divided by the sum of the weights listed.
+    ///
+    /// Only positive weights are listed, and never for a floor above a
+    /// monster's `min_depth`. Floors deeper than [`MAX_DEPTH`] have the
+    /// weights of [`MAX_DEPTH`]. Never empty for a floor from
+    /// `generation::FIRST_DEPTH` on.
+    pub fn monster_weights(&self, depth: u32) -> impl Iterator<Item = (&MonsterDef, u32)> {
         self.monsters
             .iter()
-            .filter(move |monster| monster.can_appear_at(depth))
+            .enumerate()
+            .filter_map(move |(index, monster)| {
+                let weight = self.spawns.monster_weight(index, depth);
+                (weight > 0).then_some((monster, weight))
+            })
     }
 
     /// Returns every sigil definition, in file order: the order
@@ -208,11 +306,23 @@ impl Content {
     }
 
     /// Returns the items that may be placed on floor `depth`, in file order;
-    /// possibly none.
+    /// possibly none. Those are the items with a positive weight there (see
+    /// [`Content::item_weights`]).
     pub fn items_at(&self, depth: u32) -> impl Iterator<Item = &ItemDef> {
+        self.item_weights(depth).map(|(item, _)| item)
+    }
+
+    /// Returns the items that may be placed on floor `depth`, in file order,
+    /// each with its weight there, as [`Content::monster_weights`] does for
+    /// monsters; possibly none.
+    pub fn item_weights(&self, depth: u32) -> impl Iterator<Item = (&ItemDef, u32)> {
         self.items
             .iter()
-            .filter(move |item| item.can_appear_at(depth))
+            .enumerate()
+            .filter_map(move |(index, item)| {
+                let weight = self.spawns.item_weight(index, depth);
+                (weight > 0).then_some((item, weight))
+            })
     }
 }
 
@@ -434,6 +544,50 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn a_min_depth_beyond_the_deepest_floor_is_refused_in_every_file() {
+        let deepest = MAX_DEPTH.to_string();
+        let beyond = (MAX_DEPTH + 1).to_string();
+        let too_deep = FieldProblem::TooHigh {
+            value: (MAX_DEPTH + 1).into(),
+            max: MAX_DEPTH.into(),
+        };
+
+        let monsters = |depth: &str| file(&[valid("ok"), with("abyssal", "min_depth", depth)]);
+        assert!(Content::parse(&monsters(&deepest)).is_ok());
+        let (error, message) = refused(&monsters(&beyond));
+        assert_names(&message, "monster `abyssal` (entry 2)", "min_depth");
+        assert!(matches!(
+            error,
+            ContentError::InvalidField { field: "min_depth", ref problem, .. } if *problem == too_deep
+        ));
+
+        let sigils =
+            |depth: &str| SIGILS_RON.replacen("min_depth: 3", &format!("min_depth: {depth}"), 1);
+        assert!(Content::parse_all(MONSTERS_RON, &sigils(&deepest), ITEMS_RON).is_ok());
+        let error = Content::parse_all(MONSTERS_RON, &sigils(&beyond), ITEMS_RON)
+            .expect_err("a glyph too deep");
+        let message = error.to_string();
+        assert!(message.contains(SIGILS_FILE), "{message}");
+        assert!(message.contains("sigil `lance`"), "{message}");
+        assert!(message.contains("`min_depth`"), "{message}");
+
+        let items =
+            |depth: &str| ITEMS_RON.replacen("min_depth: 2", &format!("min_depth: {depth}"), 1);
+        assert!(Content::parse_all(MONSTERS_RON, SIGILS_RON, &items(&deepest)).is_ok());
+        let error = Content::parse_all(MONSTERS_RON, SIGILS_RON, &items(&beyond))
+            .expect_err("an item too deep");
+        assert_eq!(
+            error,
+            ContentError::InvalidField {
+                file: ITEMS_FILE,
+                entry: "item `veil_page` (entry 4)".to_owned(),
+                field: "min_depth",
+                problem: too_deep,
+            }
+        );
     }
 
     #[test]

@@ -129,14 +129,16 @@ impl MonsterDef {
         self.defense
     }
 
-    /// Returns the shallowest floor the creature can appear on; at least
-    /// [`FIRST_DEPTH`].
+    /// Returns the shallowest floor the creature can appear on; from
+    /// [`FIRST_DEPTH`] to `content::MAX_DEPTH`.
     pub const fn min_depth(&self) -> u32 {
         self.min_depth
     }
 
-    /// Returns whether the creature may appear on floor `depth` (the floor
-    /// number, [`FIRST_DEPTH`] for the first one).
+    /// Returns whether floor `depth` (the floor number, [`FIRST_DEPTH`] for
+    /// the first one) is at least the creature's `min_depth`: it never
+    /// appears shallower. Whether and how often it appears there is up to
+    /// the spawn tables (`Content::monster_weights`).
     pub const fn can_appear_at(&self, depth: u32) -> bool {
         depth >= self.min_depth
     }
@@ -180,7 +182,7 @@ fn validate_entry(position: usize, entry: MonsterEntry) -> Result<MonsterDef, Co
         hp: check.in_range(entry.hp, "hp", 1, MAX_HP)?,
         attack: check.in_range(entry.attack, "attack", 0, MAX_ATTACK)?,
         defense: check.in_range(entry.defense, "defense", 0, MAX_DEFENSE)?,
-        min_depth: check.at_least(entry.min_depth, "min_depth", FIRST_DEPTH)?,
+        min_depth: check.depth(entry.min_depth, "min_depth")?,
         id,
     })
 }

@@ -15,8 +15,7 @@ use super::entry_file::RawEntry;
 use super::error::{ContentError, FieldProblem};
 use super::item_file::{EffectEntry, ItemEntry};
 use super::{MAX_POWER, SIGILS_FILE, SigilDef};
-use crate::generation::FIRST_DEPTH;
-use crate::sigil::MAX_ESSENCE;
+use crate::sigil::{MAX_ESSENCE, MAX_STEADY_CASTS};
 
 /// What using an item does. The effect is spent with the item: every item is
 /// used once.
@@ -34,10 +33,13 @@ pub enum ItemEffect {
     RestoreEssence(i32),
     /// Teaches this sigil, as reading its engraved glyph would. Written in
     /// the file as the sigil's identifier, which must name a sigil of the
-    /// sigil file.
+    /// sigil file. The item's `min_depth` is never shallower than the
+    /// sigil's: a page must not hand out a sigil before its glyph could be
+    /// found, which would bypass the progression the sigil file sets.
     Teach(SigilDef),
     /// Makes this many of the player's next unstable casts pure: the effect
-    /// applies without a backlash. From 1 to [`MAX_POWER`].
+    /// applies without a backlash. From 1 to `sigil::MAX_STEADY_CASTS`, the
+    /// most the player can hold: more could never be used.
     Steady(u32),
 }
 
@@ -110,13 +112,14 @@ impl ItemDef {
     }
 
     /// Returns the shallowest floor the item can be found on; at least
-    /// [`FIRST_DEPTH`].
+    /// `generation::FIRST_DEPTH`, at most `content::MAX_DEPTH`.
     pub const fn min_depth(&self) -> u32 {
         self.min_depth
     }
 
-    /// Returns whether the item may be placed on floor `depth`: `depth` is
-    /// at least [`ItemDef::min_depth`].
+    /// Returns whether floor `depth` is at least [`ItemDef::min_depth`]: the
+    /// item is never placed shallower. Whether and how often it is placed
+    /// there is up to the spawn tables (`Content::item_weights`).
     pub const fn can_appear_at(&self, depth: u32) -> bool {
         depth >= self.min_depth
     }
@@ -126,14 +129,17 @@ impl ItemDef {
 ///
 /// Each entry is checked in turn (identifier form, presence of every field,
 /// name length, strength of the effect within its bounds, taught sigil
-/// defined in `sigils`), then against the entries before it (identifier not
+/// defined in `sigils` and found no deeper than the page, `min_depth` within
+/// bounds), then against the entries before it (identifier not
 /// reused). An empty list is accepted: floors then hold no item.
 ///
 /// # Errors
 ///
 /// Returns the first fault found as [`ContentError::InvalidField`] naming
 /// the entry and the field; a sigil missing from `sigils` is a
-/// [`FieldProblem::UnknownReference`] on field `effect`.
+/// [`FieldProblem::UnknownReference`] on field `effect`, a page shallower
+/// than its sigil a [`FieldProblem::ShallowerThanReference`] on field
+/// `min_depth`.
 pub(super) fn validate(
     entries: Vec<ItemEntry>,
     sigils: &[SigilDef],
@@ -161,7 +167,19 @@ fn validate_entry(
     let check = EntryCheck::new(&kind, position, Some(&id));
     let name = check.name(entry.name)?;
     let effect = effect(&check, entry.effect, sigils)?;
-    let min_depth = check.at_least(entry.min_depth, "min_depth", FIRST_DEPTH)?;
+    let min_depth = check.depth(entry.min_depth, "min_depth")?;
+    if let ItemEffect::Teach(sigil) = &effect
+        && min_depth < sigil.min_depth()
+    {
+        return Err(check.fail(
+            "min_depth",
+            FieldProblem::ShallowerThanReference {
+                value: min_depth,
+                reference: format!("sigil `{}`", sigil.id()),
+                min_depth: sigil.min_depth(),
+            },
+        ));
+    }
     Ok(ItemDef {
         id,
         name,
@@ -185,7 +203,10 @@ fn effect(
         EffectEntry::RestoreEssence(amount) => {
             ItemEffect::RestoreEssence(bounded(amount, MAX_ESSENCE)?)
         }
-        EffectEntry::Steady(casts) => ItemEffect::Steady(bounded(casts, MAX_POWER)?.unsigned_abs()),
+        EffectEntry::Steady(casts) => {
+            let most = i32::try_from(MAX_STEADY_CASTS).unwrap_or(i32::MAX);
+            ItemEffect::Steady(bounded(casts, most)?.unsigned_abs())
+        }
         EffectEntry::Teach(id) => {
             let Some(sigil) = sigils.iter().find(|sigil| sigil.id() == id) else {
                 return Err(check.fail(
@@ -206,6 +227,7 @@ fn effect(
 mod tests {
     use super::*;
     use crate::content::{Content, ITEMS_FILE, MAX_NAME_LENGTH};
+    use crate::generation::FIRST_DEPTH;
 
     /// The monster file shipped with the game, valid, for parsing items.
     const MONSTERS: &str = include_str!("../../content/monsters.ron");
@@ -408,6 +430,7 @@ mod tests {
             "RestoreEssence(0)".to_owned(),
             format!("RestoreEssence({})", MAX_ESSENCE + 1),
             "Steady(-1)".to_owned(),
+            format!("Steady({})", MAX_STEADY_CASTS + 1),
             format!("Steady({})", MAX_POWER + 1),
         ];
         for effect in cases {
@@ -427,6 +450,43 @@ mod tests {
         }
         let at_the_bounds = format!("RestoreEssence({MAX_ESSENCE})");
         assert!(parse(&file(&[valid("full", &at_the_bounds)])).is_ok());
+        let at_the_bounds = format!("Steady({MAX_STEADY_CASTS})");
+        assert!(parse(&file(&[valid("thick_ink", &at_the_bounds)])).is_ok());
+    }
+
+    #[test]
+    fn a_page_found_shallower_than_the_glyph_of_its_sigil_is_refused() {
+        let content = Content::load().expect("the shipped content is valid");
+        let lance = content.sigil("lance").expect("a shipped sigil");
+        let page = |depth: u32| {
+            file(&[with("lance_page", "effect", "Teach(\"lance\")")
+                .replace("min_depth: 1", &format!("min_depth: {depth}"))])
+        };
+
+        let (error, message) = refused(&page(lance.min_depth() - 1));
+
+        assert_names(&message, "item `lance_page` (entry 1)", "min_depth");
+        assert_eq!(
+            error,
+            ContentError::InvalidField {
+                file: ITEMS_FILE,
+                entry: "item `lance_page` (entry 1)".to_owned(),
+                field: "min_depth",
+                problem: FieldProblem::ShallowerThanReference {
+                    value: lance.min_depth() - 1,
+                    reference: "sigil `lance`".to_owned(),
+                    min_depth: lance.min_depth(),
+                },
+            }
+        );
+        assert!(parse(&page(lance.min_depth())).is_ok());
+        assert!(parse(&page(lance.min_depth() + 1)).is_ok());
+        // The shipped pages follow the rule.
+        for item in content.items() {
+            if let ItemEffect::Teach(sigil) = item.effect() {
+                assert!(item.min_depth() >= sigil.min_depth(), "{}", item.id());
+            }
+        }
     }
 
     #[test]

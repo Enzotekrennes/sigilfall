@@ -3,8 +3,8 @@
 //!
 //! Exposes to the `game` module [`World`], the state the rules read and
 //! change, with the queries every rule needs (who stands where, what lies
-//! where) and the moves of items between the floor and the player's
-//! inventory. It applies no rule of the game: time, fights, casting and
+//! where), the moves of items between the floor and the player's
+//! inventory, and the change of floor down the stairs. It applies no rule of the game: time, fights, casting and
 //! the effects of items live in `game` and its submodules.
 
 use slotmap::SlotMap;
@@ -134,6 +134,27 @@ impl World {
     pub(super) fn put_down(&mut self, id: ItemId, position: Position) {
         self.inventory.retain(|&carried| carried != id);
         self.items[id].set_position(Some(position));
+    }
+
+    /// Replaces the current floor by `map`, empty, with the player standing
+    /// at `start`, and returns the keys of the monsters left behind.
+    ///
+    /// Every actor but the player leaves the game, and so do the items lying
+    /// on the floor and the engraved glyphs: what the player carries stays
+    /// in its inventory, with the same keys. The new floor's monsters, glyphs
+    /// and items are the caller's to add, and so is taking the monsters left
+    /// behind out of the turn order.
+    pub(super) fn change_floor(&mut self, map: Map, start: Position) -> Vec<ActorId> {
+        let player = self.player;
+        let left_behind: Vec<ActorId> = self.actors.keys().filter(|&id| id != player).collect();
+        for &id in &left_behind {
+            self.actors.remove(id);
+        }
+        self.items.retain(|_, item| item.is_carried());
+        self.engravings.clear();
+        self.map = map;
+        self.actors[player].position = start;
+        left_behind
     }
 
     /// Removes the carried item `id` from the game, used up, and returns it;

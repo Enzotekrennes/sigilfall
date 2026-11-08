@@ -74,6 +74,13 @@ pub const USE_COST: i32 = 100;
 /// it up, but never free, so the floor is not a free extra bag.
 pub const DROP_COST: i32 = 50;
 
+/// Energy spent by going down the stairs.
+///
+/// The normal cost, like a step: the player arrives on the new floor with
+/// the same lead over its monsters as any floor's start gives (none of them
+/// can act before the player's first turn there).
+pub const DESCEND_COST: i32 = 100;
+
 /// Returns the energy `action` costs when it is performed as such.
 ///
 /// A cast costs [`STROKE_COST`] per node of its trace plus [`CAST_COST`]
@@ -90,6 +97,7 @@ pub const fn action_cost(action: Action) -> i32 {
         Action::PickUp => PICK_UP_COST,
         Action::Use(_) => USE_COST,
         Action::Drop(_) => DROP_COST,
+        Action::Descend => DESCEND_COST,
     }
 }
 

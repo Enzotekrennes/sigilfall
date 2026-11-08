@@ -18,11 +18,13 @@ use crate::content::MonsterDef;
 
 /// Hit points of the player at the start of a run.
 ///
-/// Provisional until fights are balanced: an acolyte, the strongest
-/// first-floor creature, deals 2 per blow on average against
-/// [`PLAYER_DEFENSE`], so the player survives about fifteen of its blows,
-/// enough to fight two or three first-floor creatures in a row before
-/// healing exists.
+/// Hit points never come back on their own, only through healing items and
+/// sigils, so this is the budget of a whole run rather than of one fight:
+/// an acolyte, met from the second floor, deals 2 per blow on average
+/// against [`PLAYER_DEFENSE`], and the player survives about fifteen of its
+/// blows. Measured in `tests/balance.rs`, a player who charges every
+/// creature and never heals spends it between the second and the fourth
+/// floor, the balance aimed at; deeper floors ask for items and sigils.
 pub const PLAYER_MAX_HP: i32 = 30;
 
 /// Attack value of the player at the start of a run.

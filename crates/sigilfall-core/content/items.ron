@@ -12,12 +12,16 @@
 //                                 above the maximum;
 //              Teach("sigil_id")  page: teaches the sigil of content/sigils.ron
 //                                 with that id, as reading its glyph would;
+//                                 its min_depth must not be shallower than
+//                                 the sigil's;
 //              Steady(n)          catalyst: the next n unstable casts are
-//                                 cast pure, without backlash (1 to 99).
-// - min_depth: shallowest floor the item can be found on; 1 is the first
-//              floor.
+//                                 cast pure, without backlash (1 to 3, the
+//                                 most the player can hold at once).
+// - min_depth: shallowest floor the item can be found on, from 1 (the first
+//              floor) to 10 (the deepest the content is written for).
 //
-// Strengths are provisional until items are balanced.
+// How often each item is found, floor by floor, is set in
+// content/spawns.ron. Strengths are provisional until items are balanced.
 [
     Item(
         id: "healing_draught",

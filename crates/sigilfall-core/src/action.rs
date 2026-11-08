@@ -35,6 +35,9 @@ pub enum Action {
     /// Lay the carried item on the actor's cell. Only the player handles
     /// items.
     Drop(ItemId),
+    /// Go down the stairs the actor stands on, to the next floor. Only the
+    /// player descends; the game refuses it anywhere but on the stairs.
+    Descend,
 }
 
 /// The result of resolving an [`Action`] against the map.
@@ -55,15 +58,19 @@ pub enum ActionOutcome {
 ///
 /// A move succeeds when [`Map::can_step`] allows it: the destination cell is
 /// walkable, diagonals included even between two walls touching by a corner.
-/// Walls and cells outside the map block it. Waiting, casting and handling
-/// items always succeed here and keep the actor in place; what a cast or an
-/// item does, and whether it is allowed, is decided by the game. The
+/// Walls and cells outside the map block it. Waiting, casting, handling
+/// items and descending always succeed here and keep the actor in place;
+/// what a cast, an item or a descent does, and whether it is allowed, is
+/// decided by the game. The
 /// function is pure: neither `map` nor any actor is modified.
 pub fn resolve(action: Action, from: Position, map: &Map) -> ActionOutcome {
     match action {
-        Action::Wait | Action::Cast { .. } | Action::PickUp | Action::Use(_) | Action::Drop(_) => {
-            ActionOutcome::Performed { position: from }
-        }
+        Action::Wait
+        | Action::Cast { .. }
+        | Action::PickUp
+        | Action::Use(_)
+        | Action::Drop(_)
+        | Action::Descend => ActionOutcome::Performed { position: from },
         Action::Move(direction) => {
             if map.can_step(from, direction) {
                 ActionOutcome::Performed {

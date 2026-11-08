@@ -519,7 +519,9 @@ pub fn describe(events: &[Event], game: &Game, content: &Content) -> Vec<Message
             | Event::Waited { .. }
             | Event::MoveBlocked { .. }
             | Event::TurnLost { .. }
-            | Event::Backlash { .. } => None,
+            | Event::Backlash { .. }
+            | Event::Descended { .. }
+            | Event::NoStairsHere { .. } => None,
         };
         messages.extend(message);
     }

@@ -26,6 +26,7 @@ use crate::content::ItemEffect;
 use crate::event::Event;
 use crate::item::{INVENTORY_CAPACITY, ItemId, ItemRefusal};
 use crate::schedule::{action_cost, spend_energy};
+use crate::sigil::MAX_STEADY_CASTS;
 
 impl Game {
     /// Makes the player `actor` pick up the item lying on its cell, appends
@@ -100,7 +101,8 @@ impl Game {
     /// - [`ItemEffect::Teach`] adds the sigil to the grimoire
     ///   ([`Event::SigilLearned`]);
     /// - [`ItemEffect::Steady`] adds to the casts that an unstable trace will
-    ///   cast pure ([`Event::Steadied`], see the `cast` submodule).
+    ///   cast pure, never above `sigil::MAX_STEADY_CASTS`
+    ///   ([`Event::Steadied`], see the `cast` submodule).
     fn apply_item_effect(&mut self, actor: ActorId, effect: &ItemEffect, events: &mut Vec<Event>) {
         match effect {
             ItemEffect::Heal(power) => {
@@ -129,7 +131,10 @@ impl Game {
                 });
             }
             ItemEffect::Steady(casts) => {
-                self.steady_casts = self.steady_casts.saturating_add(*casts);
+                self.steady_casts = self
+                    .steady_casts
+                    .saturating_add(*casts)
+                    .min(MAX_STEADY_CASTS);
                 events.push(Event::Steadied {
                     casts: self.steady_casts,
                 });
@@ -558,6 +563,32 @@ mod tests {
         assert_eq!(clock(&game), before);
         assert_eq!(game.player_turns(), turns);
         assert_eq!(carried(&game), [second]);
+    }
+
+    #[test]
+    fn steadied_casts_never_exceed_their_cap() {
+        let ItemEffect::Steady(casts) = *shipped("steadying_ink").effect() else {
+            panic!("the ink steadies casts");
+        };
+        assert!(2 * casts > MAX_STEADY_CASTS, "two inks reach the cap");
+        let mut game = fixed_room_game();
+        let first = carry(&mut game, "steadying_ink");
+        game.submit(Action::Use(first));
+        assert_eq!(game.steady_casts(), casts);
+
+        let second = carry(&mut game, "steadying_ink");
+        let events = game.submit(Action::Use(second));
+
+        assert_eq!(
+            events[1],
+            Event::Steadied {
+                casts: MAX_STEADY_CASTS
+            }
+        );
+        assert_eq!(game.steady_casts(), MAX_STEADY_CASTS);
+        let third = carry(&mut game, "steadying_ink");
+        game.submit(Action::Use(third));
+        assert_eq!(game.steady_casts(), MAX_STEADY_CASTS, "wasted at the cap");
     }
 
     #[test]

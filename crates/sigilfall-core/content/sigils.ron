@@ -20,8 +20,8 @@
 //              and Heal, cells for Blink, turns for Hold.
 // - targeting: Caster, Direction (chosen after the trace) or NearestEnemy
 //              (the nearest enemy in sight).
-// - min_depth: shallowest floor where its glyph can be found; 1 is the
-//              first floor.
+// - min_depth: shallowest floor where its glyph can be found, from 1 (the
+//              first floor) to 10 (the deepest the content is written for).
 //
 // Powers are provisional until spells are balanced.
 [

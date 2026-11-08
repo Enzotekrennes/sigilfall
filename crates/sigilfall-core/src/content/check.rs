@@ -1,15 +1,17 @@
 //! Field checks shared by the validation of every kind of entry.
 //!
 //! Exposes [`EntryCheck`], which checks the fields of one entry and builds
-//! errors naming it, and [`UniqueIds`], which refuses an identifier used by
-//! two entries of the same file. The rules specific to a kind of entry live
-//! in its own module (`monster`, `sigil`).
+//! errors naming it, floor numbers included, and [`UniqueIds`], which
+//! refuses an identifier used by two entries of the same file. The rules
+//! specific to a kind of entry live in its own module (`monster`, `sigil`,
+//! `item`, `spawn`).
 
 use std::collections::HashMap;
 
-use super::MAX_NAME_LENGTH;
 use super::entry_file::EntryKind;
 use super::error::{ContentError, FieldProblem};
+use super::{MAX_DEPTH, MAX_NAME_LENGTH};
+use crate::generation::FIRST_DEPTH;
 
 /// Checks the fields of one entry, building errors that name it.
 pub(super) struct EntryCheck {
@@ -136,6 +138,28 @@ impl EntryCheck {
             ));
         }
         Ok(value)
+    }
+
+    /// Returns the floor number in `field`, refusing a missing one, one
+    /// below [`FIRST_DEPTH`] ([`FieldProblem::TooLow`]) or one beyond
+    /// [`MAX_DEPTH`] ([`FieldProblem::TooHigh`]): no floor deeper than that
+    /// is written for, so such a value is a typo or would never be seen.
+    pub(super) fn depth(
+        &self,
+        value: Option<u32>,
+        field: &'static str,
+    ) -> Result<u32, ContentError> {
+        let depth = self.at_least(value, field, FIRST_DEPTH)?;
+        if depth > MAX_DEPTH {
+            return Err(self.fail(
+                field,
+                FieldProblem::TooHigh {
+                    value: depth.into(),
+                    max: MAX_DEPTH.into(),
+                },
+            ));
+        }
+        Ok(depth)
     }
 }
 

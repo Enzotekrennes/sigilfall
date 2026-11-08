@@ -2,7 +2,8 @@
 //! and backlash.
 //!
 //! Exposes the essence constants ([`MAX_ESSENCE`], [`ESSENCE_COST`],
-//! [`ESSENCE_REGEN_TICKS`]), the reach of aimed spells ([`SPELL_RANGE`]),
+//! [`ESSENCE_REGEN_TICKS`]), the most steadied casts the player can hold
+//! ([`MAX_STEADY_CASTS`]), the reach of aimed spells ([`SPELL_RANGE`]),
 //! [`CastQuality`], the closed list of [`Backlash`]es with their strength
 //! ([`SCORCH_DAMAGE`], [`DAZE_TURNS`]) and [`draw_backlash`]. The time a cast
 //! takes is set by the `schedule` module (`STROKE_COST`, `CAST_COST`), and
@@ -36,6 +37,15 @@ pub const ESSENCE_COST: i32 = 2;
 /// slow enough that essence runs out in a long fight, fast enough that
 /// exploring a few rooms refills it.
 pub const ESSENCE_REGEN_TICKS: u64 = 12;
+
+/// Most of the player's next unstable casts that can be steadied at once
+/// (cast pure by steadying items, `ItemEffect::Steady`).
+///
+/// As many as a full reserve of essence can cast in a row
+/// ([`MAX_ESSENCE`] / [`ESSENCE_COST`], 3): enough to see one fight through
+/// without backlash, while inks used beyond that are wasted instead of being
+/// stockpiled across floors into a lasting immunity to backlash.
+pub const MAX_STEADY_CASTS: u32 = (MAX_ESSENCE / ESSENCE_COST).unsigned_abs();
 
 /// Farthest a spell aimed in a direction reaches, in cells.
 ///

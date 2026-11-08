@@ -1,8 +1,8 @@
 //! Errors raised while loading the game's content files.
 //!
-//! Exposes [`ContentError`], returned by `Content::load` and
-//! `Content::parse`, and [`FieldProblem`], what is wrong with one field of
-//! one entry. Every message names the file and, when the fault lies in an
+//! Exposes [`ContentError`], returned by `Content::load` and the
+//! `Content::parse*` functions, and [`FieldProblem`], what is wrong with one
+//! field of one entry. Every message names the file and, when the fault lies in an
 //! entry, that entry and the field, so whoever edits the data knows where to
 //! look.
 
@@ -74,6 +74,31 @@ pub enum ContentError {
         /// Path of the faulty file, relative to the crate.
         file: &'static str,
     },
+    /// No spawn rule places a monster on this floor, which would leave it
+    /// empty.
+    #[error(
+        "{file}: no rule places a monster on floor {depth}; every floor from \
+         {first_depth} to {max_depth} needs one"
+    )]
+    NoMonsterAtDepth {
+        /// Path of the spawn file, relative to the crate.
+        file: &'static str,
+        /// The floor left without monster.
+        depth: u32,
+        /// Number of the first floor.
+        first_depth: u32,
+        /// Deepest floor the content is written for (`content::MAX_DEPTH`).
+        max_depth: u32,
+    },
+    /// A monster or an item has no spawn rule, so it would never appear:
+    /// most likely a rule was forgotten when the entry was added.
+    #[error("{file}: no rule places {entry}, so it would never appear")]
+    NoSpawnRule {
+        /// Path of the spawn file, relative to the crate.
+        file: &'static str,
+        /// The entry without rule, such as "monster `acolyte` (entry 3)".
+        entry: String,
+    },
     /// No monster can appear on the first floor, which would leave it empty.
     #[error(
         "{file}: no monster can appear on floor {first_depth}: the lowest field \
@@ -114,6 +139,43 @@ pub enum FieldProblem {
         value: i64,
         /// Lowest accepted value.
         min: i64,
+    },
+    /// The value is above the highest accepted one; there is no lower bound
+    /// beyond the one the field's type gives.
+    #[error("{value} is too high, expected at most {max}")]
+    TooHigh {
+        /// The value found in the file.
+        value: i64,
+        /// Highest accepted value.
+        max: i64,
+    },
+    /// The floor is shallower than the `min_depth` of the entry the value
+    /// refers to, such as a page found before the glyph of the sigil it
+    /// teaches could be, or a spawn rule placing a creature above its own
+    /// `min_depth`.
+    #[error(
+        "floor {value} is shallower than {reference}, whose `min_depth` is \
+         {min_depth}: expected at least {min_depth}"
+    )]
+    ShallowerThanReference {
+        /// The floor found in the file.
+        value: u32,
+        /// The entry referred to, such as "sigil `veil`".
+        reference: String,
+        /// That entry's `min_depth`, the shallowest floor accepted.
+        min_depth: u32,
+    },
+    /// Two spawn rules of the same creature or item cover a common floor,
+    /// so its weight there would be ambiguous.
+    #[error("floors {from_depth} to {to_depth} overlap those of {other}")]
+    Overlap {
+        /// First floor of the faulty rule.
+        from_depth: u32,
+        /// Last floor of the faulty rule.
+        to_depth: u32,
+        /// The earlier rule covering a common floor, such as
+        /// "spawn `acolyte` (entry 4)".
+        other: String,
     },
     /// Another entry already uses this identifier.
     #[error("`{id}` is already the identifier of entry {first_entry}")]

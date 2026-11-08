@@ -12,9 +12,12 @@
 // - hp:        hit points of a fresh creature.
 // - attack:    attack value.
 // - defense:   defense value.
-// - min_depth: shallowest floor it can appear on; 1 is the first floor.
+// - min_depth: shallowest floor it can appear on, from 1 (the first floor)
+//              to 10 (the deepest the content is written for).
 //
-// Combat values are provisional until fights are balanced.
+// How often each creature appears, floor by floor, is set in
+// content/spawns.ron. The values are measured with a reckless player in
+// tests/balance.rs: change them with that test in view.
 [
     Monster(
         id: "ossuary_rat",

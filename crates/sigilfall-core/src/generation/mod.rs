@@ -4,7 +4,9 @@
 //! Exposes [`generate`] (the layout alone), [`generate_with_monsters`]
 //! (with monsters, glyphs and items), [`Floor`], [`MonsterSpawn`],
 //! [`Engraving`], [`ItemSpawn`], the size of a floor ([`FLOOR_WIDTH`],
-//! [`FLOOR_HEIGHT`]), [`FIRST_DEPTH`], [`MONSTERS_PER_FLOOR`],
+//! [`FLOOR_HEIGHT`]), [`FIRST_DEPTH`], the rule of difficulty
+//! ([`monsters_per_floor`] with [`MONSTERS_PER_FLOOR`],
+//! [`EXTRA_MONSTERS_PER_DEPTH`] and [`MAX_MONSTERS_PER_FLOOR`]),
 //! [`GLYPHS_PER_FLOOR`] and [`ITEMS_PER_FLOOR`]. A floor is
 //! a pure function of the seed, the depth and the content: every random
 //! choice is drawn from the stream `Seed::stream(depth, Purpose::Generation)`
@@ -17,6 +19,10 @@
 //! and items after the glyphs, all from the same stream, so placing what
 //! comes later never changes the layout, the monsters or the glyphs of a
 //! seed.
+//!
+//! Difficulty grows with depth in two ways: the spawn tables of the content
+//! favour stronger creatures deeper down (`Content::monster_weights`), and
+//! deeper floors hold more of them ([`monsters_per_floor`]).
 
 mod bsp;
 
@@ -43,7 +49,9 @@ pub const FLOOR_HEIGHT: usize = 40;
 /// Depth of the first floor of a run; each staircase leads one deeper.
 pub const FIRST_DEPTH: u32 = 1;
 
-/// Number of monsters placed on a floor by [`generate_with_monsters`].
+/// Number of monsters placed on the first floor by
+/// [`generate_with_monsters`]; deeper floors hold more (see
+/// [`monsters_per_floor`]).
 ///
 /// A floor has 8 to 16 rooms, about 12 on average, and the start room stays
 /// empty: six monsters leave roughly one room in two occupied, so the player
@@ -51,6 +59,22 @@ pub const FIRST_DEPTH: u32 = 1;
 /// rooms to recover in. Fewer are placed only if the rooms lack free cells,
 /// which the shipped layouts never do.
 pub const MONSTERS_PER_FLOOR: usize = 6;
+
+/// Monsters added to a floor for each floor below the first (see
+/// [`monsters_per_floor`]).
+///
+/// One per floor: on top of the stronger creatures the spawn tables bring
+/// deeper down, the count grows steadily enough that each staircase is felt,
+/// without the jump from one floor to the next ever doubling a fight.
+pub const EXTRA_MONSTERS_PER_DEPTH: usize = 1;
+
+/// Most monsters placed on a floor, however deep (see
+/// [`monsters_per_floor`]).
+///
+/// Twelve: about one per room on an average floor of 12 rooms, the start
+/// room still empty. More would leave no quiet room to recover in, and the
+/// floor would be a single running fight.
+pub const MAX_MONSTERS_PER_FLOOR: usize = 12;
 
 /// Number of engraved glyphs placed on a floor by
 /// [`generate_with_monsters`].
@@ -69,6 +93,22 @@ pub const GLYPHS_PER_FLOOR: usize = 2;
 /// a few floors of fights. Fewer are placed only when the rooms lack free
 /// cells or no item can be found that deep.
 pub const ITEMS_PER_FLOOR: usize = 3;
+
+/// Returns how many monsters [`generate_with_monsters`] places on floor
+/// `depth`: the rule of difficulty of the dungeon.
+///
+/// [`MONSTERS_PER_FLOOR`] on the first floor, then
+/// [`EXTRA_MONSTERS_PER_DEPTH`] more for each floor below it, up to
+/// [`MAX_MONSTERS_PER_FLOOR`] (reached on floor 7). A `depth` shallower
+/// than the first floor counts as the first. Fewer are placed only when the rooms
+/// lack free cells.
+pub fn monsters_per_floor(depth: u32) -> usize {
+    let below_first = usize::try_from(depth.saturating_sub(FIRST_DEPTH)).unwrap_or(usize::MAX);
+    below_first
+        .saturating_mul(EXTRA_MONSTERS_PER_DEPTH)
+        .saturating_add(MONSTERS_PER_FLOOR)
+        .min(MAX_MONSTERS_PER_FLOOR)
+}
 
 /// A generated dungeon floor: its tiles, where the player arrives, where the
 /// stairs down are, which monsters wait on it and what lies on it.
@@ -108,7 +148,7 @@ impl ItemSpawn {
     }
 
     /// Returns the definition of the item, one of those `Content::items_at`
-    /// allows on the floor's depth.
+    /// allows on the floor's depth, drawn according to its weight there.
     pub const fn definition(&self) -> &ItemDef {
         &self.definition
     }
@@ -161,7 +201,8 @@ impl MonsterSpawn {
     }
 
     /// Returns the definition of the creature, one of those
-    /// `Content::monsters_at` allows on the floor's depth.
+    /// `Content::monsters_at` allows on the floor's depth, drawn according to
+    /// its weight there.
     pub const fn definition(&self) -> &MonsterDef {
         &self.definition
     }
@@ -243,7 +284,7 @@ pub fn generate(seed: Seed, depth: u32) -> Floor {
 }
 
 /// Builds floor `depth` of the run identified by `seed`, as [`generate`]
-/// does, and places [`MONSTERS_PER_FLOOR`] monsters, [`GLYPHS_PER_FLOOR`]
+/// does, and places [`monsters_per_floor`] monsters, [`GLYPHS_PER_FLOOR`]
 /// engraved glyphs and [`ITEMS_PER_FLOOR`] items on it.
 ///
 /// The map, start and stairs are exactly those of [`generate`] with the same
@@ -253,11 +294,12 @@ pub fn generate(seed: Seed, depth: u32) -> Floor {
 /// - a cell drawn uniformly among the free floor cells of the rooms, the
 ///   start room excluded, that lie out of [`SIGHT_RADIUS`] of the start
 ///   (whatever the walls), so the player sees no monster on arrival;
-/// - a definition drawn uniformly among `content.monsters_at(depth)`;
+/// - a definition drawn among `content.monster_weights(depth)`, each with a
+///   chance proportional to its weight, in one draw of the stream;
 /// - a starting energy (see [`MonsterSpawn::energy`]).
 ///
 /// Two monsters never share a cell, and none stands on the stairs. If fewer
-/// free cells than [`MONSTERS_PER_FLOOR`] exist, one monster is placed per
+/// free cells than [`monsters_per_floor`] exist, one monster is placed per
 /// free cell.
 ///
 /// Then, still from the same stream, each glyph gets in turn a cell drawn
@@ -273,8 +315,9 @@ pub fn generate(seed: Seed, depth: u32) -> Floor {
 /// Last, still from the same stream, each item gets in turn a cell drawn
 /// uniformly among the plain floor cells of every room (the start room
 /// included) that hold neither the start, the stairs, a monster, a glyph
-/// nor another item, and a definition drawn uniformly among
-/// `content.items_at(depth)`; the same kind may be drawn twice. Every item
+/// nor another item, and a definition drawn among
+/// `content.item_weights(depth)` according to the weights, as for monsters;
+/// the same kind may be drawn twice. Every item
 /// thus lies on floor the player can walk to, one per cell; fewer are
 /// placed when fewer cells exist, none when no item is available that
 /// deep. The layout, monsters and glyphs are exactly those of the same
@@ -289,8 +332,8 @@ pub fn generate_with_monsters(seed: Seed, depth: u32, content: &Content) -> Floo
         start_room,
     } = lay_out(&mut rng);
     let cells = monster_cells(&floor, &rooms, start_room);
-    let table: Vec<&MonsterDef> = content.monsters_at(depth).collect();
-    floor.monsters = draw_monsters(cells, &table, &mut rng);
+    let table: Vec<(&MonsterDef, u32)> = content.monster_weights(depth).collect();
+    floor.monsters = draw_monsters(cells, &table, monsters_per_floor(depth), &mut rng);
     let cells = glyph_cells(&floor, &rooms);
     let sigils: Vec<&SigilDef> = content
         .sigils()
@@ -299,7 +342,7 @@ pub fn generate_with_monsters(seed: Seed, depth: u32, content: &Content) -> Floo
         .collect();
     floor.glyphs = draw_glyphs(cells, sigils, &mut rng);
     let cells = item_cells(&floor, &rooms);
-    let table: Vec<&ItemDef> = content.items_at(depth).collect();
+    let table: Vec<(&ItemDef, u32)> = content.item_weights(depth).collect();
     floor.items = draw_items(cells, &table, &mut rng);
     floor
 }
@@ -366,8 +409,9 @@ fn monster_cells(floor: &Floor, rooms: &[bsp::Rect], start_room: usize) -> Vec<P
         .collect()
 }
 
-/// Draws up to [`MONSTERS_PER_FLOOR`] monsters from `rng`: for each, a cell
-/// taken out of `cells`, a definition of `table`, then a starting energy.
+/// Draws up to `count` monsters from `rng`: for each, a cell taken out of
+/// `cells`, a definition of `table` according to its weight (see
+/// [`draw_weighted`]), then a starting energy.
 ///
 /// # Panics
 ///
@@ -375,14 +419,15 @@ fn monster_cells(floor: &Floor, rooms: &[bsp::Rect], start_room: usize) -> Vec<P
 /// least one monster for every depth.
 fn draw_monsters(
     mut cells: Vec<Position>,
-    table: &[&MonsterDef],
+    table: &[(&MonsterDef, u32)],
+    count: usize,
     rng: &mut ChaCha8Rng,
 ) -> Vec<MonsterSpawn> {
-    let mut monsters = Vec::with_capacity(MONSTERS_PER_FLOOR);
-    while monsters.len() < MONSTERS_PER_FLOOR && !cells.is_empty() {
+    let mut monsters = Vec::with_capacity(count);
+    while monsters.len() < count && !cells.is_empty() {
         assert!(!table.is_empty(), "every depth has at least one monster");
         let position = cells.swap_remove(rng.random_range(0..cells.len()));
-        let definition = table[rng.random_range(0..table.len())].clone();
+        let definition = draw_weighted(table, rng).clone();
         let energy = rng.random_range(0..ACTION_THRESHOLD);
         monsters.push(MonsterSpawn {
             position,
@@ -437,24 +482,50 @@ fn item_cells(floor: &Floor, rooms: &[bsp::Rect]) -> Vec<Position> {
 }
 
 /// Draws up to [`ITEMS_PER_FLOOR`] items from `rng`: for each, a cell taken
-/// out of `cells`, then a definition of `table`, so no cell is used twice.
-/// Draws nothing when `table` is empty, and stops early when the cells run
-/// out.
+/// out of `cells`, then a definition of `table` according to its weight (see
+/// [`draw_weighted`]), so no cell is used twice. Draws nothing when `table`
+/// is empty, and stops early when the cells run out.
 fn draw_items(
     mut cells: Vec<Position>,
-    table: &[&ItemDef],
+    table: &[(&ItemDef, u32)],
     rng: &mut ChaCha8Rng,
 ) -> Vec<ItemSpawn> {
     let mut items = Vec::with_capacity(ITEMS_PER_FLOOR);
     while items.len() < ITEMS_PER_FLOOR && !cells.is_empty() && !table.is_empty() {
         let position = cells.swap_remove(rng.random_range(0..cells.len()));
-        let definition = table[rng.random_range(0..table.len())].clone();
+        let definition = draw_weighted(table, rng).clone();
         items.push(ItemSpawn {
             position,
             definition,
         });
     }
     items
+}
+
+/// Draws one entry of `table` from `rng`, each with a chance proportional to
+/// its weight, in one draw.
+///
+/// The draw is a number below the sum of the weights, and the entries are
+/// walked in order until it falls within one: when every weight is 1, this
+/// is exactly a uniform draw of an index, so floors whose table has equal
+/// weights are the same as with a uniform choice.
+///
+/// # Panics
+///
+/// Panics if `table` is empty or its weights sum to 0; `Content` lists
+/// positive weights only, and the callers never pass an empty table.
+fn draw_weighted<'a, T>(table: &[(&'a T, u32)], rng: &mut ChaCha8Rng) -> &'a T {
+    let weight = |entry: &(&T, u32)| usize::try_from(entry.1).unwrap_or(usize::MAX);
+    let total: usize = table.iter().map(weight).sum();
+    assert!(total > 0, "a weighted draw needs a positive weight");
+    let mut roll = rng.random_range(0..total);
+    for entry in table {
+        if roll < weight(entry) {
+            return entry.0;
+        }
+        roll -= weight(entry);
+    }
+    unreachable!("the roll is below the sum of the weights")
 }
 
 /// Returns the walkable cell of `map` farthest from `start` in steps.
@@ -475,6 +546,7 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
+    use crate::content::MAX_DEPTH;
     use crate::path::flood_fill;
 
     /// Seed of the floor frozen in the snapshot.
@@ -643,7 +715,11 @@ mod tests {
             let seen_at_start = fov::visible_cells(floor.map(), floor.start(), SIGHT_RADIUS);
             let allowed: Vec<&str> = content.monsters_at(depth).map(MonsterDef::id).collect();
 
-            assert_eq!(floor.monsters().len(), MONSTERS_PER_FLOOR, "{context}");
+            assert_eq!(
+                floor.monsters().len(),
+                monsters_per_floor(depth),
+                "{context}"
+            );
             let mut cells = Vec::new();
             for spawn in floor.monsters() {
                 let cell = spawn.position();
@@ -694,10 +770,10 @@ mod tests {
             let mut rng = seed.stream(depth, Purpose::Generation);
             let layout = lay_out(&mut rng);
             let cells = monster_cells(&layout.floor, &layout.rooms, layout.start_room);
-            let table: Vec<&MonsterDef> = content.monsters_at(depth).collect();
+            let table: Vec<(&MonsterDef, u32)> = content.monster_weights(depth).collect();
             assert_eq!(
                 floor.monsters(),
-                draw_monsters(cells, &table, &mut rng),
+                draw_monsters(cells, &table, monsters_per_floor(depth), &mut rng),
                 "{context}"
             );
 
@@ -747,13 +823,26 @@ mod tests {
     }
 
     /// The shipped content without any item, to compare floors generated
-    /// with and without items to place.
+    /// with and without items to place: the shipped files and spawn rules
+    /// of the monsters (one rule per line in the spawn file).
     fn content_without_items() -> Content {
-        Content::parse_files(
+        let monster_rules: String = include_str!("../../content/spawns.ron")
+            .lines()
+            .filter(|line| !line.contains("of: Item("))
+            .map(|line| {
+                format!(
+                    "{line}
+"
+                )
+            })
+            .collect();
+        Content::parse_with_spawns(
             include_str!("../../content/monsters.ron"),
             include_str!("../../content/sigils.ron"),
+            "[]",
+            &monster_rules,
         )
-        .expect("the shipped monsters and sigils are valid")
+        .expect("the shipped monsters, sigils and monster spawns are valid")
     }
 
     #[test]
@@ -842,7 +931,7 @@ mod tests {
     #[test]
     fn items_stop_when_cells_or_definitions_run_out() {
         let content = content();
-        let table: Vec<&ItemDef> = content.items().iter().collect();
+        let table: Vec<(&ItemDef, u32)> = content.items().iter().map(|item| (item, 1)).collect();
         let cells = vec![Position::new(3, 3), Position::new(4, 3)];
         let mut rng = Seed::new(0).stream(FIRST_DEPTH, Purpose::Generation);
 
@@ -943,15 +1032,168 @@ mod tests {
     #[test]
     fn rooms_short_of_free_cells_get_fewer_monsters() {
         let content = content();
-        let table: Vec<&MonsterDef> = content.monsters_at(FIRST_DEPTH).collect();
+        let table: Vec<(&MonsterDef, u32)> = content.monster_weights(FIRST_DEPTH).collect();
         let cells = vec![Position::new(3, 3), Position::new(4, 3)];
         let mut rng = Seed::new(0).stream(FIRST_DEPTH, Purpose::Generation);
 
-        let monsters = draw_monsters(cells.clone(), &table, &mut rng);
+        let monsters = draw_monsters(cells.clone(), &table, MONSTERS_PER_FLOOR, &mut rng);
 
         let mut placed: Vec<Position> = monsters.iter().map(MonsterSpawn::position).collect();
         placed.sort_unstable_by_key(|p| (p.y, p.x));
         assert_eq!(placed, cells);
+    }
+
+    /// Number of seeds the spawn tables are checked on, at every depth.
+    const TABLE_SEEDS: u64 = 200;
+
+    /// Largest gap accepted between the share of draws an entry gets over
+    /// [`TABLE_SEEDS`] floors and the share its weight promises.
+    ///
+    /// A floor draws at least 3 items and 6 monsters, so 200 floors give at
+    /// least 600 draws: the standard deviation of a share is then at most
+    /// 2 points, and 6 points leave three of them. The seeds are fixed, so
+    /// the test cannot fail by chance from one run to the next.
+    const SHARE_TOLERANCE: f64 = 0.06;
+
+    /// Checks that `drawn`, the identifiers drawn on floor `depth` over
+    /// [`TABLE_SEEDS`] seeds, follow `table`, the weights of that floor:
+    /// nothing outside the table, every entry at its share within
+    /// [`SHARE_TOLERANCE`].
+    fn assert_follows(drawn: &[&str], table: &[(&str, u32)], depth: u32, what: &str) {
+        let total: u32 = table.iter().map(|&(_, weight)| weight).sum();
+        for id in drawn {
+            assert!(
+                table.iter().any(|(listed, _)| listed == id),
+                "depth {depth}: {what} {id} has no weight there"
+            );
+        }
+        for &(id, weight) in table {
+            let count = drawn.iter().filter(|&&drawn| drawn == id).count();
+            let share = count as f64 / drawn.len() as f64;
+            let expected = f64::from(weight) / f64::from(total);
+            assert!(
+                (share - expected).abs() <= SHARE_TOLERANCE,
+                "depth {depth}: {what} {id} drawn {share:.3} of the time, \
+                 its weight promises {expected:.3}"
+            );
+        }
+    }
+
+    #[test]
+    fn spawns_follow_the_tables_on_200_seeds_at_every_depth() {
+        let content = content();
+        // Two floors past the deepest written for, which reuse its weights.
+        for depth in FIRST_DEPTH..=MAX_DEPTH + 2 {
+            let floors: Vec<Floor> = (0..TABLE_SEEDS)
+                .map(|value| generate_with_monsters(Seed::new(value), depth, &content))
+                .collect();
+
+            let monsters: Vec<&str> = floors
+                .iter()
+                .flat_map(|floor| floor.monsters().iter().map(|m| m.definition().id()))
+                .collect();
+            let count = usize::try_from(TABLE_SEEDS).unwrap() * monsters_per_floor(depth);
+            assert_eq!(monsters.len(), count, "depth {depth}: monsters per floor");
+            let table: Vec<(&str, u32)> = content
+                .monster_weights(depth)
+                .map(|(monster, weight)| (monster.id(), weight))
+                .collect();
+            assert_follows(&monsters, &table, depth, "monster");
+
+            let items: Vec<&str> = floors
+                .iter()
+                .flat_map(|floor| floor.items().iter().map(|i| i.definition().id()))
+                .collect();
+            let count = usize::try_from(TABLE_SEEDS).unwrap() * ITEMS_PER_FLOOR;
+            assert_eq!(items.len(), count, "depth {depth}: items per floor");
+            let table: Vec<(&str, u32)> = content
+                .item_weights(depth)
+                .map(|(item, weight)| (item.id(), weight))
+                .collect();
+            assert_follows(&items, &table, depth, "item");
+        }
+    }
+
+    #[test]
+    fn deeper_floors_hold_more_monsters_up_to_a_cap() {
+        let expected = [
+            (0, 6),
+            (FIRST_DEPTH, MONSTERS_PER_FLOOR),
+            (2, 7),
+            (3, 8),
+            (6, 11),
+            (7, MAX_MONSTERS_PER_FLOOR),
+            (8, MAX_MONSTERS_PER_FLOOR),
+            (u32::MAX, MAX_MONSTERS_PER_FLOOR),
+        ];
+        for (depth, count) in expected {
+            assert_eq!(monsters_per_floor(depth), count, "depth {depth}");
+        }
+        for depth in FIRST_DEPTH..MAX_DEPTH {
+            assert!(monsters_per_floor(depth + 1) >= monsters_per_floor(depth));
+        }
+    }
+
+    /// Threat of a creature: its hit points times the damage it deals per
+    /// player turn before defense (attack times speed, a normal speed being
+    /// one action per turn). A rough measure, but one that grows with every
+    /// way a creature gets stronger.
+    fn threat(monster: &MonsterDef) -> f64 {
+        f64::from(monster.hp()) * f64::from(monster.attack()) * f64::from(monster.speed())
+            / f64::from(crate::schedule::NORMAL_SPEED)
+    }
+
+    #[test]
+    fn the_expected_threat_of_a_floor_grows_with_depth() {
+        let content = content();
+        // Expected threat of a floor: its number of monsters times the
+        // threat of a monster averaged over the weights of the floor.
+        let floor_threat = |depth| {
+            let (sum, total) = content.monster_weights(depth).fold(
+                (0.0, 0.0),
+                |(sum, total), (monster, weight)| {
+                    let weight = f64::from(weight);
+                    (sum + threat(monster) * weight, total + weight)
+                },
+            );
+            sum / total * monsters_per_floor(depth) as f64
+        };
+
+        for depth in FIRST_DEPTH..MAX_DEPTH {
+            assert!(
+                floor_threat(depth + 1) > floor_threat(depth),
+                "floor {} ({:.0}) is not more threatening than floor {depth} ({:.0})",
+                depth + 1,
+                floor_threat(depth + 1),
+                floor_threat(depth)
+            );
+        }
+        assert!(floor_threat(MAX_DEPTH) > 4.0 * floor_threat(FIRST_DEPTH));
+    }
+
+    #[test]
+    fn a_weighted_draw_with_equal_weights_is_a_uniform_draw_of_an_index() {
+        let names = ["a", "b", "c", "d"];
+        let table: Vec<(&&str, u32)> = names.iter().map(|name| (name, 1)).collect();
+        let mut weighted = Seed::new(7).stream(FIRST_DEPTH, Purpose::Generation);
+        let mut uniform = Seed::new(7).stream(FIRST_DEPTH, Purpose::Generation);
+
+        for _ in 0..200 {
+            let drawn = draw_weighted(&table, &mut weighted);
+            assert_eq!(*drawn, names[uniform.random_range(0..names.len())]);
+        }
+    }
+
+    #[test]
+    fn a_weighted_draw_follows_the_weights() {
+        let table = [(&"rare", 1), (&"common", 3)];
+        let mut rng = Seed::new(3).stream(FIRST_DEPTH, Purpose::Generation);
+
+        let common = (0..4000)
+            .filter(|_| *draw_weighted(&table, &mut rng) == "common")
+            .count();
+
+        assert!((2850..=3150).contains(&common), "{common} of 4000");
     }
 
     #[test]

@@ -144,8 +144,8 @@ impl SigilDef {
         self.targeting
     }
 
-    /// Returns the shallowest floor where the sigil's glyph can be found; at
-    /// least [`FIRST_DEPTH`].
+    /// Returns the shallowest floor where the sigil's glyph can be found;
+    /// from [`FIRST_DEPTH`] to `content::MAX_DEPTH`.
     pub const fn min_depth(&self) -> u32 {
         self.min_depth
     }
@@ -250,7 +250,7 @@ fn validate_entry(index: usize, entry: SigilEntry) -> Result<SigilDef, ContentEr
         effect,
         power,
         targeting,
-        min_depth: check.at_least(entry.min_depth, "min_depth", FIRST_DEPTH)?,
+        min_depth: check.depth(entry.min_depth, "min_depth")?,
         id,
     })
 }

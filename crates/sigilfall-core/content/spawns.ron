@@ -1,0 +1,58 @@
+// Spawn tables: which creatures and items a floor holds, and how often,
+// floor by floor. Loaded by `Content::load` with the other files and checked
+// before a game starts. Each `Spawn(...)` rule gives one creature or item a
+// weight on a band of floors. Every field is required:
+//
+// - of:         what the rule places: Monster("id") for a creature of
+//               content/monsters.ron, Item("id") for an item of
+//               content/items.ron.
+// - from_depth: first floor of the band, from 1 to 10 (the deepest floor
+//               the content is written for), never shallower than the
+//               `min_depth` of what it places.
+// - to_depth:   last floor of the band, included, from `from_depth` to 10.
+//               Floors below 10 use the weights of floor 10.
+// - weight:     relative chance of being drawn on those floors, from 1 to
+//               99. On a floor, each monster of the floor is drawn among the
+//               monsters covering it with a chance of its weight divided by
+//               the sum of their weights; items likewise among items.
+//
+// Two rules of the same creature or item must not share a floor; every
+// creature and item needs at least one rule, and every floor from 1 to 10 at
+// least one creature. A creature or item without a rule covering a floor
+// never appears there.
+//
+// The first floor keeps equal weights on purpose: its two creatures and three
+// items are equally likely. Deeper bands shift the weights towards stronger
+// creatures, while the number of creatures per floor grows with depth
+// (`generation::monsters_per_floor`): together, the rule of difficulty.
+[
+    // --- Monsters --------------------------------------------------------
+    Spawn(of: Monster("ossuary_rat"), from_depth: 1, to_depth: 1, weight: 1),
+    Spawn(of: Monster("ossuary_rat"), from_depth: 2, to_depth: 3, weight: 4),
+    Spawn(of: Monster("ossuary_rat"), from_depth: 4, to_depth: 10, weight: 1),
+    Spawn(of: Monster("wax_beetle"), from_depth: 1, to_depth: 1, weight: 1),
+    Spawn(of: Monster("wax_beetle"), from_depth: 2, to_depth: 4, weight: 3),
+    Spawn(of: Monster("wax_beetle"), from_depth: 5, to_depth: 10, weight: 1),
+    Spawn(of: Monster("acolyte"), from_depth: 2, to_depth: 3, weight: 2),
+    Spawn(of: Monster("acolyte"), from_depth: 4, to_depth: 10, weight: 3),
+    Spawn(of: Monster("homunculus"), from_depth: 2, to_depth: 3, weight: 1),
+    Spawn(of: Monster("homunculus"), from_depth: 4, to_depth: 10, weight: 3),
+    Spawn(of: Monster("vigil_eye"), from_depth: 3, to_depth: 10, weight: 2),
+    Spawn(of: Monster("shade"), from_depth: 3, to_depth: 5, weight: 3),
+    Spawn(of: Monster("shade"), from_depth: 6, to_depth: 10, weight: 4),
+    Spawn(of: Monster("hierophant"), from_depth: 4, to_depth: 6, weight: 1),
+    Spawn(of: Monster("hierophant"), from_depth: 7, to_depth: 8, weight: 3),
+    Spawn(of: Monster("hierophant"), from_depth: 9, to_depth: 10, weight: 4),
+    Spawn(of: Monster("lead_homunculus"), from_depth: 5, to_depth: 7, weight: 1),
+    Spawn(of: Monster("lead_homunculus"), from_depth: 8, to_depth: 8, weight: 2),
+    Spawn(of: Monster("lead_homunculus"), from_depth: 9, to_depth: 9, weight: 3),
+    Spawn(of: Monster("lead_homunculus"), from_depth: 10, to_depth: 10, weight: 4),
+
+    // --- Items -----------------------------------------------------------
+    Spawn(of: Item("healing_draught"), from_depth: 1, to_depth: 1, weight: 1),
+    Spawn(of: Item("healing_draught"), from_depth: 2, to_depth: 10, weight: 3),
+    Spawn(of: Item("essence_phial"), from_depth: 1, to_depth: 1, weight: 1),
+    Spawn(of: Item("essence_phial"), from_depth: 2, to_depth: 10, weight: 2),
+    Spawn(of: Item("steadying_ink"), from_depth: 1, to_depth: 10, weight: 1),
+    Spawn(of: Item("veil_page"), from_depth: 2, to_depth: 10, weight: 1),
+]

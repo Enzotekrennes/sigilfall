@@ -2,11 +2,11 @@
 //!
 //! Exposes [`Game`], [`Status`], [`VisibleMonster`], [`VisibleItem`] and
 //! [`PLAYER_START`].
-//! The game owns the run's seed, the world (map, actors, items, glyphs and
-//! the player's inventory, in the `world` submodule), the scheduler and the
-//! gameplay random stream. A new game starts on the first generated floor of
-//! its seed, with its monsters, glyphs and items (see the `generation`
-//! module). The player's
+//! The game owns the run's seed, the depth of the current floor, the world
+//! (map, actors, items, glyphs and the player's inventory, in the `world`
+//! submodule), the scheduler and the gameplay random stream. A new game
+//! starts on the first generated floor of its seed, with its monsters,
+//! glyphs and items (see the `generation` module). The player's
 //! action is applied, then the other actors take their turns until the
 //! player may act again, and everything that happened is returned as
 //! [`Event`]s. The game produces no text and draws nothing.
@@ -22,8 +22,13 @@
 //! `combat` module, drawn from the run's `Purpose::Gameplay` stream. A
 //! monster whose hit points fall to 0 leaves the map and the turn order; when
 //! the player's do, the game is over ([`Status::GameOver`]) and
-//! [`Game::submit`] no longer does anything. Going down the stairs is not
-//! handled yet.
+//! [`Game::submit`] no longer does anything.
+//!
+//! Standing on the stairs, the player goes down with `Action::Descend` to
+//! the next floor of the seed, keeping its hit points, essence, inventory and
+//! grimoire; the rules live in the `descent` submodule. Every floor has its
+//! own gameplay stream (decision D5), so a floor plays out the same for a
+//! given seed and the same actions there, whatever happened above.
 //!
 //! Sigils are cast with `Action::Cast`, whose rules (cost per stroke,
 //! essence, effects, backlash) live in the `cast` submodule. The player
@@ -39,6 +44,7 @@
 //! `inventory` submodule. Only the player handles items.
 
 mod cast;
+mod descent;
 mod inventory;
 mod world;
 
@@ -52,7 +58,7 @@ use crate::combat::{self, Combatant};
 use crate::content::{Content, Family, ItemDef, ItemFamily, MonsterDef, SigilDef};
 use crate::event::Event;
 use crate::fov::{self, SIGHT_RADIUS};
-use crate::generation::{self, Engraving, FIRST_DEPTH, Floor, MonsterSpawn};
+use crate::generation::{self, Engraving, FIRST_DEPTH, Floor, ItemSpawn, MonsterSpawn};
 use crate::geometry::{Direction, Position};
 use crate::item::{Item, ItemId};
 use crate::map::Map;
@@ -78,6 +84,13 @@ pub const PLAYER_START: Position = Position::new(5, 5);
 pub struct Game {
     /// The seed every random choice of this run follows from.
     seed: Seed,
+    /// Number of the current floor: [`FIRST_DEPTH`] at the start, one more
+    /// for each staircase taken.
+    depth: u32,
+    /// The game data the floors below are generated from, or `None` for a
+    /// game started without it ([`Game::on_floor`], [`Game::in_fixed_room`]),
+    /// whose floors below are bare layouts.
+    content: Option<Content>,
     /// The current floor: map, actors, items, glyphs, and the player's
     /// inventory.
     world: World,
@@ -85,9 +98,10 @@ pub struct Game {
     scheduler: Scheduler,
     /// Number of player actions that took time since the game started.
     player_turns: u64,
-    /// Stream of every random choice made while playing, such as the damage
-    /// of each blow or the backlash of an unstable cast:
-    /// `seed.stream(FIRST_DEPTH, Purpose::Gameplay)`.
+    /// Stream of every random choice made while playing on the current
+    /// floor, such as the damage of each blow or the backlash of an unstable
+    /// cast: `seed.stream(depth, Purpose::Gameplay)`, started afresh on each
+    /// floor.
     gameplay_rng: ChaCha8Rng,
     /// Whether the player is still alive.
     status: Status,
@@ -164,11 +178,16 @@ impl Game {
     /// The same seed and content always give the same floor, monsters,
     /// glyphs and items. Time is advanced until the player's first turn, so
     /// [`Game::submit`] can be called right away; no monster has acted yet.
+    ///
+    /// The game keeps a copy of `content` to generate the floors below,
+    /// each with `generation::generate_with_monsters` at its depth.
     pub fn new(seed: Seed, content: &Content) -> Self {
-        Self::on_floor(
+        let mut game = Self::on_floor(
             seed,
             generation::generate_with_monsters(seed, FIRST_DEPTH, content),
-        )
+        );
+        game.content = Some(content.clone());
+        game
     }
 
     /// Starts a game of the run identified by `seed` on `floor`, with the
@@ -182,13 +201,14 @@ impl Game {
     /// movement, sight or the camera use that to walk a generated floor
     /// without a monster in the way. Time is advanced until the player's
     /// first turn.
+    ///
+    /// The floor counts as the first ([`Game::depth`] is [`FIRST_DEPTH`]),
+    /// and the game has no content: the floors below its stairs are bare
+    /// layouts of the seed (`generation::generate`), with neither monster,
+    /// glyph nor item.
     pub fn on_floor(seed: Seed, floor: Floor) -> Self {
         let mut game = Self::start(seed, floor.map, floor.start, &floor.monsters);
-        game.world.engravings = floor.glyphs;
-        for spawn in floor.items {
-            game.world
-                .place_item(Item::on_floor(spawn.definition, spawn.position));
-        }
+        game.lay_out_floor_contents(floor.glyphs, floor.items);
         game
     }
 
@@ -200,7 +220,8 @@ impl Game {
     /// of tests that need known walls and distances. The seed is only kept
     /// (see [`Game::seed`]). Monsters can be added with
     /// [`Game::spawn_monster`], glyphs with [`Game::engrave`], items with
-    /// [`Game::place_item`].
+    /// [`Game::place_item`]. The room has no stairs, so the player never
+    /// leaves it.
     pub fn in_fixed_room(seed: Seed) -> Self {
         Self::start(seed, Map::fixed_room(), PLAYER_START, &[])
     }
@@ -216,17 +237,11 @@ impl Game {
         let player = actors.insert(Actor::player(start));
         let mut scheduler = Scheduler::default();
         scheduler.enrol(player);
-        for spawn in monsters {
-            let monster = actors.insert(Actor::monster(
-                spawn.position(),
-                spawn.definition(),
-                spawn.energy(),
-            ));
-            scheduler.enrol(monster);
-        }
 
         let mut game = Self {
             seed,
+            depth: FIRST_DEPTH,
+            content: None,
             world: World::new(map, actors, player),
             scheduler,
             player_turns: 0,
@@ -236,12 +251,36 @@ impl Game {
             steady_casts: 0,
             essence_since: 0,
         };
+        game.add_floor_monsters(monsters);
         game.update_field_of_view();
         // The player is first in turn order and every monster starts below
         // the action threshold, so the player is the first actor ready and
         // no event can be produced here.
         game.run_until_player_turn(&mut Vec::new());
         game
+    }
+
+    /// Creates one monster per entry of `monsters`, in that order, with its
+    /// starting energy, and puts each at the end of the turn order.
+    fn add_floor_monsters(&mut self, monsters: &[MonsterSpawn]) {
+        for spawn in monsters {
+            let monster = self.world.actors.insert(Actor::monster(
+                spawn.position(),
+                spawn.definition(),
+                spawn.energy(),
+            ));
+            self.scheduler.enrol(monster);
+        }
+    }
+
+    /// Engraves `glyphs` and lays `items` on the current floor, as a new
+    /// floor's generation placed them.
+    fn lay_out_floor_contents(&mut self, glyphs: Vec<Engraving>, items: Vec<ItemSpawn>) {
+        self.world.engravings = glyphs;
+        for spawn in items {
+            self.world
+                .place_item(Item::on_floor(spawn.definition, spawn.position));
+        }
     }
 
     /// Places a new monster of kind `definition` at `position` and returns
@@ -342,6 +381,13 @@ impl Game {
     /// known yet, it joins the grimoire and [`Event::GlyphLearned`] follows
     /// the [`Event::Moved`]. Reading takes no extra time.
     ///
+    /// Going down ([`Action::Descend`]) costs `schedule::DESCEND_COST` and
+    /// moves the player to the next floor (see the `descent` submodule):
+    /// [`Event::Descended`] comes first, then the events of the monsters of
+    /// the new floor, which can never act before the player's first turn
+    /// there. Anywhere but on the stairs it is refused with no cost and no
+    /// time passing ([`Event::NoStairsHere`]).
+    ///
     /// Items are picked up ([`Action::PickUp`]), used ([`Action::Use`]) and
     /// dropped ([`Action::Drop`]) for their own costs (`schedule::PICK_UP_COST`,
     /// `schedule::USE_COST`, `schedule::DROP_COST`); see the `inventory`
@@ -389,6 +435,12 @@ impl Game {
     /// [`Game::in_fixed_room`].
     pub const fn seed(&self) -> Seed {
         self.seed
+    }
+
+    /// Returns the number of the floor the player is on: [`FIRST_DEPTH`] in
+    /// a new game, one more after each descent ([`Action::Descend`]).
+    pub const fn depth(&self) -> u32 {
+        self.depth
     }
 
     /// Returns the current dungeon floor.
@@ -648,10 +700,11 @@ impl Game {
     /// `events` and returns whether it took time.
     ///
     /// A wait always succeeds. A move is handled by [`Game::step`], a cast
-    /// by `Game::cast` (see the `cast` submodule), and picking up, using and
-    /// dropping an item by the `inventory` submodule, which only the player
-    /// calls on; all of them may be refused, in which case nothing is spent
-    /// and `false` is returned.
+    /// by `Game::cast` (see the `cast` submodule), picking up, using and
+    /// dropping an item by the `inventory` submodule and going down the
+    /// stairs by the `descent` submodule, which only the player calls on;
+    /// all of them may be refused, in which case nothing is spent and
+    /// `false` is returned.
     fn perform(&mut self, id: ActorId, action: Action, events: &mut Vec<Event>) -> bool {
         match action {
             Action::Move(direction) => self.step(id, direction, events),
@@ -664,6 +717,7 @@ impl Game {
             Action::PickUp => self.pick_up(id, events),
             Action::Use(item) => self.use_item(id, item, events),
             Action::Drop(item) => self.drop_item(id, item, events),
+            Action::Descend => self.descend(id, events),
         }
     }
 

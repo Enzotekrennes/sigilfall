@@ -244,7 +244,8 @@ pub enum Event {
     /// steadying item.
     Steadied {
         /// Number of next unstable casts that will be cast pure, this item's
-        /// included.
+        /// included; never more than `sigil::MAX_STEADY_CASTS`, so an item
+        /// used at that cap adds nothing.
         casts: u32,
     },
     /// An unstable cast was cast pure instead, using up one steadied cast:
@@ -255,5 +256,19 @@ pub enum Event {
         sigil: String,
         /// Steadied casts left afterwards.
         casts_left: u32,
+    },
+    /// The player went down the stairs: the floor it left is gone, and it
+    /// stands on the start cell of a new floor with its monsters, glyphs and
+    /// items. Every monster and floor item of the floor left is gone with
+    /// it; the player keeps its hit points, essence, inventory and grimoire.
+    Descended {
+        /// Number of the floor the player arrived on, one more than before.
+        depth: u32,
+    },
+    /// The player tried to go down where there are no stairs. Nothing
+    /// happened: no energy and no time were spent.
+    NoStairsHere {
+        /// The player's cell.
+        position: Position,
     },
 }
