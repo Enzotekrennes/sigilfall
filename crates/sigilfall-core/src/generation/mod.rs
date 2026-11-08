@@ -1,10 +1,11 @@
 //! Dungeon floors built from the run's seed: layout, start, stairs,
-//! monsters and engraved glyphs.
+//! monsters, engraved glyphs and items.
 //!
 //! Exposes [`generate`] (the layout alone), [`generate_with_monsters`]
-//! (with monsters and glyphs), [`Floor`], [`MonsterSpawn`], [`Engraving`],
-//! the size of a floor ([`FLOOR_WIDTH`], [`FLOOR_HEIGHT`]), [`FIRST_DEPTH`],
-//! [`MONSTERS_PER_FLOOR`] and [`GLYPHS_PER_FLOOR`]. A floor is
+//! (with monsters, glyphs and items), [`Floor`], [`MonsterSpawn`],
+//! [`Engraving`], [`ItemSpawn`], the size of a floor ([`FLOOR_WIDTH`],
+//! [`FLOOR_HEIGHT`]), [`FIRST_DEPTH`], [`MONSTERS_PER_FLOOR`],
+//! [`GLYPHS_PER_FLOOR`] and [`ITEMS_PER_FLOOR`]. A floor is
 //! a pure function of the seed, the depth and the content: every random
 //! choice is drawn from the stream `Seed::stream(depth, Purpose::Generation)`
 //! in a fixed order, and nothing reads the clock or iterates over a hash map.
@@ -12,16 +13,17 @@
 //! whatever happened on earlier floors.
 //!
 //! The layout itself comes from the `bsp` submodule (rooms and corridors).
-//! Monsters are drawn after the layout, and engraved glyphs after the
-//! monsters, from the same stream, so placing them never changes the layout
-//! or the monsters of a seed. Items are not placed yet.
+//! Monsters are drawn after the layout, engraved glyphs after the monsters,
+//! and items after the glyphs, all from the same stream, so placing what
+//! comes later never changes the layout, the monsters or the glyphs of a
+//! seed.
 
 mod bsp;
 
 use rand::RngExt as _;
 use rand_chacha::ChaCha8Rng;
 
-use crate::content::{Content, MonsterDef, SigilDef};
+use crate::content::{Content, ItemDef, MonsterDef, SigilDef};
 use crate::fov::{self, SIGHT_RADIUS};
 use crate::geometry::Position;
 use crate::map::{Map, Tile};
@@ -60,8 +62,16 @@ pub const MONSTERS_PER_FLOOR: usize = 6;
 /// Fewer are placed only when fewer sigils are available at that depth.
 pub const GLYPHS_PER_FLOOR: usize = 2;
 
+/// Number of items placed on a floor by [`generate_with_monsters`].
+///
+/// Three: about one room in four holds an item, so exploring pays off on
+/// every floor, while a player who drinks every vial still runs short over
+/// a few floors of fights. Fewer are placed only when the rooms lack free
+/// cells or no item can be found that deep.
+pub const ITEMS_PER_FLOOR: usize = 3;
+
 /// A generated dungeon floor: its tiles, where the player arrives, where the
-/// stairs down are and which monsters wait on it.
+/// stairs down are, which monsters wait on it and what lies on it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Floor {
     /// The tiles, with [`Tile::StairsDown`] at `stairs`.
@@ -76,6 +86,32 @@ pub struct Floor {
     /// Glyphs engraved on the floor, in the order they were drawn; empty for
     /// a floor built by [`generate`].
     pub(crate) glyphs: Vec<Engraving>,
+    /// Items lying on the floor, in the order they were drawn; empty for a
+    /// floor built by [`generate`].
+    pub(crate) items: Vec<ItemSpawn>,
+}
+
+/// An item lying on a new floor: where, and which kind.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemSpawn {
+    /// Floor cell the item lies on.
+    pub(crate) position: Position,
+    /// Definition of the item.
+    pub(crate) definition: ItemDef,
+}
+
+impl ItemSpawn {
+    /// Returns the floor cell the item lies on: a plain floor cell of a room
+    /// that the player can walk to from the start.
+    pub const fn position(&self) -> Position {
+        self.position
+    }
+
+    /// Returns the definition of the item, one of those `Content::items_at`
+    /// allows on the floor's depth.
+    pub const fn definition(&self) -> &ItemDef {
+        &self.definition
+    }
 }
 
 /// A glyph engraved in the floor, which teaches its sigil to the player who
@@ -175,6 +211,13 @@ impl Floor {
     pub fn glyphs(&self) -> &[Engraving] {
         &self.glyphs
     }
+
+    /// Returns the items lying on the floor, in the order they were drawn
+    /// (see [`generate_with_monsters`]); empty for a floor built by
+    /// [`generate`].
+    pub fn items(&self) -> &[ItemSpawn] {
+        &self.items
+    }
 }
 
 /// Builds floor `depth` of the run identified by `seed`.
@@ -193,14 +236,15 @@ impl Floor {
 ///
 /// Calling this twice with the same arguments returns equal floors. `depth`
 /// is the floor number, [`FIRST_DEPTH`] for the first one; any value is
-/// accepted. No monster nor glyph is placed: see [`generate_with_monsters`].
+/// accepted. No monster, glyph nor item is placed: see
+/// [`generate_with_monsters`].
 pub fn generate(seed: Seed, depth: u32) -> Floor {
     lay_out(&mut seed.stream(depth, Purpose::Generation)).floor
 }
 
 /// Builds floor `depth` of the run identified by `seed`, as [`generate`]
-/// does, and places [`MONSTERS_PER_FLOOR`] monsters and [`GLYPHS_PER_FLOOR`]
-/// engraved glyphs on it.
+/// does, and places [`MONSTERS_PER_FLOOR`] monsters, [`GLYPHS_PER_FLOOR`]
+/// engraved glyphs and [`ITEMS_PER_FLOOR`] items on it.
 ///
 /// The map, start and stairs are exactly those of [`generate`] with the same
 /// seed and depth. Then, from the same generation stream, each monster gets
@@ -226,6 +270,16 @@ pub fn generate(seed: Seed, depth: u32) -> Floor {
 /// placed when fewer such sigils or cells exist, none when no sigil is
 /// available that deep.
 ///
+/// Last, still from the same stream, each item gets in turn a cell drawn
+/// uniformly among the plain floor cells of every room (the start room
+/// included) that hold neither the start, the stairs, a monster, a glyph
+/// nor another item, and a definition drawn uniformly among
+/// `content.items_at(depth)`; the same kind may be drawn twice. Every item
+/// thus lies on floor the player can walk to, one per cell; fewer are
+/// placed when fewer cells exist, none when no item is available that
+/// deep. The layout, monsters and glyphs are exactly those of the same
+/// floor with no item to place.
+///
 /// Calling this twice with the same arguments returns equal floors.
 pub fn generate_with_monsters(seed: Seed, depth: u32, content: &Content) -> Floor {
     let mut rng = seed.stream(depth, Purpose::Generation);
@@ -244,6 +298,9 @@ pub fn generate_with_monsters(seed: Seed, depth: u32, content: &Content) -> Floo
         .filter(|sigil| sigil.can_appear_at(depth))
         .collect();
     floor.glyphs = draw_glyphs(cells, sigils, &mut rng);
+    let cells = item_cells(&floor, &rooms);
+    let table: Vec<&ItemDef> = content.items_at(depth).collect();
+    floor.items = draw_items(cells, &table, &mut rng);
     floor
 }
 
@@ -274,6 +331,7 @@ fn lay_out(rng: &mut ChaCha8Rng) -> Layout {
             stairs,
             monsters: Vec::new(),
             glyphs: Vec::new(),
+            items: Vec::new(),
         },
         rooms,
         start_room,
@@ -366,6 +424,37 @@ fn draw_glyphs(
         glyphs.push(Engraving::new(position, sigil.clone()));
     }
     glyphs
+}
+
+/// Returns the cells an item may lie on, room by room in layout order and in
+/// reading order within a room: the cells a glyph may be engraved on (see
+/// [`glyph_cells`]) that hold no glyph of `floor`.
+fn item_cells(floor: &Floor, rooms: &[bsp::Rect]) -> Vec<Position> {
+    glyph_cells(floor, rooms)
+        .into_iter()
+        .filter(|&cell| floor.glyphs.iter().all(|glyph| glyph.position != cell))
+        .collect()
+}
+
+/// Draws up to [`ITEMS_PER_FLOOR`] items from `rng`: for each, a cell taken
+/// out of `cells`, then a definition of `table`, so no cell is used twice.
+/// Draws nothing when `table` is empty, and stops early when the cells run
+/// out.
+fn draw_items(
+    mut cells: Vec<Position>,
+    table: &[&ItemDef],
+    rng: &mut ChaCha8Rng,
+) -> Vec<ItemSpawn> {
+    let mut items = Vec::with_capacity(ITEMS_PER_FLOOR);
+    while items.len() < ITEMS_PER_FLOOR && !cells.is_empty() && !table.is_empty() {
+        let position = cells.swap_remove(rng.random_range(0..cells.len()));
+        let definition = table[rng.random_range(0..table.len())].clone();
+        items.push(ItemSpawn {
+            position,
+            definition,
+        });
+    }
+    items
 }
 
 /// Returns the walkable cell of `map` farthest from `start` in steps.
@@ -655,6 +744,114 @@ mod tests {
                 sigils.push(glyph.sigil().id());
             }
         }
+    }
+
+    /// The shipped content without any item, to compare floors generated
+    /// with and without items to place.
+    fn content_without_items() -> Content {
+        Content::parse_files(
+            include_str!("../../content/monsters.ron"),
+            include_str!("../../content/sigils.ron"),
+        )
+        .expect("the shipped monsters and sigils are valid")
+    }
+
+    #[test]
+    fn items_follow_the_placement_rules_on_200_seeds() {
+        let content = content();
+        let without_items = content_without_items();
+        for value in 0..SPAWN_SEEDS {
+            let seed = Seed::new(value);
+            let depth = FIRST_DEPTH + u32::try_from(value).unwrap() % DEEPEST_CHECKED;
+            let floor = generate_with_monsters(seed, depth, &content);
+            let context = format!("seed {value}, depth {depth}");
+
+            // Deterministic, and drawn last: the layout, the monsters and the
+            // glyphs are those of the same floor with no item to place.
+            let again = generate_with_monsters(seed, depth, &content);
+            assert_eq!(floor.items(), again.items(), "{context}");
+            let bare = generate_with_monsters(seed, depth, &without_items);
+            assert!(bare.items().is_empty(), "{context}");
+            assert_eq!(
+                (&bare.map, bare.start, bare.stairs),
+                (&floor.map, floor.start, floor.stairs),
+                "{context}"
+            );
+            assert_eq!(bare.monsters(), floor.monsters(), "{context}");
+            assert_eq!(bare.glyphs(), floor.glyphs(), "{context}");
+            assert!(generate(seed, depth).items().is_empty(), "{context}");
+
+            let layout = lay_out(&mut seed.stream(depth, Purpose::Generation));
+            let distances = DijkstraMap::new(floor.map(), [floor.start()]);
+            let allowed: Vec<&str> = content.items_at(depth).map(ItemDef::id).collect();
+            assert_eq!(floor.items().len(), ITEMS_PER_FLOOR, "{context}");
+            let mut cells = Vec::new();
+            for spawn in floor.items() {
+                let cell = spawn.position();
+                assert_eq!(floor.map().tile(cell), Some(Tile::Floor), "{context}");
+                assert!(
+                    distances.distance(cell).is_some_and(|steps| steps > 0),
+                    "{context}: {cell:?} not reachable from the start"
+                );
+                assert!(
+                    layout.rooms.iter().any(|&room| inside(room, cell)),
+                    "{context}: {cell:?} outside the rooms"
+                );
+                assert!(
+                    floor.monsters().iter().all(|m| m.position() != cell),
+                    "{context}: {cell:?} under a monster"
+                );
+                assert!(
+                    floor.glyphs().iter().all(|g| g.position() != cell),
+                    "{context}: {cell:?} on a glyph"
+                );
+                assert!(
+                    allowed.contains(&spawn.definition().id()),
+                    "{context}: {} too deep",
+                    spawn.definition().id()
+                );
+                assert!(!cells.contains(&cell), "{context}: {cell:?} twice");
+                cells.push(cell);
+            }
+        }
+    }
+
+    #[test]
+    fn deeper_floors_hold_deeper_items_and_seeds_vary_them() {
+        let content = content();
+        let found = |depth| {
+            let mut ids: Vec<String> = (0..SPAWN_SEEDS)
+                .flat_map(|value| generate_with_monsters(Seed::new(value), depth, &content).items)
+                .map(|spawn| spawn.definition.id().to_owned())
+                .collect();
+            ids.sort_unstable();
+            ids.dedup();
+            ids
+        };
+
+        let mut first: Vec<&str> = content.items_at(FIRST_DEPTH).map(ItemDef::id).collect();
+        first.sort_unstable();
+        assert_eq!(found(FIRST_DEPTH), first);
+        assert_eq!(found(DEEPEST_CHECKED).len(), content.items().len());
+
+        let a = generate_with_monsters(Seed::new(0), FIRST_DEPTH, &content);
+        let b = generate_with_monsters(Seed::new(1), FIRST_DEPTH, &content);
+        assert_ne!(a.items(), b.items());
+    }
+
+    #[test]
+    fn items_stop_when_cells_or_definitions_run_out() {
+        let content = content();
+        let table: Vec<&ItemDef> = content.items().iter().collect();
+        let cells = vec![Position::new(3, 3), Position::new(4, 3)];
+        let mut rng = Seed::new(0).stream(FIRST_DEPTH, Purpose::Generation);
+
+        let two_cells = draw_items(cells.clone(), &table, &mut rng);
+        let mut placed: Vec<Position> = two_cells.iter().map(ItemSpawn::position).collect();
+        placed.sort_unstable_by_key(|p| (p.y, p.x));
+        assert_eq!(placed, cells);
+        assert!(draw_items(cells, &[], &mut rng).is_empty());
+        assert!(draw_items(Vec::new(), &table, &mut rng).is_empty());
     }
 
     #[test]

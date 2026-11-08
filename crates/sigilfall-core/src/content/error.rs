@@ -160,6 +160,17 @@ pub enum FieldProblem {
         /// Smallest distance accepted.
         min: usize,
     },
+    /// The value names an entry of another file that does not exist, such as
+    /// an item teaching a sigil the sigil file does not define.
+    #[error("`{id}` is not the identifier of any {noun} of {file}")]
+    UnknownReference {
+        /// Noun of the kind of entry referred to, such as "sigil".
+        noun: &'static str,
+        /// The identifier found in the file.
+        id: String,
+        /// Path of the file that should define it, relative to the crate.
+        file: &'static str,
+    },
     /// The targeting cannot aim the sigil's effect, such as a blink that is
     /// not aimed in a direction or a heal aimed at an enemy (see
     /// `Effect::targetings`).

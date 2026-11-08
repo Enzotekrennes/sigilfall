@@ -21,10 +21,11 @@ use super::sigil_file::SigilEntry;
 use crate::generation::FIRST_DEPTH;
 use crate::sigil::{MIN_PATTERN_DISTANCE, Trace, edit_distance};
 
-/// Highest accepted power.
+/// Highest accepted power of a sigil, and highest strength of an item's heal
+/// or steadying (`ItemEffect`).
 ///
 /// Like the combat bounds of monsters, it only catches typos such as an extra
-/// digit: two digits are far above what a balanced sigil needs.
+/// digit: two digits are far above what a balanced sigil or item needs.
 pub const MAX_POWER: i32 = 99;
 
 /// What a sigil does when cast. Its strength is the sigil's power, whose

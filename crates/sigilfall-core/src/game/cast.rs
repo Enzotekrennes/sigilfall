@@ -13,8 +13,11 @@
 //!    aimed in a direction and no direction was given, it is refused
 //!    ([`Event::DirectionMissing`]); nothing is spent.
 //! 3. The essence and the energy (`schedule::action_cost`) are spent, and
-//!    [`Event::SigilCast`] reports the sigil and the quality. A fizzled
-//!    cast stops here: the essence is lost.
+//!    [`Event::SigilCast`] reports the sigil and the quality. An unstable
+//!    cast while the player has steadied casts left (`Game::steady_casts`,
+//!    given by items) uses one up and is cast pure instead: the event says
+//!    pure and [`Event::CastSteadied`] follows. A fizzled cast stops here:
+//!    the essence is lost.
 //! 4. The effect applies to its target (see [`Game::apply_effect`]).
 //! 5. An unstable cast then suffers one backlash drawn from the gameplay
 //!    stream (see [`Game::suffer_backlash`]).
@@ -42,7 +45,7 @@ impl Game {
         direction: Option<Direction>,
         events: &mut Vec<Event>,
     ) -> bool {
-        let essence = self.actors[caster].essence();
+        let essence = self.world.actors[caster].essence();
         if essence < ESSENCE_COST {
             events.push(Event::NotEnoughEssence {
                 essence,
@@ -51,7 +54,7 @@ impl Game {
             return false;
         }
         let recognition = recognize(&trace, self.grimoire.sigils());
-        let quality = CastQuality::of(&recognition);
+        let mut quality = CastQuality::of(&recognition);
         let sigil = match recognition {
             Recognition::Success(sigil) | Recognition::Unstable(sigil) => Some(sigil.clone()),
             Recognition::Fizzle => None,
@@ -66,7 +69,12 @@ impl Game {
             return false;
         }
 
-        let actor = &mut self.actors[caster];
+        let steadied = quality == CastQuality::Unstable && self.steady_casts > 0;
+        if steadied {
+            self.steady_casts -= 1;
+            quality = CastQuality::Pure;
+        }
+        let actor = &mut self.world.actors[caster];
         actor.set_essence(essence - ESSENCE_COST);
         spend_energy(actor, action_cost(Action::Cast { trace, direction }));
         events.push(Event::SigilCast {
@@ -76,6 +84,12 @@ impl Game {
         let Some(sigil) = sigil else {
             return true;
         };
+        if steadied {
+            events.push(Event::CastSteadied {
+                sigil: sigil.id().to_owned(),
+                casts_left: self.steady_casts,
+            });
+        }
         self.apply_effect(caster, &sigil, direction, events);
         if quality == CastQuality::Unstable {
             self.suffer_backlash(caster, events);
@@ -118,7 +132,7 @@ impl Game {
         match sigil.effect() {
             Effect::Damage => self.wound(target, power, caster, events),
             Effect::Heal => {
-                let healed = &mut self.actors[target];
+                let healed = &mut self.world.actors[target];
                 let amount = healed.heal(power);
                 events.push(Event::Healed {
                     actor: target,
@@ -155,7 +169,7 @@ impl Game {
             Targeting::Direction => direction.and_then(|direction| {
                 self.line(caster, direction, SPELL_RANGE)
                     .into_iter()
-                    .find_map(|cell| self.actor_at(cell))
+                    .find_map(|cell| self.world.actor_at(cell))
             }),
         }
     }
@@ -163,12 +177,13 @@ impl Game {
     /// Returns the foe of `caster` standing on a visible cell that is the
     /// fewest steps away, ties broken in reading order, if any.
     fn nearest_visible_foe(&self, caster: ActorId) -> Option<ActorId> {
-        let from = self.actors[caster].position;
-        self.actors
+        let from = self.world.actors[caster].position;
+        self.world
+            .actors
             .iter()
             .filter(|&(id, actor)| {
-                actor.is_player() != self.actors[caster].is_player()
-                    && self.map.is_visible(actor.position)
+                actor.is_player() != self.world.actors[caster].is_player()
+                    && self.world.map.is_visible(actor.position)
                     && id != caster
             })
             .min_by_key(|(_, actor)| {
@@ -184,9 +199,9 @@ impl Game {
     /// map). Actors on the way do not stop it.
     fn line(&self, id: ActorId, direction: Direction, range: u32) -> Vec<Position> {
         let mut cells = Vec::new();
-        let mut cell = self.actors[id].position;
+        let mut cell = self.world.actors[id].position;
         for _ in 0..range {
-            if !self.map.can_step(cell, direction) {
+            if !self.world.map.can_step(cell, direction) {
                 break;
             }
             cell = cell.step(direction);
@@ -208,19 +223,19 @@ impl Game {
         power: i32,
         events: &mut Vec<Event>,
     ) {
-        let from = self.actors[caster].position;
+        let from = self.world.actors[caster].position;
         let to = self
             .line(caster, direction, power.unsigned_abs())
             .into_iter()
-            .rfind(|&cell| self.actor_at(cell).is_none())
+            .rfind(|&cell| self.world.actor_at(cell).is_none())
             .unwrap_or(from);
-        self.actors[caster].position = to;
+        self.world.actors[caster].position = to;
         events.push(Event::Blinked {
             actor: caster,
             from,
             to,
         });
-        if caster == self.player {
+        if caster == self.world.player {
             self.read_glyph(events);
         }
     }
@@ -229,7 +244,7 @@ impl Game {
     /// [`Event::Wounded`]; if none are left, `target` dies at the hands of
     /// `source` (see [`Game::kill`]).
     fn wound(&mut self, target: ActorId, damage: i32, source: ActorId, events: &mut Vec<Event>) {
-        let wounded = &mut self.actors[target];
+        let wounded = &mut self.world.actors[target];
         wounded.take_damage(damage);
         let hp_left = wounded.hp();
         events.push(Event::Wounded {
@@ -249,7 +264,7 @@ impl Game {
     /// current hold and the new one, so stacking short holds cannot freeze
     /// a creature for good.
     fn hold(&mut self, target: ActorId, turns: u32, events: &mut Vec<Event>) {
-        let held = &mut self.actors[target];
+        let held = &mut self.world.actors[target];
         held.held_turns = held.held_turns.max(turns);
         events.push(Event::Held {
             actor: target,
@@ -273,11 +288,11 @@ impl Game {
         events.push(Event::Backlash { caster, backlash });
         match backlash {
             Backlash::Scorch => {
-                let spared = (self.actors[caster].hp() - 1).max(0);
+                let spared = (self.world.actors[caster].hp() - 1).max(0);
                 self.wound(caster, SCORCH_DAMAGE.min(spared), caster, events);
             }
             Backlash::Drain => {
-                let drained = &mut self.actors[caster];
+                let drained = &mut self.world.actors[caster];
                 let lost = drained.essence();
                 drained.set_essence(0);
                 events.push(Event::EssenceDrained {
@@ -450,7 +465,7 @@ mod tests {
             game.submit(Action::Wait);
             let mut turns = 0;
             for _ in 0..8 {
-                game.actors[game.player].set_essence(MAX_ESSENCE);
+                game.world.actors[game.world.player].set_essence(MAX_ESSENCE);
                 let events = if digits.is_empty() {
                     game.submit(Action::Wait)
                 } else {
@@ -594,7 +609,7 @@ mod tests {
         }
 
         // Westwards, the wall comes first: nothing is hit.
-        game.actors[game.player].set_essence(MAX_ESSENCE);
+        game.world.actors[game.world.player].set_essence(MAX_ESSENCE);
         let events = cast(&mut game, &[1, 5, 9, 6], Some(Direction::West));
         assert_eq!(
             events[1],
@@ -609,7 +624,7 @@ mod tests {
         let recall = shipped("recall");
         let mut game = game_knowing(&[&recall]);
         let player = game.player();
-        game.actors[player].take_damage(10);
+        game.world.actors[player].take_damage(10);
 
         let events = cast(&mut game, &[8, 5, 2, 1], None);
 
@@ -683,7 +698,7 @@ mod tests {
 
         game.hold(target, 2, &mut events);
         game.hold(target, 1, &mut events);
-        game.apply_effect(game.player, &hold, Some(Direction::East), &mut events);
+        game.apply_effect(game.world.player, &hold, Some(Direction::East), &mut events);
 
         let turns: Vec<u32> = events
             .iter()
@@ -742,7 +757,7 @@ mod tests {
         for (from, direction, blocker, landing) in cases {
             let mut game = game_knowing(&[&passage]);
             let player = game.player();
-            game.actors[player].position = from;
+            game.world.actors[player].position = from;
             if let Some(cell) = blocker {
                 game.spawn_monster(cell, &creature(NORMAL_SPEED, 20));
             }
@@ -896,7 +911,7 @@ mod tests {
         let mut game = Game::in_fixed_room(seed);
         game.grimoire.learn(&recall);
         let player = game.player();
-        game.actors[player].take_damage(PLAYER_MAX_HP - 1);
+        game.world.actors[player].take_damage(PLAYER_MAX_HP - 1);
 
         // 8-5-2 is one edit from Recall's 8-5-2-1: heal, then scorch.
         let events = cast(&mut game, &[8, 5, 2], None);
@@ -912,8 +927,8 @@ mod tests {
         );
 
         // At 1 hit point, a scorch takes nothing.
-        game.actors[player].take_damage(PLAYER_MAX_HP);
-        game.actors[player].heal(1);
+        game.world.actors[player].take_damage(PLAYER_MAX_HP);
+        game.world.actors[player].heal(1);
         let mut events = Vec::new();
         for _ in 0..30 {
             game.suffer_backlash(player, &mut events);
@@ -975,7 +990,7 @@ mod tests {
         let monster = game.spawn_monster(Position::new(27, 8), &creature(2 * NORMAL_SPEED, 20));
         game.submit(Action::Wait);
         let player = game.player();
-        game.actors[player].set_essence(ESSENCE_COST - 1);
+        game.world.actors[player].set_essence(ESSENCE_COST - 1);
         let before = clock(&game);
         let monster_energy = game.actor(monster).map(|a| a.energy());
         let turns = game.player_turns();
@@ -999,7 +1014,7 @@ mod tests {
     fn essence_comes_back_one_point_per_period_up_to_the_maximum() {
         let mut game = game_knowing(&[]);
         let player = game.player();
-        game.actors[player].set_essence(0);
+        game.world.actors[player].set_essence(0);
         let period = usize::try_from(ESSENCE_REGEN_TICKS).unwrap();
 
         for _ in 0..period - 1 {

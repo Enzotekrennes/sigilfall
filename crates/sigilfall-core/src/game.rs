@@ -1,9 +1,12 @@
 //! A game in progress and its single entry point, [`Game::submit`].
 //!
-//! Exposes [`Game`], [`Status`], [`VisibleMonster`] and [`PLAYER_START`].
-//! The game owns the run's seed, the map, the actors, the scheduler and the
+//! Exposes [`Game`], [`Status`], [`VisibleMonster`], [`VisibleItem`] and
+//! [`PLAYER_START`].
+//! The game owns the run's seed, the world (map, actors, items, glyphs and
+//! the player's inventory, in the `world` submodule), the scheduler and the
 //! gameplay random stream. A new game starts on the first generated floor of
-//! its seed, with its monsters (see the `generation` module). The player's
+//! its seed, with its monsters, glyphs and items (see the `generation`
+//! module). The player's
 //! action is applied, then the other actors take their turns until the
 //! player may act again, and everything that happened is returned as
 //! [`Event`]s. The game produces no text and draws nothing.
@@ -30,8 +33,14 @@
 //! Essence comes back slowly with time (see [`Game::submit`]). An actor held
 //! by a sigil or a backlash loses its next turns: when its turn comes, it
 //! spends the energy of a wait and does nothing.
+//!
+//! Items lie on the floor until the player picks them up, then fill its
+//! inventory until it uses or drops them; their rules live in the
+//! `inventory` submodule. Only the player handles items.
 
 mod cast;
+mod inventory;
+mod world;
 
 use rand_chacha::ChaCha8Rng;
 use slotmap::SlotMap;
@@ -40,15 +49,17 @@ use crate::action::{self, Action, ActionOutcome};
 use crate::actor::{Actor, ActorId, ActorKind};
 use crate::ai;
 use crate::combat::{self, Combatant};
-use crate::content::{Content, Family, MonsterDef, SigilDef};
+use crate::content::{Content, Family, ItemDef, ItemFamily, MonsterDef, SigilDef};
 use crate::event::Event;
 use crate::fov::{self, SIGHT_RADIUS};
 use crate::generation::{self, Engraving, FIRST_DEPTH, Floor, MonsterSpawn};
 use crate::geometry::{Direction, Position};
+use crate::item::{Item, ItemId};
 use crate::map::Map;
 use crate::rng::{Purpose, Seed};
 use crate::schedule::{ATTACK_COST, Scheduler, WAIT_COST, action_cost, spend_energy};
 use crate::sigil::{ESSENCE_REGEN_TICKS, Grimoire};
+use world::World;
 
 /// Cell where the player starts in the fixed room of
 /// [`Game::in_fixed_room`].
@@ -58,7 +69,8 @@ use crate::sigil::{ESSENCE_REGEN_TICKS, Grimoire};
 /// at `map::FIXED_ROOM_PILLAR`.
 pub const PLAYER_START: Position = Position::new(5, 5);
 
-/// A game in progress: the map, the actors on it and the flow of time.
+/// A game in progress: the floor with its actors and items, and the flow of
+/// time.
 ///
 /// Between two calls to [`Game::submit`], it is always the player's turn,
 /// unless the game is over.
@@ -66,12 +78,9 @@ pub const PLAYER_START: Position = Position::new(5, 5);
 pub struct Game {
     /// The seed every random choice of this run follows from.
     seed: Seed,
-    /// The current dungeon floor.
-    map: Map,
-    /// Every actor, the player included.
-    actors: SlotMap<ActorId, Actor>,
-    /// Key of the player in `actors`.
-    player: ActorId,
+    /// The current floor: map, actors, items, glyphs, and the player's
+    /// inventory.
+    world: World,
     /// Turn order and elapsed time.
     scheduler: Scheduler,
     /// Number of player actions that took time since the game started.
@@ -84,8 +93,9 @@ pub struct Game {
     status: Status,
     /// The sigils the player has learnt, the only ones it can cast.
     grimoire: Grimoire,
-    /// Glyphs engraved on the current floor, at most one per cell.
-    engravings: Vec<Engraving>,
+    /// Number of the player's next unstable casts that will be cast pure,
+    /// given by steadying items (`ItemEffect::Steady`).
+    steady_casts: u32,
     /// Tick from which the player's essence recovery is counted: the last
     /// time it gained a point, or reached its maximum.
     essence_since: u64,
@@ -102,6 +112,20 @@ pub enum Status {
         /// Who dealt the killing blow, for the end-of-run summary.
         killed_by: Combatant,
     },
+}
+
+/// An item lying on a cell the player sees right now, as the binary needs it
+/// to draw it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VisibleItem<'game> {
+    /// Key of the item.
+    pub id: ItemId,
+    /// Cell the item lies on; always visible to the player.
+    pub position: Position,
+    /// Identifier of the item's definition in the content files.
+    pub definition: &'game str,
+    /// Family of the item, which gives its glyph.
+    pub family: ItemFamily,
 }
 
 /// A monster the player sees right now, as the binary needs it to draw it.
@@ -133,11 +157,12 @@ impl Game {
     /// the monsters in the order they were drawn, each with the starting
     /// energy chosen by the generation (`MonsterSpawn::energy`).
     ///
-    /// The floor's engraved glyphs are those of the generation. The player
-    /// starts with an empty grimoire and a full reserve of essence.
+    /// The floor's engraved glyphs and items are those of the generation.
+    /// The player starts with an empty grimoire, an empty inventory and a
+    /// full reserve of essence.
     ///
-    /// The same seed and content always give the same floor, monsters and
-    /// glyphs. Time is advanced until the player's first turn, so
+    /// The same seed and content always give the same floor, monsters,
+    /// glyphs and items. Time is advanced until the player's first turn, so
     /// [`Game::submit`] can be called right away; no monster has acted yet.
     pub fn new(seed: Seed, content: &Content) -> Self {
         Self::on_floor(
@@ -148,17 +173,22 @@ impl Game {
 
     /// Starts a game of the run identified by `seed` on `floor`, with the
     /// player on its start cell, one monster per entry of `Floor::monsters`,
-    /// created in that order with their starting energy, and the glyphs of
-    /// `Floor::glyphs`.
+    /// created in that order with their starting energy, the glyphs of
+    /// `Floor::glyphs` and the items of `Floor::items`.
     ///
     /// [`Game::new`] is this function on the first floor of the seed with
     /// its monsters. Given a floor from `generation::generate`, which places
-    /// neither monster nor glyph, the player is alone: tests of movement,
-    /// sight or the camera use that to walk a generated floor without a
-    /// monster in the way. Time is advanced until the player's first turn.
+    /// neither monster, glyph nor item, the player is alone: tests of
+    /// movement, sight or the camera use that to walk a generated floor
+    /// without a monster in the way. Time is advanced until the player's
+    /// first turn.
     pub fn on_floor(seed: Seed, floor: Floor) -> Self {
         let mut game = Self::start(seed, floor.map, floor.start, &floor.monsters);
-        game.engravings = floor.glyphs;
+        game.world.engravings = floor.glyphs;
+        for spawn in floor.items {
+            game.world
+                .place_item(Item::on_floor(spawn.definition, spawn.position));
+        }
         game
     }
 
@@ -169,7 +199,8 @@ impl Game {
     /// The room never changes, whatever the seed, which makes it the ground
     /// of tests that need known walls and distances. The seed is only kept
     /// (see [`Game::seed`]). Monsters can be added with
-    /// [`Game::spawn_monster`], glyphs with [`Game::engrave`].
+    /// [`Game::spawn_monster`], glyphs with [`Game::engrave`], items with
+    /// [`Game::place_item`].
     pub fn in_fixed_room(seed: Seed) -> Self {
         Self::start(seed, Map::fixed_room(), PLAYER_START, &[])
     }
@@ -196,15 +227,13 @@ impl Game {
 
         let mut game = Self {
             seed,
-            map,
-            actors,
-            player,
+            world: World::new(map, actors, player),
             scheduler,
             player_turns: 0,
             gameplay_rng: seed.stream(FIRST_DEPTH, Purpose::Gameplay),
             status: Status::Playing,
             grimoire: Grimoire::new(),
-            engravings: Vec::new(),
+            steady_casts: 0,
             essence_since: 0,
         };
         game.update_field_of_view();
@@ -233,12 +262,15 @@ impl Game {
     /// placing a monster there is a bug in the calling code.
     pub fn spawn_monster(&mut self, position: Position, definition: &MonsterDef) -> ActorId {
         assert!(
-            self.map.is_walkable(position) && self.actor_at(position).is_none(),
+            self.world.map.is_walkable(position) && self.world.actor_at(position).is_none(),
             "cannot spawn an actor at ({}, {}): the cell is not free floor",
             position.x,
             position.y
         );
-        let id = self.actors.insert(Actor::monster(position, definition, 0));
+        let id = self
+            .world
+            .actors
+            .insert(Actor::monster(position, definition, 0));
         self.scheduler.enrol(id);
         id
     }
@@ -257,13 +289,31 @@ impl Game {
     /// engraving there is a bug in the calling code.
     pub fn engrave(&mut self, position: Position, sigil: &SigilDef) {
         assert!(
-            self.map.is_walkable(position) && self.engraving_at(position).is_none(),
+            self.world.map.is_walkable(position) && self.world.engraving_at(position).is_none(),
             "cannot engrave a glyph at ({}, {}): the cell is not floor free of glyphs",
             position.x,
             position.y
         );
-        self.engravings
+        self.world
+            .engravings
             .push(Engraving::new(position, sigil.clone()));
+    }
+
+    /// Lays an item of kind `definition` on the floor at `position`, as the
+    /// generation does on a new floor, and returns its key.
+    ///
+    /// The player picks it up with [`Action::PickUp`] while standing on the
+    /// cell. Hand-made rooms and tests use it; nothing else changes and it
+    /// is still the player's turn.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `position` is not walkable or already holds an item: a cell
+    /// holds at most one item, so placing one there is a bug in the calling
+    /// code.
+    pub fn place_item(&mut self, position: Position, definition: &ItemDef) -> ItemId {
+        self.world
+            .place_item(Item::on_floor(definition.clone(), position))
     }
 
     /// Applies the player's `action`, then lets the other actors act until
@@ -292,6 +342,15 @@ impl Game {
     /// known yet, it joins the grimoire and [`Event::GlyphLearned`] follows
     /// the [`Event::Moved`]. Reading takes no extra time.
     ///
+    /// Items are picked up ([`Action::PickUp`]), used ([`Action::Use`]) and
+    /// dropped ([`Action::Drop`]) for their own costs (`schedule::PICK_UP_COST`,
+    /// `schedule::USE_COST`, `schedule::DROP_COST`); see the `inventory`
+    /// submodule for their rules. Picking up from an empty cell or into a
+    /// full inventory, using or dropping an item the player does not carry,
+    /// using a page that teaches nothing new, and dropping onto a cell that
+    /// already holds an item are refused with no cost and no time passing,
+    /// like a move into a wall.
+    ///
     /// After an action that took time, the field of view is computed again
     /// from the player's position (see [`Game::is_visible`]) before the other
     /// actors act. An actor held by a sigil loses its turns
@@ -307,7 +366,7 @@ impl Game {
         if self.is_over() {
             return events;
         }
-        if self.perform(self.player, action, &mut events) {
+        if self.perform(self.world.player, action, &mut events) {
             self.player_turns += 1;
             self.update_field_of_view();
             self.run_until_player_turn(&mut events);
@@ -334,12 +393,12 @@ impl Game {
 
     /// Returns the current dungeon floor.
     pub const fn map(&self) -> &Map {
-        &self.map
+        &self.world.map
     }
 
     /// Returns the key of the player.
     pub const fn player(&self) -> ActorId {
-        self.player
+        self.world.player
     }
 
     /// Returns the player's actor.
@@ -347,13 +406,13 @@ impl Game {
     /// The player is never removed: after its death, it stays on its cell
     /// with 0 hit points, so the final screen can still show it.
     pub fn player_actor(&self) -> &Actor {
-        &self.actors[self.player]
+        &self.world.actors[self.world.player]
     }
 
     /// Returns the actor with key `id`, or `None` if it does not exist, such
     /// as a monster that died.
     pub fn actor(&self, id: ActorId) -> Option<&Actor> {
-        self.actors.get(id)
+        self.world.actors.get(id)
     }
 
     /// Iterates over every actor, the player included, with its key,
@@ -363,7 +422,7 @@ impl Game {
     /// the map, use [`Game::visible_monsters`], which hides what the player
     /// cannot see.
     pub fn actors(&self) -> impl Iterator<Item = (ActorId, &Actor)> {
-        self.actors.iter()
+        self.world.actors.iter()
     }
 
     /// Iterates over the monsters standing on a cell the player sees right
@@ -373,15 +432,18 @@ impl Game {
     /// a remembered cell. The order is stable between calls, like
     /// [`Game::actors`].
     pub fn visible_monsters(&self) -> impl Iterator<Item = VisibleMonster<'_>> {
-        self.actors.iter().filter_map(|(id, actor)| {
+        self.world.actors.iter().filter_map(|(id, actor)| {
             let monster = actor.as_monster()?;
-            self.map.is_visible(actor.position).then(|| VisibleMonster {
-                id,
-                position: actor.position,
-                definition: monster.definition(),
-                family: monster.family(),
-                elite: monster.elite(),
-            })
+            self.world
+                .map
+                .is_visible(actor.position)
+                .then(|| VisibleMonster {
+                    id,
+                    position: actor.position,
+                    definition: monster.definition(),
+                    family: monster.family(),
+                    elite: monster.elite(),
+                })
         })
     }
 
@@ -413,7 +475,7 @@ impl Game {
     /// after every action of the player that took time. The player's own
     /// cell is always visible; cells outside the map never are.
     pub fn is_visible(&self, position: Position) -> bool {
-        self.map.is_visible(position)
+        self.world.map.is_visible(position)
     }
 
     /// Returns whether the player has seen `position` at least once on this
@@ -422,7 +484,7 @@ impl Game {
     /// Every visible cell is remembered, and stays so after the player walks
     /// away. Cells outside the map are never remembered.
     pub fn is_remembered(&self, position: Position) -> bool {
-        self.map.is_remembered(position)
+        self.world.map.is_remembered(position)
     }
 
     /// Returns the sigils the player has learnt, in the order of the sigil
@@ -437,29 +499,60 @@ impl Game {
     /// A glyph whose sigil the grimoire knows has been read (or teaches
     /// nothing new); the others have not.
     pub fn engravings(&self) -> &[Engraving] {
-        &self.engravings
+        &self.world.engravings
     }
 
     /// Returns the glyph engraved at `position`, if any.
     pub fn engraving_at(&self, position: Position) -> Option<&Engraving> {
-        self.engravings
+        self.world.engraving_at(position)
+    }
+
+    /// Returns the item with key `id`, on the floor or carried, or `None` if
+    /// it was used up.
+    pub fn item(&self, id: ItemId) -> Option<&Item> {
+        self.world.item(id)
+    }
+
+    /// Iterates over the items lying on a cell the player sees right now
+    /// (see [`Game::is_visible`]), with what is needed to draw them.
+    ///
+    /// An item out of the player's field of view is never listed, even on a
+    /// remembered cell, and neither is a carried item. The order is stable
+    /// between calls.
+    pub fn visible_items(&self) -> impl Iterator<Item = VisibleItem<'_>> {
+        self.world.items().filter_map(|(id, item)| {
+            let position = item.position()?;
+            self.world.map.is_visible(position).then(|| VisibleItem {
+                id,
+                position,
+                definition: item.definition().id(),
+                family: item.definition().family(),
+            })
+        })
+    }
+
+    /// Iterates over the items the player carries, with their keys, in the
+    /// order they were picked up: at most `item::INVENTORY_CAPACITY` of
+    /// them.
+    pub fn inventory(&self) -> impl Iterator<Item = (ItemId, &Item)> {
+        self.world
+            .inventory()
             .iter()
-            .find(|engraving| engraving.position() == position)
+            .filter_map(|&id| Some((id, self.world.item(id)?)))
+    }
+
+    /// Returns how many of the player's next unstable casts will be cast
+    /// pure, thanks to steadying items; 0 at the start of a run.
+    pub const fn steady_casts(&self) -> u32 {
+        self.steady_casts
     }
 
     /// Computes what the player sees from its current position and records
     /// it on the map, which also remembers those cells.
     fn update_field_of_view(&mut self) {
-        let origin = self.actors[self.player].position;
-        let field = fov::visible_cells(&self.map, origin, SIGHT_RADIUS);
-        self.map.set_visible(field);
-    }
-
-    /// Returns the key of the actor standing at `position`, if any.
-    fn actor_at(&self, position: Position) -> Option<ActorId> {
-        self.actors
-            .iter()
-            .find_map(|(id, actor)| (actor.position == position).then_some(id))
+        let origin = self.world.actors[self.world.player].position;
+        let field = fov::visible_cells(&self.world.map, origin, SIGHT_RADIUS);
+        self.world.map.set_visible(field);
     }
 
     /// Lets non-player actors take their turns, in schedule order, until the
@@ -470,12 +563,12 @@ impl Game {
     /// its essence recovers first (see [`Game::recover_essence`]).
     fn run_until_player_turn(&mut self, events: &mut Vec<Event>) {
         while !self.is_over() {
-            let id = self.scheduler.next_actor(&mut self.actors);
-            if self.actors[id].held_turns > 0 {
+            let id = self.scheduler.next_actor(&mut self.world.actors);
+            if self.world.actors[id].held_turns > 0 {
                 self.lose_turn(id, events);
                 continue;
             }
-            if id == self.player {
+            if id == self.world.player {
                 self.recover_essence();
                 return;
             }
@@ -491,7 +584,7 @@ impl Game {
     /// Makes the held actor `id` lose the turn that just came: one less turn
     /// held, the energy of a wait spent, and [`Event::TurnLost`] appended.
     fn lose_turn(&mut self, id: ActorId, events: &mut Vec<Event>) {
-        let actor = &mut self.actors[id];
+        let actor = &mut self.world.actors[id];
         actor.held_turns -= 1;
         spend_energy(actor, WAIT_COST);
         events.push(Event::TurnLost { actor: id });
@@ -506,7 +599,7 @@ impl Game {
     /// never banked.
     fn recover_essence(&mut self) {
         let now = self.scheduler.ticks();
-        let player = &mut self.actors[self.player];
+        let player = &mut self.world.actors[self.world.player];
         let missing = player.max_essence() - player.essence();
         let periods = (now - self.essence_since) / ESSENCE_REGEN_TICKS;
         let gained = i32::try_from(periods).unwrap_or(i32::MAX).min(missing);
@@ -527,25 +620,25 @@ impl Game {
     /// action, holds the monster's cell. Other actors count as obstacles on
     /// the way.
     fn non_player_action(&mut self, id: ActorId) -> Action {
-        let player = self.actors[self.player].position;
-        let actor = &self.actors[id];
+        let player = self.world.actors[self.world.player].position;
+        let actor = &self.world.actors[id];
         let Some(monster) = actor.as_monster() else {
             return Action::Wait;
         };
         let position = actor.position;
-        let sees_player = self.map.is_visible(position);
+        let sees_player = self.world.map.is_visible(position);
         let mut last_seen = monster.last_seen_player;
 
         let action = ai::choose_action(
-            &self.map,
+            &self.world.map,
             position,
             player,
             sees_player,
             &mut last_seen,
-            |cell| self.actor_at(cell).is_some(),
+            |cell| self.world.actor_at(cell).is_some(),
         );
 
-        if let ActorKind::Monster(monster) = &mut self.actors[id].kind {
+        if let ActorKind::Monster(monster) = &mut self.world.actors[id].kind {
             monster.last_seen_player = last_seen;
         }
         action
@@ -554,18 +647,23 @@ impl Game {
     /// Applies `action` for actor `id`, appends the resulting events to
     /// `events` and returns whether it took time.
     ///
-    /// A wait always succeeds. A move is handled by [`Game::step`] and a cast
-    /// by `Game::cast` (see the `cast` submodule); both may be refused, in
-    /// which case nothing is spent and `false` is returned.
+    /// A wait always succeeds. A move is handled by [`Game::step`], a cast
+    /// by `Game::cast` (see the `cast` submodule), and picking up, using and
+    /// dropping an item by the `inventory` submodule, which only the player
+    /// calls on; all of them may be refused, in which case nothing is spent
+    /// and `false` is returned.
     fn perform(&mut self, id: ActorId, action: Action, events: &mut Vec<Event>) -> bool {
         match action {
             Action::Move(direction) => self.step(id, direction, events),
             Action::Wait => {
-                spend_energy(&mut self.actors[id], action_cost(action));
+                spend_energy(&mut self.world.actors[id], action_cost(action));
                 events.push(Event::Waited { actor: id });
                 true
             }
             Action::Cast { trace, direction } => self.cast(id, trace, direction, events),
+            Action::PickUp => self.pick_up(id, events),
+            Action::Use(item) => self.use_item(id, item, events),
+            Action::Drop(item) => self.drop_item(id, item, events),
         }
     }
 
@@ -582,14 +680,14 @@ impl Game {
     /// returned.
     fn step(&mut self, id: ActorId, direction: Direction, events: &mut Vec<Event>) -> bool {
         let action = Action::Move(direction);
-        let from = self.actors[id].position;
+        let from = self.world.actors[id].position;
         let target = from.step(direction);
         if let Some(foe) = self.foe_at(id, target) {
             self.strike(id, foe, events);
             return true;
         }
-        let occupied = self.actor_at(target).is_some_and(|other| other != id);
-        let outcome = match action::resolve(action, from, &self.map) {
+        let occupied = self.world.actor_at(target).is_some_and(|other| other != id);
+        let outcome = match action::resolve(action, from, &self.world.map) {
             ActionOutcome::Performed { .. } if occupied => ActionOutcome::Blocked,
             outcome => outcome,
         };
@@ -604,7 +702,7 @@ impl Game {
                 false
             }
             ActionOutcome::Performed { position } => {
-                let actor = &mut self.actors[id];
+                let actor = &mut self.world.actors[id];
                 actor.position = position;
                 spend_energy(actor, action_cost(action));
                 events.push(Event::Moved {
@@ -612,7 +710,7 @@ impl Game {
                     from,
                     to: position,
                 });
-                if id == self.player {
+                if id == self.world.player {
                     self.read_glyph(events);
                 }
                 true
@@ -625,12 +723,8 @@ impl Game {
     /// appended to `events`; a known one changes nothing and reports
     /// nothing.
     fn read_glyph(&mut self, events: &mut Vec<Event>) {
-        let position = self.actors[self.player].position;
-        let Some(engraving) = self
-            .engravings
-            .iter()
-            .find(|engraving| engraving.position() == position)
-        else {
+        let position = self.world.player_position();
+        let Some(engraving) = self.world.engraving_at(position) else {
             return;
         };
         if self.grimoire.learn(engraving.sigil()) {
@@ -646,8 +740,8 @@ impl Game {
     /// The player and the monsters are foes; two monsters are not, so they
     /// block each other instead of fighting. An actor is never its own foe.
     fn foe_at(&self, id: ActorId, position: Position) -> Option<ActorId> {
-        let other = self.actor_at(position).filter(|&other| other != id)?;
-        (self.actors[id].is_player() != self.actors[other].is_player()).then_some(other)
+        let other = self.world.actor_at(position).filter(|&other| other != id)?;
+        (self.world.actors[id].is_player() != self.world.actors[other].is_player()).then_some(other)
     }
 
     /// Makes `attacker` strike `target`, charging it [`ATTACK_COST`], and
@@ -658,14 +752,14 @@ impl Game {
     /// with no hit points dies (see [`Game::kill`]).
     fn strike(&mut self, attacker: ActorId, target: ActorId, events: &mut Vec<Event>) {
         let damage = combat::roll_damage(
-            self.actors[attacker].attack(),
-            self.actors[target].defense(),
+            self.world.actors[attacker].attack(),
+            self.world.actors[target].defense(),
             &mut self.gameplay_rng,
         );
-        let struck = &mut self.actors[target];
+        let struck = &mut self.world.actors[target];
         struck.take_damage(damage);
         let hp_left = struck.hp();
-        spend_energy(&mut self.actors[attacker], ATTACK_COST);
+        spend_energy(&mut self.world.actors[attacker], ATTACK_COST);
         events.push(Event::Attacked {
             attacker,
             target,
@@ -685,12 +779,12 @@ impl Game {
     fn kill(&mut self, victim: ActorId, killer: ActorId, events: &mut Vec<Event>) {
         let who = self.combatant(victim);
         let killed_by = self.combatant(killer);
-        if victim == self.player {
+        if victim == self.world.player {
             self.status = Status::GameOver {
                 killed_by: killed_by.clone(),
             };
         } else {
-            self.actors.remove(victim);
+            self.world.actors.remove(victim);
             self.scheduler.remove(victim);
         }
         events.push(Event::Died {
@@ -702,7 +796,7 @@ impl Game {
 
     /// Returns who the actor `id` is, as events record it.
     fn combatant(&self, id: ActorId) -> Combatant {
-        match &self.actors[id].kind {
+        match &self.world.actors[id].kind {
             ActorKind::Player => Combatant::Player,
             ActorKind::Monster(monster) => Combatant::Monster {
                 definition: monster.definition().to_owned(),
@@ -1065,7 +1159,7 @@ mod tests {
         );
         assert!(game.actor(monster).is_none(), "removed from the world");
         assert!(!game.scheduler.is_enrolled(monster), "and from turn order");
-        assert_eq!(game.actor_at(east), None);
+        assert_eq!(game.world.actor_at(east), None);
         assert_eq!(game.visible_monsters().count(), 0);
         assert_eq!(game.status(), &Status::Playing);
 
@@ -1584,7 +1678,7 @@ mod tests {
         // The player vanishes into the other room, out of the monster's
         // sight.
         let hidden = Position::new(15, 2);
-        game.actors[game.player].position = hidden;
+        game.world.actors[game.world.player].position = hidden;
         game.update_field_of_view();
         assert!(
             !fov::visible_cells(game.map(), position_of(&game, monster), SIGHT_RADIUS)

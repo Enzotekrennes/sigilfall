@@ -8,11 +8,13 @@
 //! actor still in the game afterwards, or one that died during that call, in
 //! which case the [`Event::Died`] of that actor follows in the same list and
 //! tells who it was. Keys are generational, so a dead actor's key never names
-//! another actor later.
+//! another actor later. The same holds for an [`ItemId`]: an item used up is
+//! named by the identifier of its definition in its [`Event::Used`].
 
 use crate::actor::ActorId;
 use crate::combat::Combatant;
 use crate::geometry::Position;
+use crate::item::{ItemId, ItemRefusal};
 use crate::sigil::{Backlash, CastQuality};
 
 /// Something that happened in the game, in the order it happened.
@@ -74,7 +76,8 @@ pub enum Event {
     },
     /// The player cast a trace: the strokes, the validation and the essence
     /// are paid. The events of the effect follow, then, for an unstable
-    /// cast, an [`Event::Backlash`].
+    /// cast, an [`Event::Backlash`]. A cast steadied by an item is reported
+    /// pure, and [`Event::CastSteadied`] follows right away.
     SigilCast {
         /// Identifier of the sigil cast (`SigilDef::id`); `None` for a trace
         /// that matched no sigil of the grimoire, which fizzles with no
@@ -113,7 +116,7 @@ pub enum Event {
         /// Hit points left afterwards; at 0, [`Event::Died`] follows.
         hp_left: i32,
     },
-    /// An actor got hit points back from a sigil.
+    /// An actor got hit points back from a sigil or an item.
     Healed {
         /// Actor that was healed.
         actor: ActorId,
@@ -170,5 +173,87 @@ pub enum Event {
         sigil: String,
         /// Cell of the glyph.
         position: Position,
+    },
+    /// The player picked up the item lying on its cell: it is now the last
+    /// item of its inventory.
+    PickedUp {
+        /// Key of the item.
+        item: ItemId,
+        /// Identifier of the item's definition, to name it.
+        definition: String,
+    },
+    /// The player tried to pick up an item with a full inventory
+    /// (`item::INVENTORY_CAPACITY`). The item stays on the floor; no energy
+    /// and no time were spent.
+    InventoryFull {
+        /// Key of the item left on the floor.
+        item: ItemId,
+        /// Identifier of the item's definition, to name it.
+        definition: String,
+    },
+    /// The player tried to pick up an item where none lies. Nothing
+    /// happened: no energy and no time were spent.
+    NothingToPickUp {
+        /// The player's cell.
+        position: Position,
+    },
+    /// The player used a carried item, which is spent: its key no longer
+    /// finds anything. The event of its effect follows: [`Event::Healed`],
+    /// [`Event::EssenceRestored`], [`Event::SigilLearned`] or
+    /// [`Event::Steadied`].
+    Used {
+        /// Key the item had.
+        item: ItemId,
+        /// Identifier of the item's definition, to name it.
+        definition: String,
+    },
+    /// The player laid a carried item on its cell; it left the inventory.
+    Dropped {
+        /// Key of the item.
+        item: ItemId,
+        /// Identifier of the item's definition, to name it.
+        definition: String,
+        /// Cell it now lies on.
+        position: Position,
+    },
+    /// The player tried to use or drop an item and the game refused.
+    /// Nothing happened: no energy and no time were spent.
+    ItemRefused {
+        /// Key given with the action.
+        item: ItemId,
+        /// Why the action was refused.
+        reason: ItemRefusal,
+    },
+    /// An actor got essence back from an item.
+    EssenceRestored {
+        /// Actor whose essence was restored.
+        actor: ActorId,
+        /// Essence actually restored: 0 when it was full, never more than
+        /// what it lacked.
+        amount: i32,
+        /// Essence it has afterwards.
+        essence: i32,
+    },
+    /// The player learnt a sigil from an item, such as a page of a
+    /// grimoire: the sigil is now in its grimoire.
+    SigilLearned {
+        /// Identifier of the sigil learnt.
+        sigil: String,
+    },
+    /// The player's next unstable casts will be cast pure, thanks to a
+    /// steadying item.
+    Steadied {
+        /// Number of next unstable casts that will be cast pure, this item's
+        /// included.
+        casts: u32,
+    },
+    /// An unstable cast was cast pure instead, using up one steadied cast:
+    /// the effect applies and no backlash follows. Comes right after its
+    /// [`Event::SigilCast`].
+    CastSteadied {
+        /// Identifier of the sigil cast.
+        sigil: String,
+        /// Steadied casts left afterwards.
+        casts_left: u32,
     },
 }

@@ -120,7 +120,17 @@ pub fn describe(events: &[Event], game: &Game, content: &Content) -> Vec<Message
             | Event::Blinked { .. }
             | Event::Backlash { .. }
             | Event::EssenceDrained { .. }
-            | Event::GlyphLearned { .. } => None,
+            | Event::GlyphLearned { .. }
+            | Event::PickedUp { .. }
+            | Event::InventoryFull { .. }
+            | Event::NothingToPickUp { .. }
+            | Event::Used { .. }
+            | Event::Dropped { .. }
+            | Event::ItemRefused { .. }
+            | Event::EssenceRestored { .. }
+            | Event::SigilLearned { .. }
+            | Event::Steadied { .. }
+            | Event::CastSteadied { .. } => None,
         };
         messages.extend(message);
     }

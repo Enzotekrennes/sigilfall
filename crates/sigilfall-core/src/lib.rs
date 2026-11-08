@@ -15,6 +15,7 @@ pub mod fov;
 pub mod game;
 pub mod generation;
 pub mod geometry;
+pub mod item;
 pub mod map;
 pub mod path;
 pub mod rng;

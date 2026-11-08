@@ -56,6 +56,24 @@ pub const STROKE_COST: i32 = 25;
 /// blow and a spell is never a free extra attack.
 pub const CAST_COST: i32 = 50;
 
+/// Energy spent by picking up the item on the actor's cell.
+///
+/// The normal cost: stooping for an item takes a turn, so grabbing loot in
+/// the middle of a fight has a price.
+pub const PICK_UP_COST: i32 = 100;
+
+/// Energy spent by using a carried item, such as drinking a vial.
+///
+/// The normal cost: a draught in a fight costs the blow the player could
+/// have struck instead, which keeps healing a decision.
+pub const USE_COST: i32 = 100;
+
+/// Energy spent by dropping a carried item.
+///
+/// Half a normal action: letting go of something is quicker than picking
+/// it up, but never free, so the floor is not a free extra bag.
+pub const DROP_COST: i32 = 50;
+
 /// Returns the energy `action` costs when it is performed as such.
 ///
 /// A cast costs [`STROKE_COST`] per node of its trace plus [`CAST_COST`]
@@ -69,6 +87,9 @@ pub const fn action_cost(action: Action) -> i32 {
         Action::Move(_) => MOVE_COST,
         Action::Wait => WAIT_COST,
         Action::Cast { trace, .. } => cast_cost(trace.len()),
+        Action::PickUp => PICK_UP_COST,
+        Action::Use(_) => USE_COST,
+        Action::Drop(_) => DROP_COST,
     }
 }
 

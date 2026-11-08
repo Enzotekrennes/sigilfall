@@ -1,31 +1,37 @@
-//! The game's data: creature and sigil definitions read from RON files and
-//! validated.
+//! The game's data: creature, sigil and item definitions read from RON files
+//! and validated.
 //!
 //! Exposes [`Content`], with [`Content::load`] for the files built into the
-//! game, [`Content::parse`] and [`Content::parse_files`] for any text,
-//! [`MonsterDef`] and [`Family`], [`SigilDef`], [`Effect`] and
-//! [`Targeting`], the bounds of a definition, and the errors
+//! game, [`Content::parse`], [`Content::parse_files`] and
+//! [`Content::parse_all`] for any text, [`MonsterDef`] and [`Family`],
+//! [`SigilDef`], [`Effect`] and [`Targeting`], [`ItemDef`], [`ItemEffect`]
+//! and [`ItemFamily`], the bounds of a definition, and the errors
 //! [`ContentError`] and [`FieldProblem`]. The files are embedded in the
 //! binary at compile time (`include_str!`), so an installed game needs no
 //! asset folder.
 //!
-//! This module only reads and checks data. Spawning monsters on a floor,
-//! recognising a trace (`sigil` module of the crate) and casting a sigil are
-//! not done here.
+//! This module only reads and checks data, references between files
+//! included: an item teaching a sigil must name a sigil of the sigil file.
+//! Spawning monsters or placing items on a floor, recognising a trace
+//! (`sigil` module of the crate), casting a sigil and using an item are not
+//! done here.
 
 mod check;
 mod entry_file;
 mod error;
+mod item;
+mod item_file;
 mod monster;
 mod monster_file;
 mod sigil;
 mod sigil_file;
 
 pub use error::{ContentError, FieldProblem};
+pub use item::{ItemDef, ItemEffect, ItemFamily};
 pub use monster::{Family, MAX_ATTACK, MAX_DEFENSE, MAX_HP, MAX_SPEED, MonsterDef};
 pub use sigil::{Effect, MAX_POWER, SigilDef, Targeting};
 
-/// Most characters in the name of a monster or a sigil.
+/// Most characters in the name of a monster, a sigil or an item.
 ///
 /// Names are written whole in sentences: a log line is 76 columns wide and
 /// "The NAME kills you (99)." with a name of 24 characters takes 44, so even
@@ -43,11 +49,21 @@ pub const MONSTERS_FILE: &str = "content/monsters.ron";
 /// error messages.
 pub const SIGILS_FILE: &str = "content/sigils.ron";
 
+/// Path of the item file relative to the `sigilfall-core` crate, as named in
+/// error messages.
+pub const ITEMS_FILE: &str = "content/items.ron";
+
 /// The monster file shipped with the game.
 const MONSTERS_RON: &str = include_str!("../../content/monsters.ron");
 
 /// The sigil file shipped with the game.
 const SIGILS_RON: &str = include_str!("../../content/sigils.ron");
+
+/// The item file shipped with the game.
+const ITEMS_RON: &str = include_str!("../../content/items.ron");
+
+/// An item file that defines no item, for [`Content::parse_files`].
+const NO_ITEMS_RON: &str = "[]";
 
 /// Every piece of validated game data.
 ///
@@ -57,13 +73,16 @@ const SIGILS_RON: &str = include_str!("../../content/sigils.ron");
 /// sigil, one of them found on the first floor, each with a pattern the
 /// player can draw
 /// and far enough from the others (`sigil::MIN_PATTERN_DISTANCE`), and a
-/// targeting suited to its effect (`Effect::targetings`).
+/// targeting suited to its effect (`Effect::targetings`). Items may be
+/// absent; every sigil an item teaches is one of the sigils.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Content {
     /// Monster definitions, in file order.
     monsters: Vec<MonsterDef>,
     /// Sigil definitions, in file order.
     sigils: Vec<SigilDef>,
+    /// Item definitions, in file order.
+    items: Vec<ItemDef>,
 }
 
 impl Content {
@@ -75,13 +94,13 @@ impl Content {
     ///
     /// # Errors
     ///
-    /// Same as [`Content::parse_files`].
+    /// Same as [`Content::parse_all`].
     pub fn load() -> Result<Self, ContentError> {
-        Self::parse_files(MONSTERS_RON, SIGILS_RON)
+        Self::parse_all(MONSTERS_RON, SIGILS_RON, ITEMS_RON)
     }
 
     /// Parses and validates `monsters`, the text of a monster file, with the
-    /// sigil file shipped with the game.
+    /// sigil and item files shipped with the game.
     ///
     /// The text is a RON list of `Monster(...)` entries; see
     /// `content/monsters.ron` for the fields and their meaning. Tests that
@@ -89,18 +108,34 @@ impl Content {
     ///
     /// # Errors
     ///
-    /// Same as [`Content::parse_files`]; the shipped sigils are valid (a test
-    /// checks it), so the errors concern `monsters`.
+    /// Same as [`Content::parse_all`]; the shipped sigils and items are
+    /// valid (a test checks it), so the errors concern `monsters`.
     pub fn parse(monsters: &str) -> Result<Self, ContentError> {
-        Self::parse_files(monsters, SIGILS_RON)
+        Self::parse_all(monsters, SIGILS_RON, ITEMS_RON)
     }
 
     /// Parses and validates `monsters` and `sigils`, the texts of a monster
-    /// file and of a sigil file, in that order.
+    /// file and of a sigil file, in that order, with no item at all.
     ///
-    /// Each text is a RON list of entries, `Monster(...)` or `Sigil(...)`;
-    /// see `content/monsters.ron` and `content/sigils.ron` for the fields and
-    /// their meaning.
+    /// The shipped items teach shipped sigils, which a test sigil file may
+    /// not define, so they are left out: floors built from this content hold
+    /// no item. Tests that need their own sigils use it; to give them items
+    /// too, use [`Content::parse_all`].
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Content::parse_all`] with an empty item file.
+    pub fn parse_files(monsters: &str, sigils: &str) -> Result<Self, ContentError> {
+        Self::parse_all(monsters, sigils, NO_ITEMS_RON)
+    }
+
+    /// Parses and validates `monsters`, `sigils` and `items`, the texts of a
+    /// monster file, a sigil file and an item file, in that order.
+    ///
+    /// Each text is a RON list of entries, `Monster(...)`, `Sigil(...)` or
+    /// `Item(...)`; see `content/monsters.ron`, `content/sigils.ron` and
+    /// `content/items.ron` for the fields and their meaning. The item file
+    /// may be an empty list.
     ///
     /// # Errors
     ///
@@ -111,17 +146,23 @@ impl Content {
     /// - [`ContentError::InvalidField`] naming the entry and the field when a
     ///   field is missing, out of bounds, an identifier is malformed or
     ///   repeated, a pattern cannot be drawn as written or is too close to
-    ///   the pattern of an earlier sigil, or a targeting cannot aim the
-    ///   sigil's effect;
+    ///   the pattern of an earlier sigil, a targeting cannot aim the
+    ///   sigil's effect, or an item teaches a sigil that `sigils` does not
+    ///   define ([`FieldProblem::UnknownReference`]);
     /// - [`ContentError::NoMonster`] or [`ContentError::NoMonsterAtFirstDepth`]
     ///   when the first floor would have no creature;
     /// - [`ContentError::NoSigil`] when the sigil file defines none, or
     ///   [`ContentError::NoSigilAtFirstDepth`] when none can be found on the
     ///   first floor.
-    pub fn parse_files(monsters: &str, sigils: &str) -> Result<Self, ContentError> {
+    pub fn parse_all(monsters: &str, sigils: &str, items: &str) -> Result<Self, ContentError> {
         let monsters = monster::validate(entry_file::read(monsters)?)?;
         let sigils = sigil::validate(entry_file::read(sigils)?)?;
-        Ok(Self { monsters, sigils })
+        let items = item::validate(entry_file::read(items)?, &sigils)?;
+        Ok(Self {
+            monsters,
+            sigils,
+            items,
+        })
     }
 
     /// Returns every monster definition, in file order.
@@ -153,6 +194,25 @@ impl Content {
     /// Returns the sigil definition identified by `id`, if any.
     pub fn sigil(&self, id: &str) -> Option<&SigilDef> {
         self.sigils.iter().find(|sigil| sigil.id() == id)
+    }
+
+    /// Returns every item definition, in file order; empty for content
+    /// parsed without items ([`Content::parse_files`]).
+    pub fn items(&self) -> &[ItemDef] {
+        &self.items
+    }
+
+    /// Returns the item definition identified by `id`, if any.
+    pub fn item(&self, id: &str) -> Option<&ItemDef> {
+        self.items.iter().find(|item| item.id() == id)
+    }
+
+    /// Returns the items that may be placed on floor `depth`, in file order;
+    /// possibly none.
+    pub fn items_at(&self, depth: u32) -> impl Iterator<Item = &ItemDef> {
+        self.items
+            .iter()
+            .filter(move |item| item.can_appear_at(depth))
     }
 }
 

@@ -5,6 +5,7 @@
 //! time or energy, or produce game events: the caller applies the outcome.
 
 use crate::geometry::{Direction, Position};
+use crate::item::ItemId;
 use crate::map::Map;
 use crate::sigil::Trace;
 
@@ -26,6 +27,14 @@ pub enum Action {
         /// (`content::Targeting::Direction`); ignored by the others.
         direction: Option<Direction>,
     },
+    /// Pick up the item lying on the actor's cell. Only the player handles
+    /// items.
+    PickUp,
+    /// Use the carried item, which is spent. Only the player handles items.
+    Use(ItemId),
+    /// Lay the carried item on the actor's cell. Only the player handles
+    /// items.
+    Drop(ItemId),
 }
 
 /// The result of resolving an [`Action`] against the map.
@@ -46,13 +55,15 @@ pub enum ActionOutcome {
 ///
 /// A move succeeds when [`Map::can_step`] allows it: the destination cell is
 /// walkable, diagonals included even between two walls touching by a corner.
-/// Walls and cells outside the map block it. Waiting and casting always
-/// succeed here and keep the actor in place; what a cast does, and whether
-/// the caster can afford it, is decided by the game. The function is pure:
-/// neither `map` nor any actor is modified.
+/// Walls and cells outside the map block it. Waiting, casting and handling
+/// items always succeed here and keep the actor in place; what a cast or an
+/// item does, and whether it is allowed, is decided by the game. The
+/// function is pure: neither `map` nor any actor is modified.
 pub fn resolve(action: Action, from: Position, map: &Map) -> ActionOutcome {
     match action {
-        Action::Wait | Action::Cast { .. } => ActionOutcome::Performed { position: from },
+        Action::Wait | Action::Cast { .. } | Action::PickUp | Action::Use(_) | Action::Drop(_) => {
+            ActionOutcome::Performed { position: from }
+        }
         Action::Move(direction) => {
             if map.can_step(from, direction) {
                 ActionOutcome::Performed {
@@ -178,14 +189,21 @@ mod tests {
     }
 
     #[test]
-    fn waiting_and_casting_keep_the_actor_in_place() {
+    fn waiting_casting_and_handling_items_keep_the_actor_in_place() {
         let map = Map::fixed_room();
         let cast = Action::Cast {
             trace: Trace::from_pattern(&[7, 5, 3]).expect("a drawable pattern"),
             direction: Some(Direction::East),
         };
+        let item = ItemId::default();
 
-        for action in [Action::Wait, cast] {
+        for action in [
+            Action::Wait,
+            cast,
+            Action::PickUp,
+            Action::Use(item),
+            Action::Drop(item),
+        ] {
             assert_eq!(
                 resolve(action, ROOM_CENTRE, &map),
                 ActionOutcome::Performed {

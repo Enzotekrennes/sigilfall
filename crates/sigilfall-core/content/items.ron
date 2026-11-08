@@ -1,0 +1,46 @@
+// Items lying on the floors, which the player picks up, carries and uses
+// once. Loaded by `Content::load` and checked before a game starts. Every
+// field is required:
+//
+// - id:        stable key used by saves; lower-case letters, digits and
+//              underscores, starting with a letter. Never rename.
+// - name:      name shown to the player, at most 24 characters.
+// - effect:    what using the item does, which also gives its glyph:
+//              Heal(n)            vial: restores n hit points (1 to 99),
+//                                 never above the maximum;
+//              RestoreEssence(n)  vial: restores n essence (1 to 6), never
+//                                 above the maximum;
+//              Teach("sigil_id")  page: teaches the sigil of content/sigils.ron
+//                                 with that id, as reading its glyph would;
+//              Steady(n)          catalyst: the next n unstable casts are
+//                                 cast pure, without backlash (1 to 99).
+// - min_depth: shallowest floor the item can be found on; 1 is the first
+//              floor.
+//
+// Strengths are provisional until items are balanced.
+[
+    Item(
+        id: "healing_draught",
+        name: "Healing Draught",
+        effect: Heal(10),
+        min_depth: 1,
+    ),
+    Item(
+        id: "essence_phial",
+        name: "Essence Phial",
+        effect: RestoreEssence(4),
+        min_depth: 1,
+    ),
+    Item(
+        id: "steadying_ink",
+        name: "Steadying Ink",
+        effect: Steady(2),
+        min_depth: 1,
+    ),
+    Item(
+        id: "veil_page",
+        name: "Page of the Veil",
+        effect: Teach("veil"),
+        min_depth: 2,
+    ),
+]
