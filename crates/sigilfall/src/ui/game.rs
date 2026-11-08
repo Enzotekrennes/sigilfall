@@ -200,7 +200,8 @@ fn run_label(game: &Game, theme: &Theme) -> Line<'static> {
 ///
 /// The keys are those of the screen in front of the player: the game's
 /// (move, wait, trace, take, pack, descend, save & quit), which fit the
-/// 80 columns with one to spare; under the sigil overlay,
+/// 80 columns with one to spare, so the explore key (`input::EXPLORE_KEY`)
+/// is left to the README; under the sigil overlay,
 /// the overlay's (link a node, undo, cast, cancel), the direction prompt's
 /// (aim, back) or the verdict's (continue); in the inventory, its own
 /// (choose, use, drop, close), or only close while the player carries

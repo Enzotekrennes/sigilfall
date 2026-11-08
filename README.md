@@ -76,11 +76,19 @@ On the map:
 | `g`, `,` | Pick up the item underfoot |
 | `i` | Open the inventory |
 | `>`, `D` | Go down the stairs, when standing on them |
+| `x` | Explore: walk towards the nearest unexplored place, step by step (see below) |
 | `q` | Save and quit |
 | Ctrl+C | Quit from any screen, saving the game in progress |
 
 Escape never quits: it closes the grid, the inventory and the sub-screens of
 the title, and does nothing on the map.
+
+Exploring with `x` takes one step at a time, each one a normal move, and
+stops as soon as a monster comes into view, an item or an unread glyph
+appears, you are hurt, nothing is left to explore, any key is pressed, or
+after 200 steps; the log says why. It does not start with a monster in view.
+The key help at the bottom of the screen has no room for `x`, so it is
+listed here only.
 
 While tracing a sigil, the grid is numbered like the keypad (7 8 9 on top,
 1 2 3 at the bottom):

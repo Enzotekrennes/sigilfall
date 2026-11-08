@@ -38,6 +38,11 @@ pub enum Action {
     /// Go down the stairs the actor stands on, to the next floor. Only the
     /// player descends; the game refuses it anywhere but on the stairs.
     Descend,
+    /// Take one step towards the nearest cell the player has never seen,
+    /// for the cost of a move; the way is chosen by the game with
+    /// `explore::explore_step`. Only the player explores; the game refuses
+    /// it when nothing is left to explore within reach.
+    Explore,
 }
 
 /// The result of resolving an [`Action`] against the map.
@@ -59,9 +64,10 @@ pub enum ActionOutcome {
 /// A move succeeds when [`Map::can_step`] allows it: the destination cell is
 /// walkable, diagonals included even between two walls touching by a corner.
 /// Walls and cells outside the map block it. Waiting, casting, handling
-/// items and descending always succeed here and keep the actor in place;
-/// what a cast, an item or a descent does, and whether it is allowed, is
-/// decided by the game. The
+/// items, descending and exploring always succeed here and keep the actor
+/// in place; what a cast, an item, a descent or a step of exploration does,
+/// and whether it is allowed, is decided by the game (a step of exploration
+/// becomes a move in the direction the game chooses). The
 /// function is pure: neither `map` nor any actor is modified.
 pub fn resolve(action: Action, from: Position, map: &Map) -> ActionOutcome {
     match action {
@@ -70,7 +76,8 @@ pub fn resolve(action: Action, from: Position, map: &Map) -> ActionOutcome {
         | Action::PickUp
         | Action::Use(_)
         | Action::Drop(_)
-        | Action::Descend => ActionOutcome::Performed { position: from },
+        | Action::Descend
+        | Action::Explore => ActionOutcome::Performed { position: from },
         Action::Move(direction) => {
             if map.can_step(from, direction) {
                 ActionOutcome::Performed {
@@ -196,7 +203,7 @@ mod tests {
     }
 
     #[test]
-    fn waiting_casting_and_handling_items_keep_the_actor_in_place() {
+    fn waiting_casting_handling_items_and_exploring_keep_the_actor_in_place() {
         let map = Map::fixed_room();
         let cast = Action::Cast {
             trace: Trace::from_pattern(&[7, 5, 3]).expect("a drawable pattern"),
@@ -210,6 +217,7 @@ mod tests {
             Action::PickUp,
             Action::Use(item),
             Action::Drop(item),
+            Action::Explore,
         ] {
             assert_eq!(
                 resolve(action, ROOM_CENTRE, &map),

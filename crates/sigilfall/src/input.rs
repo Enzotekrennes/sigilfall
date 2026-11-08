@@ -5,7 +5,9 @@
 //! ([`TraceCommand`]), [`aim_command_for`] while its direction is asked
 //! ([`AimCommand`]), [`verdict_command_for`] while the verdict of a cast
 //! is shown ([`VerdictCommand`]), [`inventory_command_for`] while the
-//! inventory is open ([`InventoryCommand`]), [`end_command_for`] on the end
+//! inventory is open ([`InventoryCommand`]), [`exploring_command_for`]
+//! while the floor is explored automatically ([`ExploringCommand`]),
+//! [`end_command_for`] on the end
 //! screen ([`EndCommand`]), and for the screens before a game:
 //! [`title_command_for`] on the title menu and [`confirm_command_for`] on
 //! the confirmation before a saved game is abandoned ([`MenuCommand`]),
@@ -37,6 +39,16 @@ use sigilfall_core::sigil::Node;
 /// mistake.
 pub const DESCEND_ALTERNATIVE_KEY: char = 'D';
 
+/// Key that explores the floor automatically, step by step: `x`.
+///
+/// `x` reads as "explore" and is the key Brogue gives the same command. It
+/// is neither a vi movement key nor bound anywhere else on the game screen,
+/// and it sits at the same place on QWERTY, AZERTY and QWERTZ keyboards.
+/// `o`, the key of Dungeon Crawl, was the other candidate, but several
+/// roguelikes (NetHack, Angband) open doors with it, which this game may
+/// want one day.
+pub const EXPLORE_KEY: char = 'x';
+
 /// What the player asked for with one key press.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
@@ -46,6 +58,19 @@ pub enum Command {
     Trace,
     /// Open the inventory.
     Inventory,
+    /// Explore the floor automatically, one `Action::Explore` after the
+    /// other, until something worth a look happens.
+    Explore,
+    /// Leave the game.
+    Quit,
+}
+
+/// What the player asked for with one key press while the floor is being
+/// explored automatically.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExploringCommand {
+    /// Stop exploring; the key does nothing else.
+    Stop,
     /// Leave the game.
     Quit,
 }
@@ -196,6 +221,7 @@ pub enum OptionsCommand {
 /// - go down the stairs: `>`, the key of the genre, or
 ///   [`DESCEND_ALTERNATIVE_KEY`]; the game refuses it off the stairs, at no
 ///   cost;
+/// - explore automatically: [`EXPLORE_KEY`];
 /// - quit: `q` or Ctrl+C (raw mode turns Ctrl+C into a plain key).
 ///
 /// Escape is bound to nothing here: it closes the overlays, and a player
@@ -212,10 +238,27 @@ pub fn command_for(key: KeyEvent) -> Option<Command> {
         KeyCode::Char('q') => Some(Command::Quit),
         KeyCode::Char('t') => Some(Command::Trace),
         KeyCode::Char('i') => Some(Command::Inventory),
+        KeyCode::Char(EXPLORE_KEY) => Some(Command::Explore),
         KeyCode::Char('>' | DESCEND_ALTERNATIVE_KEY) => Some(Command::Act(Action::Descend)),
         KeyCode::Char('g' | ',') => Some(Command::Act(Action::PickUp)),
         KeyCode::Char('.' | '5') | KeyCode::KeypadBegin => Some(Command::Act(Action::Wait)),
         code => direction_for(code).map(|direction| Command::Act(Action::Move(direction))),
+    }
+}
+
+/// Returns the command bound to `key` while the floor is explored
+/// automatically, or `None` when the key does not count.
+///
+/// Any key pressed alone or with Shift stops the walk and does nothing
+/// else, so a key meant to stop it never moves the player or quits by
+/// mistake (`q` included); Ctrl+C quits. Releases and repeats are ignored,
+/// so the release of the explore key itself, which Windows reports just
+/// after the walk starts, never stops it; keys with Alt or Ctrl, Ctrl+C
+/// aside, are ignored like everywhere else.
+pub fn exploring_command_for(key: KeyEvent) -> Option<ExploringCommand> {
+    match plain_press(key)? {
+        Press::Quit => Some(ExploringCommand::Quit),
+        Press::Code(_) => Some(ExploringCommand::Stop),
     }
 }
 
@@ -783,6 +826,57 @@ mod tests {
         let release =
             KeyEvent::new_with_kind(KeyCode::Enter, KeyModifiers::NONE, KeyEventKind::Release);
         assert_eq!(verdict_command_for(release), None);
+    }
+
+    #[test]
+    fn x_explores_and_capital_x_does_nothing() {
+        assert_eq!(
+            command_for(press(KeyCode::Char(EXPLORE_KEY))),
+            Some(Command::Explore)
+        );
+        assert_eq!(command_for(press(KeyCode::Char('X'))), None);
+        let release = KeyEvent::new_with_kind(
+            KeyCode::Char(EXPLORE_KEY),
+            KeyModifiers::NONE,
+            KeyEventKind::Release,
+        );
+        assert_eq!(command_for(release), None);
+    }
+
+    #[test]
+    fn while_exploring_any_press_stops_and_only_ctrl_c_quits() {
+        for code in [
+            KeyCode::Char('q'),
+            KeyCode::Char(EXPLORE_KEY),
+            KeyCode::Right,
+            KeyCode::Char('.'),
+            KeyCode::Esc,
+            KeyCode::Enter,
+        ] {
+            assert_eq!(
+                exploring_command_for(press(code)),
+                Some(ExploringCommand::Stop),
+                "{code:?}"
+            );
+        }
+        assert_eq!(
+            exploring_command_for(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT)),
+            Some(ExploringCommand::Stop)
+        );
+        assert_eq!(
+            exploring_command_for(ctrl_c()),
+            Some(ExploringCommand::Quit)
+        );
+    }
+
+    #[test]
+    fn while_exploring_releases_repeats_and_alt_keys_do_not_stop() {
+        for kind in [KeyEventKind::Release, KeyEventKind::Repeat] {
+            let key = KeyEvent::new_with_kind(KeyCode::Char(EXPLORE_KEY), KeyModifiers::NONE, kind);
+            assert_eq!(exploring_command_for(key), None, "{kind:?}");
+        }
+        let alt = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT);
+        assert_eq!(exploring_command_for(alt), None);
     }
 
     #[test]

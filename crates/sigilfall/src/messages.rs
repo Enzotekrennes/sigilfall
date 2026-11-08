@@ -6,7 +6,8 @@
 //!
 //! Exposes [`describe`], which turns the events of one `Game::submit` into
 //! [`Message`]s, the opening messages ([`welcome`], [`welcome_back`],
-//! [`save_set_aside`]), the save notice [`save_not_deleted`], the words of
+//! [`save_set_aside`]), the save notice [`save_not_deleted`], why automatic
+//! exploration stopped ([`exploration_halted`]), the words of
 //! the death summary (its [`epitaph`], [`cause_of_death`], the labels of its
 //! counts, [`cast_breakdown`] and the [`share_line`]), monster, sigil and item names
 //! ([`monster_name`], [`sigil_name`], [`item_name`]), what a sigil or an
@@ -41,6 +42,7 @@ use sigilfall_core::schedule::{MOVE_COST, STROKE_COST, cast_cost};
 use sigilfall_core::sigil::{CastQuality, Node};
 use sigilfall_core::stats::{CastCounts, Stats};
 
+use crate::app::exploring::{Halt, MAX_EXPLORE_STEPS};
 use crate::message_log::{Message, Tone};
 use crate::theme::ColorSupport;
 use crate::ui::log::TEXT_WIDTH;
@@ -628,6 +630,65 @@ pub fn save_not_deleted() -> Message {
     )
 }
 
+/// The message logged when automatic exploration stops, or does not start,
+/// for `halt`, naming monsters and items from `content`; `None` when the
+/// log already says why ([`Halt::Explored`]: the line of
+/// [`Event::NothingToExplore`] from [`describe`]).
+///
+/// - a monster in view when the key is pressed: "You cannot explore with
+///   the ossuary rat in view." ([`Tone::Info`]: nothing happened);
+/// - a monster coming into view: "An ossuary rat comes into view."
+///   ([`Tone::Danger`]);
+/// - an item coming into view: "You spot an Essence Phial." ([`Tone::Info`]);
+/// - an unread glyph coming into view: "You spot a carved glyph you have
+///   not read." ([`Tone::Sigil`]);
+/// - hit points lost: "You are hurt and stop exploring." ([`Tone::Danger`]);
+/// - the way held: "Something stands in your way; you stop exploring.";
+/// - the step limit: "You stop exploring after 200 steps."
+///   ([`MAX_EXPLORE_STEPS`]);
+/// - a key pressed: "You stop exploring." (all three [`Tone::Info`]).
+pub fn exploration_halted(halt: &Halt, content: &Content) -> Option<Message> {
+    let (tone, text) = match halt {
+        Halt::Explored => return None,
+        Halt::FoeInView(definition) => (
+            Tone::Info,
+            format!(
+                "You cannot explore with the {} in view.",
+                monster_name(content, definition)
+            ),
+        ),
+        Halt::FoeAppeared(definition) => {
+            let name = monster_name(content, definition);
+            let article = if indefinite_article(name) == "an" {
+                "An"
+            } else {
+                "A"
+            };
+            (Tone::Danger, format!("{article} {name} comes into view."))
+        }
+        Halt::ItemAppeared(definition) => {
+            let name = item_name(content, definition);
+            let article = indefinite_article(name);
+            (Tone::Info, format!("You spot {article} {name}."))
+        }
+        Halt::GlyphAppeared => (
+            Tone::Sigil,
+            "You spot a carved glyph you have not read.".to_owned(),
+        ),
+        Halt::Hurt => (Tone::Danger, "You are hurt and stop exploring.".to_owned()),
+        Halt::Blocked => (
+            Tone::Info,
+            "Something stands in your way; you stop exploring.".to_owned(),
+        ),
+        Halt::StepLimit => (
+            Tone::Info,
+            format!("You stop exploring after {MAX_EXPLORE_STEPS} steps."),
+        ),
+        Halt::Interrupted => (Tone::Info, "You stop exploring.".to_owned()),
+    };
+    Some(Message::new(tone, text))
+}
+
 /// `reason` as a message about a file shows it: whole when it has at most
 /// [`MAX_REASON_CHARS`] characters, otherwise its first characters, without
 /// the spaces they end with, followed by [`ELLIPSIS`], [`MAX_REASON_CHARS`]
@@ -708,6 +769,9 @@ fn bounded_path(path: &str) -> String {
 ///   and the new floor already show the change, and the line marks in the
 ///   history where the floor above ends); a descent off the stairs, which
 ///   took no time: "There are no stairs here." ([`Tone::Info`]);
+/// - a step of automatic exploration refused because nothing is left to
+///   explore, which took no time: "There is nothing left to explore within
+///   reach." ([`Tone::Info`]); a step taken is a move, and says nothing;
 /// - nothing for moves and waits, which the map already shows, nor for a
 ///   move refused by a wall: no time passes and the player sees they did not
 ///   move, while a line per bump would push the blows out of the five
@@ -935,6 +999,10 @@ pub fn describe(events: &[Event], game: &Game, content: &Content) -> Vec<Message
             Event::NoStairsHere { .. } => {
                 Some(Message::new(Tone::Info, "There are no stairs here."))
             }
+            Event::NothingToExplore { .. } => Some(Message::new(
+                Tone::Info,
+                "There is nothing left to explore within reach.",
+            )),
             Event::Died { .. }
             | Event::Moved { .. }
             | Event::Waited { .. }
@@ -2170,6 +2238,78 @@ mod tests {
                 (Tone::Info, "You descend to depth 10."),
             ]
         );
+    }
+
+    #[test]
+    fn nothing_left_to_explore_is_said_once() {
+        let (game, _, content) = spell_target();
+        let events = [Event::NothingToExplore {
+            position: Position::new(5, 5),
+        }];
+
+        let messages = describe(&events, &game, &content);
+
+        assert_eq!(
+            lines(&messages),
+            [(Tone::Info, "There is nothing left to explore within reach.")]
+        );
+        assert_eq!(exploration_halted(&Halt::Explored, &content), None);
+    }
+
+    #[test]
+    fn every_other_halt_of_exploration_says_why() {
+        let content = content();
+        let halts = [
+            (
+                Halt::FoeInView("ossuary_rat".to_owned()),
+                Tone::Info,
+                "You cannot explore with the ossuary rat in view.",
+            ),
+            (
+                Halt::FoeAppeared("ossuary_rat".to_owned()),
+                Tone::Danger,
+                "An ossuary rat comes into view.",
+            ),
+            (
+                Halt::FoeAppeared("shade".to_owned()),
+                Tone::Danger,
+                "A shade comes into view.",
+            ),
+            (
+                Halt::ItemAppeared("essence_phial".to_owned()),
+                Tone::Info,
+                "You spot an Essence Phial.",
+            ),
+            (
+                Halt::ItemAppeared("healing_draught".to_owned()),
+                Tone::Info,
+                "You spot a Healing Draught.",
+            ),
+            (
+                Halt::GlyphAppeared,
+                Tone::Sigil,
+                "You spot a carved glyph you have not read.",
+            ),
+            (Halt::Hurt, Tone::Danger, "You are hurt and stop exploring."),
+            (
+                Halt::Blocked,
+                Tone::Info,
+                "Something stands in your way; you stop exploring.",
+            ),
+            (
+                Halt::StepLimit,
+                Tone::Info,
+                "You stop exploring after 200 steps.",
+            ),
+            (Halt::Interrupted, Tone::Info, "You stop exploring."),
+        ];
+
+        for (halt, tone, text) in halts {
+            let message = exploration_halted(&halt, &content);
+
+            assert_eq!(message, Some(Message::new(tone, text)), "{halt:?}");
+            assert!(text.chars().count() <= TEXT_WIDTH, "{text}");
+        }
     }
 
     #[test]

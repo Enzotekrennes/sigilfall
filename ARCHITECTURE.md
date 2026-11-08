@@ -28,7 +28,7 @@ library, and the terminal application in a binary that depends on it.
 
 | Module | Responsibility |
 |---|---|
-| `action` | `Action`, what an actor can attempt on its turn (move, wait, cast, pick up, use, drop, descend), and `resolve`, which checks a move against the map. |
+| `action` | `Action`, what an actor can attempt on its turn (move, wait, cast, pick up, use, drop, descend, explore), and `resolve`, which checks a move against the map. |
 | `actor` | `Actor` and `ActorId`: the player and the monsters, their position, speed, energy, hit points, essence and held turns. |
 | `ai` | `choose_action`: a monster chases the player it sees by A*, goes to where it last saw it, then waits. |
 | `combat` | The player's starting values and the damage formula of a blow. |
@@ -41,12 +41,14 @@ library, and the terminal application in a binary that depends on it.
 | `content::item`, `content::item_file` | Item definitions, their rules, and the shape of an item entry. |
 | `content::spawn`, `content::spawn_file` | Spawn tables: how often each monster and item is drawn, floor by floor. |
 | `event` | `Event`: what happened during a turn (moved, attacked, died, sigil cast, glyph learned, picked up, descended…). |
+| `explore` | `explore_step`: the step of automatic exploration towards the nearest unseen cell next to known ground, by a Dijkstra map planned on what the player remembers. |
 | `fov` | Symmetric shadowcasting in integer fractions, with a sight radius of 8. |
 | `game` | `Game`, the game in progress, and its single entry point `Game::submit`. |
 | `game::world` | What the current floor holds: map, actors, items, engraved glyphs, the player's inventory. |
 | `game::cast` | What `Action::Cast` does: cost, essence, target, effect, backlash. |
 | `game::inventory` | What picking up, using and dropping an item do. |
 | `game::descent` | What `Action::Descend` does: the next floor of the seed, with the player's belongings. |
+| `game::explore` | What `Action::Explore` does: a move chosen by `explore`, never a blow, refused when nothing is left to explore. |
 | `game::saved` | Turns a game into the records of a save and back, checking every value read. |
 | `generation` | A floor built from the seed and the depth: layout, start, stairs, monsters, glyphs and items. |
 | `generation::bsp` | Rooms and corridors laid out by binary space partitioning. |
@@ -77,6 +79,7 @@ library, and the terminal application in a binary that depends on it.
 | `main` | Reads the command line, prepares and restores the terminal (also on a panic), runs the application and saves the game on leaving. |
 | `cli` | `Cli`: the `--seed` and `--ascii` options, parsed by clap. |
 | `app` | `App`: the screen state machine (title, seed entry, confirmation, options, game, sigil overlay, inventory, end screen), the handling of each key, and the event loop. |
+| `app::exploring` | The walk of automatic exploration (`x`): when it stops, its step limit and the pause between steps. |
 | `input` | The keymaps: one function per kind of screen, from a key press to a command. Only presses count, not releases. |
 | `clock` | Where the application reads the wall-clock time, for the end screen's short grace period only; tests replace it with a manual clock. Game time never depends on it. |
 | `casting` | The sigil overlay's own state: the trace being drawn, the direction prompt, the verdict of a cast. |

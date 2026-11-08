@@ -40,6 +40,10 @@
 //! by a sigil or a backlash loses its next turns: when its turn comes, it
 //! spends the energy of a wait and does nothing.
 //!
+//! `Action::Explore` takes one step towards the nearest cell the player has
+//! never seen; its rules live in the `explore` submodule, the choice of the
+//! way in the `explore` module.
+//!
 //! Items lie on the floor until the player picks them up, then fill its
 //! inventory until it uses or drops them; their rules live in the
 //! `inventory` submodule. Only the player handles items.
@@ -53,6 +57,7 @@
 
 mod cast;
 mod descent;
+mod explore;
 mod inventory;
 mod saved;
 mod world;
@@ -425,6 +430,15 @@ impl Game {
     /// there. Anywhere but on the stairs it is refused with no cost and no
     /// time passing ([`Event::NoStairsHere`]).
     ///
+    /// A step of automatic exploration ([`Action::Explore`]) is a move
+    /// towards the nearest cell the player has never seen, chosen on what
+    /// it remembers of the floor (see the `explore` submodule): same cost
+    /// and events as [`Action::Move`]. It never strikes; when every way
+    /// closer is held by an actor it is refused like a move into a wall
+    /// ([`Event::MoveBlocked`]), and when nothing is left to explore within
+    /// reach with [`Event::NothingToExplore`], with no cost and no time
+    /// passing either way.
+    ///
     /// Items are picked up ([`Action::PickUp`]), used ([`Action::Use`]) and
     /// dropped ([`Action::Drop`]) for their own costs (`schedule::PICK_UP_COST`,
     /// `schedule::USE_COST`, `schedule::DROP_COST`); see the `inventory`
@@ -760,9 +774,10 @@ impl Game {
     ///
     /// A wait always succeeds. A move is handled by [`Game::step`], a cast
     /// by `Game::cast` (see the `cast` submodule), picking up, using and
-    /// dropping an item by the `inventory` submodule and going down the
-    /// stairs by the `descent` submodule, which only the player calls on;
-    /// all of them may be refused, in which case nothing is spent and
+    /// dropping an item by the `inventory` submodule, going down the
+    /// stairs by the `descent` submodule and a step of automatic
+    /// exploration by the `explore` submodule, which only the player calls
+    /// on; all of them may be refused, in which case nothing is spent and
     /// `false` is returned.
     fn perform(&mut self, id: ActorId, action: Action, events: &mut Vec<Event>) -> bool {
         match action {
@@ -777,6 +792,7 @@ impl Game {
             Action::Use(item) => self.use_item(id, item, events),
             Action::Drop(item) => self.drop_item(id, item, events),
             Action::Descend => self.descend(id, events),
+            Action::Explore => self.explore(id, events),
         }
     }
 

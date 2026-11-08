@@ -58,11 +58,20 @@
 //! keeps the floors above. Off the stairs the game refuses it at no cost,
 //! and the log says so.
 //!
+//! `x` explores the floor automatically: the application submits
+//! `Action::Explore` again and again, drawing the screen after every step,
+//! until a monster comes into view, an item or an unread glyph appears, the
+//! player is hurt, nothing is left to explore, a key is pressed or
+//! `exploring::MAX_EXPLORE_STEPS` steps are taken; the log says why it
+//! stopped. The rules of the walk live in the `exploring` submodule.
+//!
 //! The launched application is tied to the player's save file
 //! (`persist::SaveFile`): "Continue" resumes the saved game, the save is
 //! deleted the moment the player dies, before the end screen is drawn, and
 //! [`App::save_on_exit`] writes the game in progress when the event loop
 //! ends. The rules of the launch are given at [`App::launch`].
+
+pub(crate) mod exploring;
 
 use std::cell::Cell;
 use std::time::{Duration, Instant};
@@ -81,14 +90,15 @@ use sigilfall_core::item::ItemId;
 use sigilfall_core::rng::Seed;
 use sigilfall_core::sigil::{CastQuality, ESSENCE_COST, Recognition, Trace, recognize};
 
+use self::exploring::{EXPLORE_STEP_DELAY, Exploration, Halt, Sightings};
 use crate::casting::{Casting, Drawing, Verdict};
 use crate::cli::{self, Cli};
 #[cfg(test)]
 use crate::clock::ManualClock;
 use crate::clock::{Clock, SystemClock};
 use crate::input::{
-    self, AimCommand, Command, EndCommand, InventoryCommand, MenuCommand, OptionsCommand,
-    SeedCommand, TraceCommand, VerdictCommand,
+    self, AimCommand, Command, EndCommand, ExploringCommand, InventoryCommand, MenuCommand,
+    OptionsCommand, SeedCommand, TraceCommand, VerdictCommand,
 };
 use crate::message_log::{Message, MessageLog, Tone};
 use crate::messages;
@@ -208,6 +218,9 @@ pub struct App {
     /// When the application reached [`State::GameOver`], read from
     /// `clock`; `None` while no game is over.
     ended_at: Option<Instant>,
+    /// The walk of automatic exploration in progress on the game screen,
+    /// or `None` when the player is not exploring.
+    exploration: Option<Exploration>,
 }
 
 impl App {
@@ -405,6 +418,7 @@ impl App {
             options_not_saved: None,
             clock,
             ended_at: None,
+            exploration: None,
         }
     }
 
@@ -512,7 +526,9 @@ impl App {
     ///   (`messages::describe`). `t` opens the sigil overlay
     ///   ([`State::Casting`], see [`App::handle_casting_key`]); `i` opens
     ///   the inventory ([`State::Inventory`], see
-    ///   [`App::handle_inventory_key`]). If the player died, the
+    ///   [`App::handle_inventory_key`]); `x` starts automatic exploration
+    ///   (see [`App::explore_further`]), during which any key press only
+    ///   stops it ([`App::handle_exploring_key`]). If the player died, the
     ///   application moves to [`State::GameOver`].
     /// - End screen (`input::end_command_for`): Enter goes back to the
     ///   title screen, `q` quits, once [`END_SCREEN_GRACE`] has passed
@@ -737,8 +753,12 @@ impl App {
         }
     }
 
-    /// Reacts to `key` on the game screen (see [`App::handle_key`]).
+    /// Reacts to `key` on the game screen (see [`App::handle_key`]); while
+    /// the player explores, see [`App::handle_exploring_key`] instead.
     fn handle_game_key(&mut self, key: KeyEvent) {
+        if self.exploration.is_some() {
+            return self.handle_exploring_key(key);
+        }
         match input::command_for(key) {
             None => {}
             Some(Command::Quit) => self.state = State::Quit,
@@ -748,6 +768,87 @@ impl App {
             }
             Some(Command::Trace) => self.state = State::Casting(Casting::start()),
             Some(Command::Inventory) => self.state = State::Inventory(InventoryScreen::open()),
+            Some(Command::Explore) => self.start_exploring(),
+        }
+    }
+
+    /// Reacts to `key` while the player explores automatically
+    /// (`input::exploring_command_for`): any key press stops the walk, with
+    /// a line in the log, and does nothing else; Ctrl+C quits. Releases,
+    /// such as the one of the explore key itself, change nothing.
+    fn handle_exploring_key(&mut self, key: KeyEvent) {
+        match input::exploring_command_for(key) {
+            None => {}
+            Some(ExploringCommand::Stop) => self.halt_exploration(&Halt::Interrupted),
+            Some(ExploringCommand::Quit) => {
+                self.exploration = None;
+                self.state = State::Quit;
+            }
+        }
+    }
+
+    /// Starts a walk of automatic exploration and takes its first step at
+    /// once (see [`App::explore_further`]), so the key always answers.
+    ///
+    /// With a monster in view, the walk does not start: the log says so and
+    /// no time passes, since stepping blindly next to a foe is what the
+    /// walk exists to avoid.
+    fn start_exploring(&mut self) {
+        let Some(run) = &self.run else {
+            return;
+        };
+        if let Some(foe) = exploring::foe_in_view(&run.game) {
+            return self.halt_exploration(&Halt::FoeInView(foe));
+        }
+        self.exploration = Some(Exploration::default());
+        self.explore_further();
+    }
+
+    /// Returns whether a walk of automatic exploration is in progress: the
+    /// event loop then takes its next step ([`App::explore_further`])
+    /// unless a key comes first.
+    pub const fn is_exploring(&self) -> bool {
+        self.exploration.is_some()
+    }
+
+    /// Takes the next step of the walk of automatic exploration in
+    /// progress, if any: submits `Action::Explore` (see [`App::play`]) and
+    /// stops the walk when `exploring::halt_after_step` says so, logging
+    /// why (`messages::exploration_halted`).
+    ///
+    /// The walk also stops, before stepping, when the last frame drawn was
+    /// smaller than 80 × 24, as any key would do nothing then; and it ends
+    /// without a word when the player dies, the end screen saying enough.
+    pub fn explore_further(&mut self) {
+        let Some(walk) = self.exploration.take() else {
+            return;
+        };
+        if !self.screen_is_visible() {
+            return self.halt_exploration(&Halt::Interrupted);
+        }
+        let Some(run) = &self.run else {
+            return;
+        };
+        let before = Sightings::of(&run.game);
+        let hp_before = run.game.player_actor().hp();
+        let events = self.play(Action::Explore);
+        let Some(run) = self.run.as_ref().filter(|run| !run.game.is_over()) else {
+            return;
+        };
+        let walk = walk.stepped();
+        match exploring::halt_after_step(&events, &run.game, &before, hp_before, walk) {
+            Some(halt) => self.halt_exploration(&halt),
+            None => self.exploration = Some(walk),
+        }
+    }
+
+    /// Ends the walk of automatic exploration, if any, and logs why it
+    /// stopped, or did not start, for `halt`.
+    fn halt_exploration(&mut self, halt: &Halt) {
+        self.exploration = None;
+        if let Some(run) = &mut self.run {
+            run.log
+                .extend(messages::exploration_halted(halt, &self.content));
         }
     }
 
@@ -1129,6 +1230,11 @@ impl App {
     /// Runs the event loop on `terminal` until the player quits, from any
     /// screen: draw, wait for the next terminal event, handle it, repeat.
     ///
+    /// While the player explores automatically, the loop waits
+    /// `exploring::EXPLORE_STEP_DELAY` at most: the next step is taken
+    /// ([`App::explore_further`]) and drawn if no event came, so every step
+    /// is seen and any key press stops the walk.
+    ///
     /// A resize event needs no handling of its own: the next draw adapts to
     /// the new size and records it before any further key is read.
     ///
@@ -1141,6 +1247,14 @@ impl App {
             terminal
                 .draw(|frame| self.render(frame))
                 .context("cannot draw the game screen on the terminal")?;
+            // While exploring, the next step comes after a short wait
+            // unless an event comes first; otherwise the loop waits for one.
+            let event_ready = !self.is_exploring()
+                || event::poll(EXPLORE_STEP_DELAY).context("cannot read terminal input")?;
+            if !event_ready {
+                self.explore_further();
+                continue;
+            }
             if let Event::Key(key) = event::read().context("cannot read terminal input")? {
                 self.handle_key(key);
             }
@@ -1173,6 +1287,7 @@ mod tests {
     mod daily_run;
     mod death_summary;
     mod demo_tape;
+    mod exploration;
     mod inventory_screen;
     mod options_screen;
     mod save_files;

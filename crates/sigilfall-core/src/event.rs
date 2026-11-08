@@ -35,8 +35,10 @@ pub enum Event {
         actor: ActorId,
     },
     /// An actor tried to step into a cell it cannot enter (a wall, the edge
-    /// of the map or another actor it does not fight). It did not move,
-    /// spent no energy and no time passed.
+    /// of the map or another actor it does not fight), or a step of
+    /// automatic exploration found every way closer held by an actor, foe
+    /// or not: exploring never strikes. It did not move, spent no energy
+    /// and no time passed.
     MoveBlocked {
         /// Actor whose move was refused.
         actor: ActorId,
@@ -268,6 +270,14 @@ pub enum Event {
     /// The player tried to go down where there are no stairs. Nothing
     /// happened: no energy and no time were spent.
     NoStairsHere {
+        /// The player's cell.
+        position: Position,
+    },
+    /// The player asked for a step of automatic exploration and no cell it
+    /// has never seen can be reached from where it stands: the floor is
+    /// explored as far as the player can walk (see the `explore` module).
+    /// Nothing happened: no energy and no time were spent.
+    NothingToExplore {
         /// The player's cell.
         position: Position,
     },

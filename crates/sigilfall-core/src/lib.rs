@@ -11,6 +11,7 @@ pub mod ai;
 pub mod combat;
 pub mod content;
 pub mod event;
+pub mod explore;
 pub mod fov;
 pub mod game;
 pub mod generation;

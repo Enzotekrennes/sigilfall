@@ -84,14 +84,15 @@ pub const DESCEND_COST: i32 = 100;
 /// Returns the energy `action` costs when it is performed as such.
 ///
 /// A cast costs [`STROKE_COST`] per node of its trace plus [`CAST_COST`]
-/// (see [`cast_cost`]). A move into a foe is not a step but a blow, which
+/// (see [`cast_cost`]). A step of automatic exploration is a move and costs
+/// [`MOVE_COST`]. A move into a foe is not a step but a blow, which
 /// costs [`ATTACK_COST`] instead; the `game` module, which finds the foe,
 /// charges that cost. A blocked or refused action costs nothing; that rule
 /// is applied by the caller, which simply does not call [`spend_energy`]
 /// for it.
 pub const fn action_cost(action: Action) -> i32 {
     match action {
-        Action::Move(_) => MOVE_COST,
+        Action::Move(_) | Action::Explore => MOVE_COST,
         Action::Wait => WAIT_COST,
         Action::Cast { trace, .. } => cast_cost(trace.len()),
         Action::PickUp => PICK_UP_COST,
