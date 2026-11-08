@@ -267,7 +267,13 @@ pub fn welcome() -> Message {
 ///   ([`Tone::Sigil`]);
 /// - a backlash, on its own [`Tone::Danger`] line after the cast, with what
 ///   it cost: "The backlash scorches you (2).", "The backlash drains your
-///   essence (4).", "The backlash dazes you: you lose 1 turn.";
+///   essence (4).", "The backlash dazes you: you lose 1 turn."; a backlash
+///   that took nothing is told as such, never as a loss of 0: a scorch
+///   spared at the last hit point, "The backlash scorches you, but you hold
+///   on." (still [`Tone::Danger`]: one hit point is left), and a drain with
+///   no essence left, "The backlash finds no essence to drain."
+///   ([`Tone::Info`]: nothing was at stake). The drain is still announced,
+///   so every unstable cast logs which backlash it drew;
 /// - a glyph learnt: "You decipher a carved glyph: Recall joins your
 ///   grimoire." ([`Tone::Success`]);
 /// - a refused cast, which took no time: "Not enough essence to cast: 1 of
@@ -353,10 +359,14 @@ pub fn describe(events: &[Event], game: &Game, content: &Content) -> Vec<Message
                 hp_left,
             } => {
                 if *actor == game.player() {
-                    Some(Message::new(
-                        Tone::Danger,
-                        format!("The backlash scorches you ({damage})."),
-                    ))
+                    // The game spares the last hit point: a scorch at 1 HP
+                    // takes nothing, which "(0)" would misreport.
+                    let text = if *damage > 0 {
+                        format!("The backlash scorches you ({damage}).")
+                    } else {
+                        "The backlash scorches you, but you hold on.".to_owned()
+                    };
+                    Some(Message::new(Tone::Danger, text))
                 } else {
                     let lethal = *hp_left <= 0;
                     if lethal {
@@ -407,9 +417,13 @@ pub fn describe(events: &[Event], game: &Game, content: &Content) -> Vec<Message
                 Some(spell_line(cast_lead.take(), &effect))
             }
             Event::SpellMissed { .. } => Some(spell_line(cast_lead.take(), "no foe in reach")),
-            Event::EssenceDrained { lost, .. } => Some(Message::new(
+            Event::EssenceDrained { lost, .. } if *lost > 0 => Some(Message::new(
                 Tone::Danger,
                 format!("The backlash drains your essence ({lost})."),
+            )),
+            Event::EssenceDrained { .. } => Some(Message::new(
+                Tone::Info,
+                "The backlash finds no essence to drain.",
             )),
             Event::NotEnoughEssence { essence, cost } => Some(Message::new(
                 Tone::Info,
@@ -1278,6 +1292,53 @@ mod tests {
                 ],
                 "{backlash:?}"
             );
+        }
+    }
+
+    #[test]
+    fn a_backlash_that_takes_nothing_is_never_told_as_a_loss_of_zero() {
+        let (game, _, content) = spell_target();
+        let player = game.player();
+        let cases = [
+            (
+                Backlash::Scorch,
+                Event::Wounded {
+                    actor: player,
+                    damage: 0,
+                    hp_left: 1,
+                },
+                (Tone::Danger, "The backlash scorches you, but you hold on."),
+            ),
+            (
+                Backlash::Scorch,
+                Event::Wounded {
+                    actor: player,
+                    damage: 1,
+                    hp_left: 1,
+                },
+                (Tone::Danger, "The backlash scorches you (1)."),
+            ),
+            (
+                Backlash::Drain,
+                Event::EssenceDrained {
+                    actor: player,
+                    lost: 0,
+                },
+                (Tone::Info, "The backlash finds no essence to drain."),
+            ),
+        ];
+
+        for (backlash, consequence, expected) in cases {
+            let events = [
+                Event::Backlash {
+                    caster: player,
+                    backlash,
+                },
+                consequence,
+            ];
+            let messages = describe(&events, &game, &content);
+            assert_eq!(lines(&messages), [expected], "{backlash:?}");
+            assert!(!messages[0].text.contains("(0)"));
         }
     }
 

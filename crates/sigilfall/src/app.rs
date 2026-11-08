@@ -13,6 +13,10 @@
 //! Once the player has died, the end screen replaces the game and only the
 //! quit keys still work.
 //!
+//! The quit keys are `q`, outside the overlays, and Ctrl+C everywhere.
+//! Escape never quits: it closes the overlays and verdicts below, and does
+//! nothing on the game and end screens.
+//!
 //! Casting a sigil goes through the overlay ([`State::Casting`]): `t` opens
 //! it, the digits link nodes, Backspace removes the last one, Escape closes
 //! it at no cost and Enter validates. An empty trace is never submitted.
@@ -618,13 +622,35 @@ mod tests {
     }
 
     #[test]
-    fn escape_quits_and_later_keys_are_ignored() {
+    fn q_then_later_keys_are_ignored() {
         let mut app = new_app();
 
-        press_all(&mut app, &[KeyCode::Esc, KeyCode::Right]);
+        press_all(&mut app, &[KeyCode::Char('q'), KeyCode::Right]);
 
         assert_eq!(app.state(), State::Quit);
         assert_eq!(player_position(&app), PLAYER_START);
+    }
+
+    #[test]
+    fn escape_on_the_game_screen_does_nothing_and_passes_no_time() {
+        let mut app = new_app();
+        let ticks = app.game().ticks();
+        let turns = app.game().player_turns();
+        let messages = app.log().len();
+        let before = render(&app, 80, 24).backend().buffer().clone();
+
+        // Twice, as a player closing an overlay then pressing once more.
+        press_all(&mut app, &[KeyCode::Esc, KeyCode::Esc]);
+
+        assert_eq!(app.state(), State::Playing);
+        assert_eq!(app.game().ticks(), ticks, "no time passes");
+        assert_eq!(app.game().player_turns(), turns);
+        assert_eq!(player_position(&app), PLAYER_START);
+        assert_eq!(app.log().len(), messages, "nothing is logged");
+        assert_eq!(render(&app, 80, 24).backend().buffer(), &before);
+        // The game still answers.
+        app.handle_key(press(KeyCode::Right));
+        assert_eq!(player_position(&app), PLAYER_START.step(Direction::East));
     }
 
     #[test]
@@ -1195,7 +1221,10 @@ mod tests {
                 "the end screen stays as it is"
             );
 
+            // Escape never quits, not even here: only `q` and Ctrl+C do.
             app.handle_key(press(KeyCode::Esc));
+            assert_eq!(app.state(), State::GameOver);
+            app.handle_key(press(KeyCode::Char('q')));
             assert_eq!(app.state(), State::Quit);
         }
 
@@ -2442,6 +2471,7 @@ mod tests {
             keys.push(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL));
             keys.push(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::ALT));
             for code in [
+                KeyCode::Esc,
                 KeyCode::Enter,
                 KeyCode::Tab,
                 KeyCode::BackTab,
@@ -2462,14 +2492,12 @@ mod tests {
             }
             keys.extend((1..=12).map(|n| press(KeyCode::F(n))));
             // A release or a repeat of a quit key is not a press.
-            for code in [KeyCode::Char('q'), KeyCode::Esc] {
-                keys.push(release(code));
-                keys.push(KeyEvent::new_with_kind(
-                    code,
-                    KeyModifiers::NONE,
-                    KeyEventKind::Repeat,
-                ));
-            }
+            keys.push(release(KeyCode::Char('q')));
+            keys.push(KeyEvent::new_with_kind(
+                KeyCode::Char('q'),
+                KeyModifiers::NONE,
+                KeyEventKind::Repeat,
+            ));
             keys
         }
 
@@ -2509,7 +2537,6 @@ mod tests {
         fn s3_every_quit_key_still_works_after_death() {
             let quits = [
                 press(KeyCode::Char('q')),
-                press(KeyCode::Esc),
                 KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
             ];
             for key in quits {
@@ -3473,7 +3500,7 @@ mod tests {
                 false,
             );
             let screen = screen(&app);
-            let panel: Vec<String> = (1..=10)
+            let panel: Vec<String> = (1..=12)
                 .map(|y| {
                     (60..=78)
                         .map(|x| screen[(x, y)].symbol())
@@ -3494,8 +3521,10 @@ mod tests {
                     "Ember",
                     "Recall",
                     "Veil",
-                    "and 2 more",
+                    "Passage",
+                    "Lance",
                     "",
+                    "IN VIEW",
                 ]
             );
             assert_eq!(screen[(76, 3)].fg, dark().sigil_stroke.fg.unwrap());

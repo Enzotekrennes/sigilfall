@@ -8,7 +8,9 @@
 //! inventory is open ([`InventoryCommand`]). Only key presses count: crossterm also
 //! reports key releases on Windows, and treating them as input would play
 //! every key twice. Ctrl+C quits from every screen, since raw mode turns it
-//! into a plain key. This module decides nothing about the game itself; the
+//! into a plain key; `q` quits from the game and end screens only. Escape
+//! never quits: it closes an overlay or a verdict, and does nothing on the
+//! game screen, so a second press after closing one loses nothing. This module decides nothing about the game itself; the
 //! `app` module submits the resulting actions to `sigilfall_core`.
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -102,8 +104,10 @@ pub enum VerdictCommand {
 /// - pick up the item underfoot: `g`, as in the mock-up, or `,`, the key
 ///   of other roguelikes; neither is a vi key;
 /// - open the inventory: `i`;
-/// - quit: `q`, Escape or Ctrl+C (raw mode turns Ctrl+C into a plain key).
+/// - quit: `q` or Ctrl+C (raw mode turns Ctrl+C into a plain key).
 ///
+/// Escape is bound to nothing here: it closes the overlays, and a player
+/// who presses it once too many after closing one must not lose the game.
 /// Releases and repeats are ignored (`None`), so each physical press counts
 /// once. Shift is accepted, because some keyboard layouts need it for `.` or
 /// the digit row; any other key combined with Ctrl or Alt is ignored.
@@ -113,7 +117,7 @@ pub fn command_for(key: KeyEvent) -> Option<Command> {
         Press::Code(code) => code,
     };
     match code {
-        KeyCode::Char('q') | KeyCode::Esc => Some(Command::Quit),
+        KeyCode::Char('q') => Some(Command::Quit),
         KeyCode::Char('t') => Some(Command::Trace),
         KeyCode::Char('i') => Some(Command::Inventory),
         KeyCode::Char('g' | ',') => Some(Command::Act(Action::PickUp)),
@@ -340,9 +344,9 @@ mod tests {
     }
 
     #[test]
-    fn q_escape_and_ctrl_c_quit() {
+    fn q_and_ctrl_c_quit_and_escape_does_nothing() {
         assert_eq!(command_for(press(KeyCode::Char('q'))), Some(Command::Quit));
-        assert_eq!(command_for(press(KeyCode::Esc)), Some(Command::Quit));
+        assert_eq!(command_for(press(KeyCode::Esc)), None);
         assert_eq!(
             command_for(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
             Some(Command::Quit)

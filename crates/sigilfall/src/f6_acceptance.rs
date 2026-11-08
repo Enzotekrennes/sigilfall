@@ -8,7 +8,9 @@
 //! game charges, that the grimoire shown is the game's, that a long cast
 //! gives the monsters more turns, that nothing is submitted for an empty
 //! trace, that a replay is identical, and that the screens stay readable at
-//! 80 × 24.
+//! 80 × 24. The fixes of the F6 test are checked too: a backlash that takes
+//! nothing is never told as a loss of 0, the side panel names the five
+//! shipped sigils, and Escape never quits the game.
 //!
 //! Expected values are written out here (costs of 25 per node and 50 per
 //! cast, 2 essence per cast, wording of the log and of the overlay) instead
@@ -1010,7 +1012,6 @@ fn seed_with_first_backlash(wanted: Backlash) -> Seed {
 }
 
 #[test]
-#[ignore = "B1: the log says 'drains your essence (0)' when nothing was left to drain"]
 fn a_backlash_that_takes_nothing_is_not_announced_as_a_loss_of_zero() {
     // At exactly one hit point a scorch is spared (0 taken), and a drain
     // after paying a cast from 2 essence finds nothing left (0 lost).
@@ -1031,10 +1032,17 @@ fn a_backlash_that_takes_nothing_is_not_announced_as_a_loss_of_zero() {
         !lines.iter().any(|line| line.contains("(0)")),
         "a drain of nothing is announced as a loss: {lines:?}"
     );
+    // The backlash is still named, so the player knows which one came.
+    assert!(
+        lines
+            .iter()
+            .any(|line| line == "The backlash finds no essence to drain."),
+        "{lines:?}"
+    );
+    assert_eq!(app.game().player_actor().essence(), 0);
 }
 
 #[test]
-#[ignore = "B2: the log says 'scorches you (0)' when the scorch was spared at one hit point"]
 fn a_scorch_that_is_spared_at_one_hit_point_is_not_announced_as_zero_damage() {
     // The moth's blows use the gameplay stream, so which backlash comes
     // depends on the seed: run seeds until scorches have been seen at one
@@ -1069,6 +1077,13 @@ fn a_scorch_that_is_spared_at_one_hit_point_is_not_announced_as_zero_damage() {
                 !lines.iter().any(|line| line.contains("scorches you (0)")),
                 "seed {value}: a spared scorch is announced as damage: {lines:?}"
             );
+            assert!(
+                lines
+                    .iter()
+                    .any(|line| line == "The backlash scorches you, but you hold on."),
+                "seed {value}: the player is told they were spared: {lines:?}"
+            );
+            assert_eq!(app.game().player_actor().hp(), 1, "seed {value}");
         }
     }
     assert!(scorched > 0, "no scorch at one hit point was exercised");
@@ -1164,6 +1179,104 @@ fn every_overlay_state_stays_readable_at_80_by_24() {
         failed.contains("fizzles"),
         "the log line of the fizzle is visible\n{failed}"
     );
+}
+
+#[test]
+fn the_panel_names_the_five_shipped_sigils_at_80_by_24() {
+    // B3: with a short "in view" list (the player, a monster and the
+    // glyphs), every shipped sigil is named in the side panel, in grimoire
+    // order, and none is replaced by "and N more".
+    for seed in seeds() {
+        let app = app_knowing(seed, &ALL, Some("sloth"));
+        let panel: Vec<String> = rows(&app)
+            .iter()
+            .map(|row| {
+                row.chars()
+                    .skip(58)
+                    .collect::<String>()
+                    .trim_matches(|c: char| c == '│' || c == ' ')
+                    .to_owned()
+            })
+            .collect();
+        let title = panel
+            .iter()
+            .position(|row| row.starts_with("SIGILS"))
+            .unwrap_or_else(|| panic!("seed {seed}: no SIGILS block in {panel:#?}"));
+        assert!(panel[title].ends_with("5/5"), "{panel:#?}");
+        assert_eq!(
+            panel[title + 1..title + 6],
+            ["Ember", "Recall", "Veil", "Passage", "Lance"],
+            "seed {seed}: {panel:#?}"
+        );
+        assert!(
+            !panel.iter().any(|row| row.ends_with(" more")),
+            "seed {seed}: {panel:#?}"
+        );
+        // The list under them still names what is in view.
+        let in_view = panel.iter().position(|row| row == "IN VIEW").unwrap();
+        assert_eq!(panel[in_view + 1], "@ you", "{panel:#?}");
+        assert!(panel[in_view..].iter().any(|row| row.contains("sloth")));
+        assert!(
+            panel[in_view..]
+                .iter()
+                .any(|row| row.contains("known glyph"))
+        );
+    }
+}
+
+// --- Escape never quits (B4) -------------------------------------------------
+
+#[test]
+fn escape_on_the_game_screen_does_nothing_and_passes_no_time() {
+    for seed in seeds() {
+        let mut app = app_knowing(seed, &ALL, Some("gnat"));
+        let before = world(&app);
+        let screen = text(&app);
+
+        // A cancelled trace, then the extra presses a player makes out of
+        // habit: the game stays, nothing moves.
+        trace(&mut app, "75");
+        app.handle_key(press(KeyCode::Esc));
+        for _ in 0..3 {
+            app.handle_key(press(KeyCode::Esc));
+        }
+        assert_eq!(app.state(), State::Playing, "seed {seed}");
+        assert_eq!(world(&app), before, "seed {seed}: no time passes");
+        assert_eq!(text(&app), screen, "seed {seed}: the screen is unchanged");
+
+        // After a verdict closed by Escape, the next Escape does nothing
+        // either.
+        trace(&mut app, "987");
+        enter(&mut app);
+        assert!(matches!(app.state(), State::Casting(Casting::Verdict(_))));
+        app.handle_key(press(KeyCode::Esc));
+        assert_eq!(app.state(), State::Playing);
+        let after_cast = world(&app);
+        app.handle_key(press(KeyCode::Esc));
+        assert_eq!(app.state(), State::Playing, "seed {seed}");
+        assert_eq!(world(&app), after_cast, "seed {seed}: no time passes");
+    }
+}
+
+#[test]
+fn q_quits_from_the_game_screen_but_not_from_an_overlay() {
+    let mut app = app_knowing(SEED, &ALL, None);
+    trace(&mut app, "7");
+    app.handle_key(press(KeyCode::Char('q')));
+    assert!(
+        matches!(app.state(), State::Casting(_)),
+        "q never quits from the overlay"
+    );
+    app.handle_key(press(KeyCode::Esc));
+    assert_eq!(app.state(), State::Playing);
+
+    app.handle_key(press(KeyCode::Char('q')));
+    assert_eq!(app.state(), State::Quit);
+
+    let mut app = app_knowing(SEED, &ALL, None);
+    trace(&mut app, "7");
+    app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    assert_eq!(app.state(), State::Quit, "Ctrl+C quits from anywhere");
 }
 
 #[test]
