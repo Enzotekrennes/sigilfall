@@ -16,6 +16,8 @@ mod cli;
 mod f6_acceptance;
 #[cfg(test)]
 mod f7_acceptance;
+#[cfg(test)]
+mod f8_acceptance;
 mod input;
 mod message_log;
 mod messages;
