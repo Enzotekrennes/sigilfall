@@ -19,8 +19,9 @@
 //! and Recall, then goes down; on the bottom floor it breaks the seal. It
 //! measures the depths a player who uses everything the game gives reaches
 //! (task T32: the healing draughts of the deeper floors, decision D24), and
-//! checks that such a player gets past the reckless one's floors while a
-//! victory stays rare.
+//! checks that such a player gets past the reckless one's floors, reaching
+//! floor 6 or 7 as a rule, and that a victory happens but stays rare (task
+//! T36: the elites of floors 5 to 7 made weaker).
 
 use sigilfall_core::action::Action;
 use sigilfall_core::combat::Combatant;
@@ -216,7 +217,7 @@ const CAREFUL_RUNS: u64 = 80;
 const CAREFUL_MAX_TURNS: u64 = 30_000;
 
 /// Hit points at or under which the careful bot heals before anything else,
-/// fight or not: two blows of the strongest creature (attack 6) and a bit.
+/// fight or not: two blows of the strongest creature (attack 5) and a bit.
 const LOW_HP: i32 = 12;
 
 /// Hit points a healing draught gives back (`content/items.ron`), written
@@ -230,12 +231,23 @@ const PHIAL_ESSENCE: i32 = 4;
 /// of radius `SPELL_RANGE`); the bot never wastes a cast on a farther foe.
 const NEAREST_REACH_SQUARED: i32 = 72;
 
-/// Floors the median floor reached by the careful bot must lie on: past the
-/// floors where the reckless bot dies, short of the bottom.
-const CAREFUL_TARGET_DEPTHS: std::ops::RangeInclusive<u32> = 4..=7;
+/// Floors the median floor reached by the careful bot must lie on (task
+/// T36): two to three floors past the reckless bot's median of 3, so that
+/// care pays, yet short of the last three floors, the hardest ones (12
+/// creatures each), which most careful runs must not reach. Measured at 7
+/// (mean 7.05) once the elites were made weaker, 5 before.
+const CAREFUL_TARGET_DEPTHS: std::ops::RangeInclusive<u32> = 6..=7;
+
+/// Smallest share of the careful bot's runs that must end in a victory
+/// (task T36): the seal must be within reach of a player who uses
+/// everything the game gives. 2 % of the 80 runs asks for 2 victories, so
+/// that a single lucky seed does not pass for a winnable game. Measured at
+/// 3 runs out of 80 (and 7 out of 200), none before.
+const MIN_CAREFUL_WIN_SHARE: f64 = 0.02;
 
 /// Largest share of the careful bot's runs that may end in a victory: the
-/// seal stays an achievement, not the usual end of a careful run.
+/// seal stays an achievement, not the usual end of a careful run; 10 % is
+/// 8 runs out of 80.
 const MAX_CAREFUL_WIN_SHARE: f64 = 0.1;
 
 /// How a run of the careful bot ended.
@@ -331,8 +343,9 @@ fn way_down(game: &Game) -> Position {
 }
 
 /// The careful bot's next action on the current state of `game`, knowing
-/// whether the floor is already `explored` and the cell of an unread glyph
-/// or an item it set out for, its `errand`.
+/// whether the floor is already `explored` and the cell it set out for, its
+/// `errand`: an unread glyph, an item, or the cell of the monster it last
+/// closed in on.
 ///
 /// In order: pick up what lies underfoot; heal at [`LOW_HP`] or under (a
 /// draught, else Recall); drink a draught out of a fight when none of it is
@@ -342,6 +355,10 @@ fn way_down(game: &Game) -> Position {
 /// of a fight, go on with the errand or set out for the nearest unread glyph
 /// or item in view (the errand is kept until reached, so a glimpse through a
 /// gap is not forgotten one step later), explore, then take the way down.
+/// Closing in on a monster makes its cell the errand: a step that loses
+/// sight of it round a corner is followed by the next step towards it, not
+/// by an explore step back into view (which, against a slow monster that
+/// only acts out of sight, used to loop forever on seed 177).
 /// Every rule is deterministic.
 fn careful_action(
     game: &Game,
@@ -424,9 +441,11 @@ fn careful_action(
                 Some((path.len(), foe.y, foe.x, path))
             })
             .min_by_key(|&(steps, y, x, _)| (steps, y, x));
-        return charge
-            .and_then(|(_, _, _, path)| path.first().copied())
-            .map_or(Action::Wait, Action::Move);
+        let Some((_, y, x, path)) = charge else {
+            return Action::Wait;
+        };
+        *errand = Some(Position::new(x, y));
+        return path.first().copied().map_or(Action::Wait, Action::Move);
     }
 
     let pack_full = game.inventory().count() >= INVENTORY_CAPACITY;
@@ -590,8 +609,9 @@ fn a_careful_player_gets_past_the_reckless_floors_and_rarely_wins() {
     );
     let win_share = wins as f64 / outcomes.len() as f64;
     assert!(
-        win_share <= MAX_CAREFUL_WIN_SHARE,
-        "{win_share:.2} of the careful runs win, expected at most {MAX_CAREFUL_WIN_SHARE}"
+        (MIN_CAREFUL_WIN_SHARE..=MAX_CAREFUL_WIN_SHARE).contains(&win_share),
+        "{win_share:.3} of the careful runs win, expected {MIN_CAREFUL_WIN_SHARE} to \
+         {MAX_CAREFUL_WIN_SHARE}"
     );
     assert!(
         outcomes.iter().all(|o| o.died || o.won),

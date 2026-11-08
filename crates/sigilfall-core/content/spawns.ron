@@ -26,6 +26,18 @@
 // creatures, while the number of creatures per floor grows with depth
 // (`generation::monsters_per_floor`): together, the rule of difficulty.
 //
+// On floors 7 to 10, which already hold 12 creatures each, the elites weigh
+// 2 at most (they rose to 3 and 4): on the bottom floor, one creature in
+// eight is a hierophant and one in eight a lead homunculus, instead of one
+// in five and a half each. With their weaker statistics
+// (content/monsters.ron, task T36), a careful player then reaches floor 6
+// or 7 as a rule and breaks the seal in a few runs out of a hundred
+// (tests/balance.rs); with the weaker elites alone, at the old weights, none
+// of the 80 measured runs broke it. So that each floor from 7 down still
+// threatens more than the one above (a test of `generation` checks it),
+// the weakest creatures leave the deepest floors instead: no wax beetle
+// below floor 7, no ossuary rat on floor 10.
+//
 // From floor 5, where the elite creatures arrive and a run used to wear
 // down for want of healing, healing draughts weigh 6 instead of 3: 6 chances
 // in 10 for each item of the floor instead of 3 in 7, about 1.8 draughts a
@@ -35,10 +47,10 @@
     // --- Monsters --------------------------------------------------------
     Spawn(of: Monster("ossuary_rat"), from_depth: 1, to_depth: 1, weight: 1),
     Spawn(of: Monster("ossuary_rat"), from_depth: 2, to_depth: 3, weight: 4),
-    Spawn(of: Monster("ossuary_rat"), from_depth: 4, to_depth: 10, weight: 1),
+    Spawn(of: Monster("ossuary_rat"), from_depth: 4, to_depth: 9, weight: 1),
     Spawn(of: Monster("wax_beetle"), from_depth: 1, to_depth: 1, weight: 1),
     Spawn(of: Monster("wax_beetle"), from_depth: 2, to_depth: 4, weight: 3),
-    Spawn(of: Monster("wax_beetle"), from_depth: 5, to_depth: 10, weight: 1),
+    Spawn(of: Monster("wax_beetle"), from_depth: 5, to_depth: 7, weight: 1),
     Spawn(of: Monster("acolyte"), from_depth: 2, to_depth: 3, weight: 2),
     Spawn(of: Monster("acolyte"), from_depth: 4, to_depth: 10, weight: 3),
     Spawn(of: Monster("homunculus"), from_depth: 2, to_depth: 3, weight: 1),
@@ -47,12 +59,12 @@
     Spawn(of: Monster("shade"), from_depth: 3, to_depth: 5, weight: 3),
     Spawn(of: Monster("shade"), from_depth: 6, to_depth: 10, weight: 4),
     Spawn(of: Monster("hierophant"), from_depth: 4, to_depth: 6, weight: 1),
-    Spawn(of: Monster("hierophant"), from_depth: 7, to_depth: 8, weight: 3),
-    Spawn(of: Monster("hierophant"), from_depth: 9, to_depth: 10, weight: 4),
+    Spawn(of: Monster("hierophant"), from_depth: 7, to_depth: 8, weight: 2),
+    Spawn(of: Monster("hierophant"), from_depth: 9, to_depth: 10, weight: 2),
     Spawn(of: Monster("lead_homunculus"), from_depth: 5, to_depth: 7, weight: 1),
-    Spawn(of: Monster("lead_homunculus"), from_depth: 8, to_depth: 8, weight: 2),
-    Spawn(of: Monster("lead_homunculus"), from_depth: 9, to_depth: 9, weight: 3),
-    Spawn(of: Monster("lead_homunculus"), from_depth: 10, to_depth: 10, weight: 4),
+    Spawn(of: Monster("lead_homunculus"), from_depth: 8, to_depth: 8, weight: 1),
+    Spawn(of: Monster("lead_homunculus"), from_depth: 9, to_depth: 9, weight: 2),
+    Spawn(of: Monster("lead_homunculus"), from_depth: 10, to_depth: 10, weight: 2),
 
     // --- Items -----------------------------------------------------------
     Spawn(of: Item("healing_draught"), from_depth: 1, to_depth: 1, weight: 1),

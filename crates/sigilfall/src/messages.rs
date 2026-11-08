@@ -797,7 +797,10 @@ fn bounded_path(path: &str) -> String {
 ///   sentences of [`item_refusal`];
 ///   a descent: "You descend to depth 2." ([`Tone::Info`]: the status line
 ///   and the new floor already show the change, and the line marks in the
-///   history where the floor above ends); a descent off the stairs, which
+///   history where the floor above ends); a descent to the bottom floor
+///   (`generation::is_bottom_floor` of the new depth) also tells it is the
+///   last one and why: "You descend to depth 10, the last. The seal lies
+///   here." ([`Tone::Info`] too); a descent off the stairs, which
 ///   took no time: "There are no stairs here." ([`Tone::Info`]), or on the
 ///   bottom floor, which has a seal instead (`generation::is_bottom_floor`
 ///   of the game's depth): "No stairs lead deeper: stand on the seal to
@@ -1027,6 +1030,12 @@ pub fn describe(events: &[Event], game: &Game, content: &Content) -> Vec<Message
             )),
             Event::ItemRefused { item, reason } => {
                 Some(Message::new(Tone::Info, item_refusal(game, *item, *reason)))
+            }
+            Event::Descended { depth } if generation::is_bottom_floor(*depth) => {
+                Some(Message::new(
+                    Tone::Info,
+                    format!("You descend to depth {depth}, the last. The seal lies here."),
+                ))
             }
             Event::Descended { depth } => Some(Message::new(
                 Tone::Info,
@@ -1551,7 +1560,7 @@ mod tests {
 
     #[test]
     fn a_blow_on_a_monster_gives_the_damage_and_a_killing_blow_names_it() {
-        // The hierophant (20 hit points) survives a first blow; striking it
+        // The hierophant (14 hit points) survives a first blow; striking it
         // again and again ends with a kill, bounded by its hit points.
         let (mut game, content) = duel("hierophant");
         let first = game.submit(Action::Move(Direction::East));
@@ -1586,7 +1595,7 @@ mod tests {
                 return;
             }
         }
-        panic!("twenty blows of at least one point kill 20 hit points");
+        panic!("twenty blows of at least one point kill 14 hit points");
     }
 
     #[test]
@@ -2358,7 +2367,7 @@ mod tests {
                 position: Position::new(5, 5),
             },
             Event::Descended { depth: 2 },
-            Event::Descended { depth: 10 },
+            Event::Descended { depth: 9 },
         ];
 
         let messages = describe(&events, &game, &content);
@@ -2368,8 +2377,24 @@ mod tests {
             [
                 (Tone::Info, "There are no stairs here."),
                 (Tone::Info, "You descend to depth 2."),
-                (Tone::Info, "You descend to depth 10."),
+                (Tone::Info, "You descend to depth 9."),
             ]
+        );
+    }
+
+    #[test]
+    fn the_descent_to_the_bottom_floor_says_it_is_the_last_and_holds_the_seal() {
+        let (game, _, content) = spell_target();
+        let line = "You descend to depth 10, the last. The seal lies here.";
+        assert!(generation::is_bottom_floor(10), "10 is the bottom floor");
+        let events = [Event::Descended { depth: 10 }];
+
+        let messages = describe(&events, &game, &content);
+
+        assert_eq!(lines(&messages), [(Tone::Info, line)]);
+        assert!(
+            line.chars().count() <= TEXT_WIDTH,
+            "the line fits the log without wrapping"
         );
     }
 

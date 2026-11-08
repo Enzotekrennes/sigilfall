@@ -16,8 +16,19 @@
 //              to 10 (the deepest the content is written for).
 //
 // How often each creature appears, floor by floor, is set in
-// content/spawns.ron. The values are measured with a reckless player in
-// tests/balance.rs: change them with that test in view.
+// content/spawns.ron. The values are measured in tests/balance.rs, with a
+// reckless player (death on floors 2 to 4) and a careful one (median floor
+// 6 or 7, a few victories): change them with that test in view.
+//
+// The two elites were made weaker in task T36. With 28 hit points and a
+// defense of 4, the player's attack of 4, the lead homunculus took about 25
+// blows of one point each and killed most careful runs on floors 5 to 7;
+// the hierophant, with 20 hit points, came next. Now the lead homunculus
+// has 16 hit points, a defense of 2 (about two points a blow) and an attack
+// of 5, the hierophant 14 hit points, a defense of 1 and an attack of 4:
+// still the strongest creatures of their floors, with the most hit points
+// and, for the lead homunculus, the hardest blows. Each change was needed:
+// without the lower attacks, 2 runs out of 80 broke the seal at most.
 [
     Monster(
         id: "ossuary_rat",
@@ -91,9 +102,9 @@
         family: Acolyte,
         elite: true,
         speed: 100,
-        hp: 20,
-        attack: 5,
-        defense: 2,
+        hp: 14,
+        attack: 4,
+        defense: 1,
         min_depth: 4,
     ),
     Monster(
@@ -102,9 +113,9 @@
         family: Homunculus,
         elite: true,
         speed: 75,
-        hp: 28,
-        attack: 6,
-        defense: 4,
+        hp: 16,
+        attack: 5,
+        defense: 2,
         min_depth: 5,
     ),
 ]

@@ -549,7 +549,9 @@ fn no_monster_letter_is_on_the_first_screen_of_a_floor() {
 // ---------------------------------------------------------------------------
 
 /// The text of the "IN VIEW" block of an `width` × `height` screen, one entry
-/// per line, panel margin removed.
+/// per line, panel margin removed. The second row of an entry that takes
+/// two (a long name, then its count and health right-aligned, task T36)
+/// starts with a blank: it is joined to the first, one blank between them.
 fn in_view_lines(app: &App, width: u16, height: u16) -> Vec<String> {
     let rows = rows(app, width, height);
     let start = rows
@@ -557,18 +559,25 @@ fn in_view_lines(app: &App, width: u16, height: u16) -> Vec<String> {
         .position(|row| row.contains("IN VIEW"))
         .expect("the panel has an IN VIEW title");
     let skip = usize::from(width - PANEL_WIDTH) + 2;
-    rows[start + 1..]
+    let mut lines: Vec<String> = Vec::new();
+    for row in rows[start + 1..]
         .iter()
         .take_while(|row| !row.contains("Log"))
-        .map(|row| {
-            row.chars()
-                .skip(skip)
-                .collect::<String>()
-                .trim_end()
-                .to_owned()
-        })
-        .filter(|line| !line.is_empty())
-        .collect()
+    {
+        let line = row.chars().skip(skip).collect::<String>();
+        let line = line.trim_end();
+        if line.is_empty() {
+            continue;
+        }
+        match lines.last_mut() {
+            Some(entry) if line.starts_with(' ') => {
+                entry.push(' ');
+                entry.push_str(line.trim_start());
+            }
+            _ => lines.push(line.to_owned()),
+        }
+    }
+    lines
 }
 
 /// Health a monster line must show: the most wounded of the monsters of that

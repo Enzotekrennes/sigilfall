@@ -13,11 +13,15 @@
 //! kind of engraved glyph and one for the way down in view: the stairs, or
 //! on the bottom floor the seal that ends the run.
 //!
-//! Each monster line ends with that monster's hit points, current out of
+//! Each monster entry ends with that monster's hit points, current out of
 //! maximum ("4/9"), right-aligned like the player's value above and in the
 //! colour of the same [`HealthLevel`]; for a kind seen several times
 //! ("×2"), those of the most wounded of them. The figures and the count are
-//! never cut: the name is shortened first.
+//! never cut, and neither is the name while it fits a row: an entry whose
+//! name, count and figures do not share one row takes two, the name alone
+//! on the first ("H lead homunculus"), the count and the figures
+//! right-aligned on the second ("×2 26/28"). Only a name longer than a whole
+//! row is shortened.
 //!
 //! The rows left under the fixed lines are shared by the sigil names and
 //! the "in view" block, in this order of priority: the "in view" block
@@ -170,9 +174,13 @@ pub fn render(buffer: &mut Buffer, area: Rect, game: &Game, content: &Content, t
             .saturating_sub(CONTENT_LEFT + CONTENT_RIGHT_MARGIN),
         ..area
     };
-    let entries = in_view_entries(game, content, content_area.width, theme);
+    let entries = in_view_entries(game, content, theme);
     let shared = usize::from(content_area.height).saturating_sub(FIXED_ROWS);
-    let name_rows = sigil_name_rows(game.grimoire().len(), entries.len() + 1, shared);
+    let in_view_rows = 1 + entries
+        .iter()
+        .map(|entry| entry.rows(content_area.width))
+        .sum::<usize>();
+    let name_rows = sigil_name_rows(game.grimoire().len(), in_view_rows, shared);
     let mut lines = health_block(game, content_area.width, theme);
     lines.push(essence_line(game, content_area.width, theme));
     lines.push(Line::default());
@@ -273,7 +281,7 @@ fn essence_line(game: &Game, width: u16, theme: &Theme) -> Line<'static> {
 /// Returns how many rows the sigil names take, out of the `shared` rows
 /// that they and the "in view" block divide between them, when `known`
 /// sigils are known and the block wants `in_view_rows` rows (its title and
-/// one row per entry).
+/// the rows of its entries, see [`Entry::rows`]).
 ///
 /// The names take what the block leaves free, but never fewer than
 /// [`SIGIL_MIN_ROWS`] and never more than they need: one row per sigil, or
@@ -330,19 +338,42 @@ fn sigils_block(
     lines
 }
 
-/// One line of the "in view" list: a glyph in its own style, then a name,
-/// and for a monster its health right-aligned.
+/// One entry of the "in view" list: a glyph in its own style, then a name
+/// and the count of its kind, and for a monster its health right-aligned.
+/// It takes one row, or two for a monster whose name, count and health do
+/// not fit one ([`Entry::rows`]).
 struct Entry {
     /// The glyph the thing is drawn with on the map.
     glyph: char,
     /// Style of that glyph, the same as on the map.
     glyph_style: Style,
-    /// Name, possibly followed by a count, already shortened so that the
-    /// health (and the blank column before it) fits on the line.
+    /// Name in full; it is shortened only when drawn, if a row is too
+    /// narrow for it.
     name: String,
+    /// How many things of this kind are in view, written "×2" after the
+    /// name (or before the health) when above 1.
+    count: usize,
     /// For a monster, its hit points as "4/9" in the style of their
     /// [`HealthLevel`]; `None` for everything else.
     health: Option<(String, Style)>,
+}
+
+impl Entry {
+    /// Returns how many rows this entry takes in a list `width` columns
+    /// wide: two for a monster whose name, count, one blank column and
+    /// health are wider than the row (the glyph and the blank after it
+    /// apart), one otherwise.
+    fn rows(&self, width: u16) -> usize {
+        let Some((health, _)) = &self.health else {
+            return 1;
+        };
+        // The sign of the count is one column in every glyph set.
+        let wanted = self.name.chars().count()
+            + count_suffix(self.count, 'x').chars().count()
+            + 1
+            + health.chars().count();
+        if wanted <= name_width(width) { 1 } else { 2 }
+    }
 }
 
 /// One kind of monster in view, while [`in_view_entries`] groups them.
@@ -376,21 +407,21 @@ impl MonsterKind<'_> {
     }
 }
 
-/// The entries of the "in view" block, names cut to fit `width` columns:
-/// the player, then one entry per kind of monster in view, in the order of
-/// `Game::visible_monsters`, then one per kind of item in view, in the
-/// order of `Game::visible_items`, then the engraved glyphs in view, unread
-/// ones first, then the stairs down or the seal when in view, with "×2"
-/// after the name when several of a kind are in view. A monster entry also carries the
-/// health of the most wounded monster of its kind in view, and its name is
-/// shortened so that name, count and health share the `width` columns.
+/// The entries of the "in view" block: the player, then one entry per kind
+/// of monster in view, in the order of `Game::visible_monsters`, then one
+/// per kind of item in view, in the order of `Game::visible_items`, then
+/// the engraved glyphs in view, unread ones first, then the stairs down or
+/// the seal when in view, each with the count of its kind. A monster entry
+/// also carries the health of the most wounded monster of its kind in view.
 /// Monsters come first since they threaten the player; items, which the
-/// player may pick up, come before the glyphs, as in the mock-up.
-fn in_view_entries(game: &Game, content: &Content, width: u16, theme: &Theme) -> Vec<Entry> {
+/// player may pick up, come before the glyphs, as in the mock-up. Names are
+/// kept whole here: [`entry_lines`] fits them to the panel.
+fn in_view_entries(game: &Game, content: &Content, theme: &Theme) -> Vec<Entry> {
     let mut entries = vec![Entry {
         glyph: theme.glyphs.player,
         glyph_style: theme.player,
         name: messages::PLAYER_IN_VIEW.to_owned(),
+        count: 1,
         health: None,
     }];
     let mut kinds: Vec<MonsterKind<'_>> = Vec::new();
@@ -418,18 +449,14 @@ fn in_view_entries(game: &Game, content: &Content, width: u16, theme: &Theme) ->
             });
         }
     }
-    let name_width = usize::from(width).saturating_sub(2);
     entries.extend(kinds.into_iter().map(|kind| {
-        let health = format!("{}/{}", kind.hp, kind.max_hp);
         let level = HealthLevel::of(kind.hp, kind.max_hp);
-        // One blank column between the name (or its count) and the figures.
-        let room = name_width.saturating_sub(health.chars().count() + 1);
-        let name = messages::monster_name(content, kind.definition);
         Entry {
             glyph: kind.glyph,
             glyph_style: kind.style,
-            name: counted_name(name, kind.count, room, theme.glyphs.dimension),
-            health: Some((health, level.style(theme))),
+            name: messages::monster_name(content, kind.definition).to_owned(),
+            count: kind.count,
+            health: Some((format!("{}/{}", kind.hp, kind.max_hp), level.style(theme))),
         }
     }));
     let mut items: Vec<(&str, char, usize)> = Vec::new();
@@ -443,12 +470,8 @@ fn in_view_entries(game: &Game, content: &Content, width: u16, theme: &Theme) ->
     entries.extend(items.into_iter().map(|(definition, glyph, count)| Entry {
         glyph,
         glyph_style: theme.item,
-        name: counted_name(
-            messages::item_name(content, definition),
-            count,
-            name_width,
-            theme.glyphs.dimension,
-        ),
+        name: messages::item_name(content, definition).to_owned(),
+        count,
         health: None,
     }));
     let (read, unread): (Vec<_>, Vec<_>) = game
@@ -474,7 +497,8 @@ fn in_view_entries(game: &Game, content: &Content, width: u16, theme: &Theme) ->
         |(count, glyph, glyph_style, name)| Entry {
             glyph,
             glyph_style,
-            name: counted_name(name, count, name_width, theme.glyphs.dimension),
+            name: name.to_owned(),
+            count,
             health: None,
         },
     ));
@@ -497,7 +521,8 @@ fn in_view_entries(game: &Game, content: &Content, width: u16, theme: &Theme) ->
             entries.push(Entry {
                 glyph,
                 glyph_style,
-                name: counted_name(name, 1, name_width, theme.glyphs.dimension),
+                name: name.to_owned(),
+                count: 1,
                 health: None,
             });
         }
@@ -521,9 +546,10 @@ fn tile_in_view(game: &Game, tile: Tile) -> bool {
 }
 
 /// The "in view" block in at most `rows` rows of `width` columns: its
-/// title, then `entries` in order, a monster's health right-aligned; when
-/// they overflow, the last row tells how many it replaces. Nothing at all
-/// when `rows` is 0.
+/// title, then `entries` in order, each on its one or two rows
+/// ([`entry_lines`]); when they overflow, the last row tells how many
+/// entries it replaces, and an entry is shown whole or not at all. Nothing
+/// at all when `rows` is 0.
 fn in_view_lines(
     entries: Vec<Entry>,
     rows: usize,
@@ -537,56 +563,106 @@ fn in_view_lines(
     // Rows under the title; when the entries overflow them, the last one
     // tells how many entries it replaces.
     let room = rows - 1;
-    let overflows = entries.len() > room;
-    let shown = if overflows {
+    let wanted: usize = entries.iter().map(|entry| entry.rows(width)).sum();
+    let overflows = wanted > room;
+    let budget = if overflows {
         room.saturating_sub(1)
     } else {
-        entries.len()
+        room
     };
-    let hidden = entries.len() - shown;
-    lines.extend(
-        entries
-            .into_iter()
-            .take(shown)
-            .map(|entry| entry_line(entry, width, theme)),
-    );
+    let total = entries.len();
+    let (mut shown, mut used) = (0, 0);
+    for entry in entries {
+        let entry_rows = entry.rows(width);
+        if used + entry_rows > budget {
+            break;
+        }
+        used += entry_rows;
+        shown += 1;
+        lines.extend(entry_lines(entry, width, theme));
+    }
     if overflows && room > 0 {
         lines.push(Line::styled(
-            messages::more_in_view(hidden),
+            messages::more_in_view(total - shown),
             theme.text_muted,
         ));
     }
     lines
 }
 
-/// One line of the "in view" list, `width` columns wide: the glyph, a blank
-/// and the name in `text`, then the health, if any, right-aligned in the
-/// style of its level, at least one blank column after the name.
-fn entry_line(entry: Entry, width: u16, theme: &Theme) -> Line<'static> {
-    let name = format!(" {}", entry.name);
+/// Columns left for the name, its count and the health on a row of the
+/// list `width` columns wide: the glyph and the blank after it take two.
+fn name_width(width: u16) -> usize {
+    usize::from(width).saturating_sub(2)
+}
+
+/// The rows of one entry of the "in view" list, `width` columns wide, as
+/// many as [`Entry::rows`] says.
+///
+/// On one row: the glyph, a blank and the name with its count in `text`,
+/// then the health, if any, right-aligned in the style of its level, at
+/// least one blank column after the name; a name without health is cut
+/// before its count if the row is too narrow. On two rows: the glyph, a
+/// blank and the name alone on the first, cut only if wider than the row,
+/// then on the second the count, if any, in `text` and the health,
+/// right-aligned.
+fn entry_lines(entry: Entry, width: u16, theme: &Theme) -> Vec<Line<'static>> {
+    let rows = entry.rows(width);
+    let times = theme.glyphs.dimension;
     let glyph = Span::styled(entry.glyph.to_string(), entry.glyph_style);
     let Some((health, style)) = entry.health else {
-        return Line::from(vec![glyph, Span::styled(name, theme.text)]);
+        let name = counted_name(&entry.name, entry.count, name_width(width), times);
+        return vec![Line::from(vec![
+            glyph,
+            Span::styled(format!(" {name}"), theme.text),
+        ])];
     };
-    // The glyph takes one column.
-    let used = 1 + name.chars().count() + health.chars().count();
-    let gap = usize::from(width).saturating_sub(used).max(1);
-    Line::from(vec![
-        glyph,
-        Span::styled(name, theme.text),
-        Span::raw(" ".repeat(gap)),
-        Span::styled(health, style),
-    ])
+    let count = count_suffix(entry.count, times);
+    if rows == 1 {
+        let name = format!(" {}{count}", entry.name);
+        // The glyph takes one column.
+        let used = 1 + name.chars().count() + health.chars().count();
+        let gap = usize::from(width).saturating_sub(used).max(1);
+        return vec![Line::from(vec![
+            glyph,
+            Span::styled(name, theme.text),
+            Span::raw(" ".repeat(gap)),
+            Span::styled(health, style),
+        ])];
+    }
+    let name = counted_name(&entry.name, 1, name_width(width), times);
+    // " ×2" becomes "×2 ", a blank between the count and the figures.
+    let count = count.trim_start();
+    let count = if count.is_empty() {
+        String::new()
+    } else {
+        format!("{count} ")
+    };
+    let indent = usize::from(width).saturating_sub(count.chars().count() + health.chars().count());
+    vec![
+        Line::from(vec![glyph, Span::styled(format!(" {name}"), theme.text)]),
+        Line::from(vec![
+            Span::raw(" ".repeat(indent)),
+            Span::styled(count, theme.text),
+            Span::styled(health, style),
+        ]),
+    ]
+}
+
+/// The count written after a name: " ×3" for `count` above 1, with `times`
+/// as the sign, nothing for a single thing.
+fn count_suffix(count: usize, times: char) -> String {
+    if count > 1 {
+        format!(" {times}{count}")
+    } else {
+        String::new()
+    }
 }
 
 /// `name` followed by `×count` when `count` is above 1, cut so the whole
 /// fits in `width` characters; the count is kept and the name shortened.
 fn counted_name(name: &str, count: usize, width: usize, times: char) -> String {
-    let suffix = if count > 1 {
-        format!(" {times}{count}")
-    } else {
-        String::new()
-    };
+    let suffix = count_suffix(count, times);
     let room = width.saturating_sub(suffix.chars().count());
     let short: String = name.chars().take(room).collect();
     format!("{}{suffix}", short.trim_end())
@@ -677,12 +753,7 @@ mod tests {
         width: u16,
         theme: &Theme,
     ) -> Vec<Line<'static>> {
-        in_view_lines(
-            in_view_entries(game, content, width, theme),
-            rows,
-            width,
-            theme,
-        )
+        in_view_lines(in_view_entries(game, content, theme), rows, width, theme)
     }
 
     /// The text of `lines`.
@@ -843,26 +914,81 @@ mod tests {
     }
 
     #[test]
-    fn a_long_name_is_shortened_before_the_count_or_the_health() {
+    fn a_long_name_keeps_a_row_and_its_count_and_health_go_below() {
         let far = Position::new(PLAYER_START.x + 4, PLAYER_START.y);
         let (game, content, hp) = wounded_room(&[("lead", far), ("lead", NEXT_TO_START)], 2);
         assert_eq!(hp, 26);
-        for (glyph_set, line) in [
-            (GlyphSet::Unicode, "H lead hom ×2 26/28"),
-            (GlyphSet::Ascii, "H lead hom x2 26/28"),
+        for (glyph_set, figures) in [
+            (GlyphSet::Unicode, "           ×2 26/28"),
+            (GlyphSet::Ascii, "           x2 26/28"),
         ] {
             let theme = Theme::new(ColorMode::Monochrome, glyph_set);
 
             let lines = in_view_block(&game, &content, 10, 19, &theme);
 
-            assert_eq!(texts(&lines)[2], line, "{glyph_set:?}");
+            assert_eq!(
+                texts(&lines)[2..],
+                ["H lead homunculus", figures],
+                "{glyph_set:?}"
+            );
+            assert_eq!(lines[3].width(), 19, "right-aligned");
         }
 
-        // Alone, the kind keeps three more letters of its name.
+        // Alone, the health goes below the whole name as well.
         let (game, content, _) = wounded_room(&[("lead", NEXT_TO_START)], 0);
         let theme = Theme::new(ColorMode::Monochrome, GlyphSet::Ascii);
         let lines = in_view_block(&game, &content, 10, 19, &theme);
-        assert_eq!(texts(&lines)[2], "H lead homunc 28/28");
+        assert_eq!(
+            texts(&lines)[2..],
+            ["H lead homunculus", "              28/28"]
+        );
+    }
+
+    #[test]
+    fn a_name_that_fits_with_its_count_and_health_keeps_one_row() {
+        // "rat ×2", a blank and "5/8" take 10 of the 17 columns.
+        let far = Position::new(PLAYER_START.x + 4, PLAYER_START.y);
+        let shade = Position::new(PLAYER_START.x + 2, PLAYER_START.y + 2);
+        let (game, content, _) =
+            wounded_room(&[("rat", far), ("shade", shade), ("rat", NEXT_TO_START)], 3);
+        let theme = Theme::new(ColorMode::Monochrome, GlyphSet::Unicode);
+
+        let lines = in_view_block(&game, &content, 10, 19, &theme);
+
+        assert_eq!(
+            texts(&lines),
+            [
+                "IN VIEW",
+                "@ you",
+                "v rat ×2        5/8",
+                "s shade         7/7"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_two_row_entry_is_shown_whole_or_counted_on_the_last_row() {
+        // The player and a shade take two rows, the lead homunculus two
+        // more: with three rows under the title it is replaced by
+        // "and 1 more" rather than shown without its health.
+        let shade = Position::new(PLAYER_START.x + 2, PLAYER_START.y + 2);
+        let (game, content, _) = wounded_room(&[("shade", shade), ("lead", NEXT_TO_START)], 0);
+        let theme = Theme::new(ColorMode::Monochrome, GlyphSet::Ascii);
+
+        assert_eq!(
+            texts(&in_view_block(&game, &content, 4, 19, &theme)),
+            ["IN VIEW", "@ you", "s shade         7/7", "and 1 more"]
+        );
+        assert_eq!(
+            texts(&in_view_block(&game, &content, 5, 19, &theme)),
+            [
+                "IN VIEW",
+                "@ you",
+                "s shade         7/7",
+                "H lead homunculus",
+                "              28/28"
+            ]
+        );
     }
 
     #[test]

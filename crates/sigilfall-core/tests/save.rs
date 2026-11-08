@@ -586,6 +586,52 @@ fn an_inconsistent_save_is_refused() {
     }
 }
 
+#[test]
+fn a_save_whose_seal_and_depth_disagree_is_refused() {
+    // A first floor of a real run: stairs, no seal. Its save, edited, gives
+    // the bottom floor (depth 10) with or without the seal.
+    let content = content();
+    let text = saved(&Game::new(Seed::new(36), &content));
+    assert_eq!(text.matches('>').count(), 1, "the stairs, once:\n{text}");
+    assert!(!text.contains('*'), "no seal on the first floor");
+    let bottom =
+        text.replacen("depth: 1,", "depth: 10,", 1)
+            .replacen("deepest: 1,", "deepest: 10,", 1);
+    let sealed = |text: &str| text.replacen('>', "*", 1);
+    // The bottom floor with its seal in place of the stairs is a state the
+    // game reaches: it reads back.
+    let loaded = save::from_str(&sealed(&bottom), &content).expect("a sealed bottom floor");
+    assert_eq!(loaded.depth(), 10);
+    let cases = [
+        (
+            bottom.clone(),
+            "floor 10 is the bottom of the dungeon, but its map has no seal",
+        ),
+        (
+            sealed(&text),
+            "floor 1 is above the bottom of the dungeon, but its map holds a seal",
+        ),
+        (
+            sealed(&bottom).replacen("#", ">", 1),
+            "floor 10 is the bottom of the dungeon, but its map has stairs down",
+        ),
+        (
+            text.replacen("status: Playing", "status: Won", 1),
+            "the game is won on floor 1, but only breaking the seal of floor 10 wins",
+        ),
+    ];
+
+    for (edited, expected) in cases {
+        let error = save::from_str(&edited, &content).expect_err("an inconsistent seal");
+
+        assert_eq!(error, SaveError::Inconsistent(expected.to_owned()));
+        assert_eq!(
+            error.to_string(),
+            format!("the save is inconsistent: {expected}")
+        );
+    }
+}
+
 /// The date of the daily runs of these tests.
 fn daily_date() -> DailyDate {
     DailyDate::new(2026, 11, 8).expect("a real date")

@@ -7,7 +7,8 @@
 //! panicking or hanging later in play: definitions are looked up in the
 //! content, keys must name actors and items of the save, and each value must
 //! be one the rules could have produced (a daily run's seed being the one
-//! of its date, actors, items and glyphs on
+//! of its date, the seal on the bottom floor only and in place of its
+//! stairs, a victory there only, actors, items and glyphs on
 //! walkable cells of the map, one of each per cell, hit points and essence
 //! within their maximums, counters within bounds, the turn order holding
 //! every actor once, statistics naming monsters of the content…).
@@ -23,12 +24,12 @@ use super::{Game, Status};
 use crate::actor::{Actor, ActorId, ActorKind, Monster};
 use crate::combat::{CombatStats, Combatant};
 use crate::content::{
-    Content, ItemDef, MAX_ATTACK, MAX_DEFENSE, MAX_HP, MAX_POWER, MAX_SPEED, SigilDef,
+    Content, ItemDef, MAX_ATTACK, MAX_DEFENSE, MAX_DEPTH, MAX_HP, MAX_POWER, MAX_SPEED, SigilDef,
 };
-use crate::generation::{Engraving, FIRST_DEPTH};
+use crate::generation::{Engraving, FIRST_DEPTH, is_bottom_floor};
 use crate::geometry::Position;
 use crate::item::{INVENTORY_CAPACITY, Item, ItemId};
-use crate::map::Map;
+use crate::map::{Map, Tile};
 use crate::rng::{DailyDate, Seed};
 use crate::save::{
     ActorKindRecord, ActorRecord, DailyRecord, EngravingRecord, FORMAT_VERSION, GameRecord,
@@ -117,6 +118,7 @@ impl Game {
             .transpose()?;
         check_stats(&record.stats, record.depth, content)?;
         let map = record.map.to_map()?;
+        check_way_down(&map, record.depth, &record.status)?;
         let grimoire = grimoire_of(&record.grimoire, content)?;
         let engravings = engravings_of(record.engravings, &map, content)?;
 
@@ -348,6 +350,46 @@ fn check_counters(record: &GameRecord) -> Result<(), SaveError> {
         record.steady_casts,
         0..=MAX_STEADY_CASTS,
     )
+}
+
+/// Checks that the way down of `map`, the floor `depth` of a game whose
+/// status is `status`, is the one the generator lays there (decision D23):
+/// the bottom floor (`generation::is_bottom_floor`) holds the seal and no
+/// stairs, a floor above holds no seal, and only a game on the bottom floor
+/// can be won, since breaking its seal is the only way to win.
+///
+/// A floor above the bottom may lack stairs: the fixed room of the tests
+/// (`Game::in_fixed_room`) has none.
+///
+/// # Errors
+///
+/// Returns [`SaveError::Inconsistent`] naming the floor and what its map
+/// lacks or holds wrongly, or the floor a won game stands on.
+fn check_way_down(map: &Map, depth: u32, status: &Status) -> Result<(), SaveError> {
+    let holds = |tile: Tile| map.positions().any(|cell| map.tile(cell) == Some(tile));
+    let bottom = is_bottom_floor(depth);
+    if bottom && !holds(Tile::Seal) {
+        return Err(inconsistent(format!(
+            "floor {depth} is the bottom of the dungeon, but its map has no seal"
+        )));
+    }
+    if bottom && holds(Tile::StairsDown) {
+        return Err(inconsistent(format!(
+            "floor {depth} is the bottom of the dungeon, but its map has stairs down"
+        )));
+    }
+    if !bottom && holds(Tile::Seal) {
+        return Err(inconsistent(format!(
+            "floor {depth} is above the bottom of the dungeon, but its map holds a seal"
+        )));
+    }
+    if !bottom && *status == Status::Won {
+        return Err(inconsistent(format!(
+            "the game is won on floor {depth}, but only breaking the seal of floor \
+             {MAX_DEPTH} wins"
+        )));
+    }
+    Ok(())
 }
 
 /// Checks the run's statistics `stats` of a game on floor `depth`.

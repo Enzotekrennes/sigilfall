@@ -113,7 +113,9 @@ pub fn to_string(game: &Game) -> Result<String, SaveError> {
 ///   sigil `content` does not define;
 /// - [`SaveError::Inconsistent`] if its values could not be played: an
 ///   actor or an item outside the map or on a wall, two actors on one cell,
-///   no player, a key naming nothing, a value out of its bounds…
+///   no player, a key naming nothing, a value out of its bounds, a bottom
+///   floor without its seal or with stairs, a seal or a victory above the
+///   bottom floor…
 pub fn from_str(text: &str, content: &Content) -> Result<Game, SaveError> {
     let header: Header = ron::from_str(text).map_err(SaveError::malformed)?;
     if header.format_version != FORMAT_VERSION {

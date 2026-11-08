@@ -951,7 +951,10 @@ fn a_game_saved_by_the_game_on_the_tenth_floor_after_a_descent_reads_back_with_i
     walk_keys(&mut app, 0, |_| {});
     tap(&mut app, '>');
     assert_eq!(app.game().depth(), BOTTOM);
-    assert_eq!(last_log_line(&app), "You descend to depth 10.");
+    assert_eq!(
+        last_log_line(&app),
+        "You descend to depth 10, the last. The seal lies here."
+    );
     tap(&mut app, 'q');
     app.save_on_exit().expect("the game is saved");
 
