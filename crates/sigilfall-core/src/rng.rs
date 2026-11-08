@@ -186,6 +186,13 @@ pub enum Purpose {
     Generation,
     /// Everything decided while playing: combat rolls and monster choices.
     Gameplay,
+    /// Choosing how a floor is laid out (rooms or caves), before
+    /// [`Purpose::Generation`] lays it out.
+    ///
+    /// The choice has its own stream so that adding it left every layout
+    /// drawn from the generation stream as it was: a floor of rooms is the
+    /// same whether or not caves could have been drawn instead.
+    FloorKind,
 }
 
 impl Purpose {
@@ -198,6 +205,7 @@ impl Purpose {
         match self {
             Self::Generation => 1,
             Self::Gameplay => 2,
+            Self::FloorKind => 3,
         }
     }
 }
@@ -329,7 +337,7 @@ mod tests {
     fn the_same_seed_depth_and_purpose_give_the_same_values() {
         for seed in [0, 1, 42, u64::MAX].map(Seed::new) {
             for depth in [0, 1, 7, u32::MAX] {
-                for purpose in [Purpose::Generation, Purpose::Gameplay] {
+                for purpose in [Purpose::Generation, Purpose::Gameplay, Purpose::FloorKind] {
                     assert_eq!(
                         first_values(seed, depth, purpose, 64),
                         first_values(seed, depth, purpose, 64),
@@ -348,6 +356,16 @@ mod tests {
                 first_values(REFERENCE_SEED, depth, Purpose::Gameplay, 4),
                 "depth {depth}"
             );
+            assert_ne!(
+                first_values(REFERENCE_SEED, depth, Purpose::Generation, 4),
+                first_values(REFERENCE_SEED, depth, Purpose::FloorKind, 4),
+                "depth {depth}"
+            );
+            assert_ne!(
+                first_values(REFERENCE_SEED, depth, Purpose::Gameplay, 4),
+                first_values(REFERENCE_SEED, depth, Purpose::FloorKind, 4),
+                "depth {depth}"
+            );
         }
     }
 
@@ -355,7 +373,7 @@ mod tests {
     fn depths_have_different_streams() {
         let mut streams: Vec<Vec<u64>> = (0..100)
             .flat_map(|depth| {
-                [Purpose::Generation, Purpose::Gameplay]
+                [Purpose::Generation, Purpose::Gameplay, Purpose::FloorKind]
                     .map(|purpose| first_values(REFERENCE_SEED, depth, purpose, 4))
             })
             .collect();

@@ -1,8 +1,10 @@
 //! Dungeon floors built from the run's seed: layout, start, stairs,
 //! monsters, engraved glyphs and items.
 //!
-//! Exposes [`generate`] (the layout alone), [`generate_with_monsters`]
-//! (with monsters, glyphs and items), [`Floor`], [`MonsterSpawn`],
+//! Exposes [`generate`] (a layout of rooms alone), [`generate_of_kind`] (a
+//! layout of the given kind alone), [`floor_kind`] (the kind of a floor),
+//! [`generate_with_monsters`] (the floor of its kind, with monsters,
+//! glyphs and items), [`Floor`], [`MonsterSpawn`],
 //! [`Engraving`], [`ItemSpawn`], the size of a floor ([`FLOOR_WIDTH`],
 //! [`FLOOR_HEIGHT`]), [`FIRST_DEPTH`], the rule of difficulty
 //! ([`monsters_per_floor`] with [`MONSTERS_PER_FLOOR`],
@@ -14,22 +16,29 @@
 //! The same seed and depth therefore give the same floor on every platform,
 //! whatever happened on earlier floors.
 //!
-//! The layout itself comes from the `bsp` submodule (rooms and corridors).
+//! The layout itself comes from the `bsp` submodule (rooms and corridors)
+//! or the `caves` submodule (one cave grown by a cellular automaton),
+//! depending on the kind of the floor. The kind is drawn first, from its own
+//! stream `Seed::stream(depth, Purpose::FloorKind)` and the weights of the
+//! content's floor file, so choosing it never shifts the draws of a layout.
 //! Monsters are drawn after the layout, engraved glyphs after the monsters,
-//! and items after the glyphs, all from the same stream, so placing what
-//! comes later never changes the layout, the monsters or the glyphs of a
-//! seed.
+//! and items after the glyphs, all from the generation stream, so placing
+//! what comes later never changes the layout, the monsters or the glyphs of
+//! a seed. Both kinds share every step after the layout: only the cells
+//! open to placement differ (the rooms of a floor of rooms, the whole of a
+//! cave).
 //!
 //! Difficulty grows with depth in two ways: the spawn tables of the content
 //! favour stronger creatures deeper down (`Content::monster_weights`), and
 //! deeper floors hold more of them ([`monsters_per_floor`]).
 
 mod bsp;
+mod caves;
 
 use rand::RngExt as _;
 use rand_chacha::ChaCha8Rng;
 
-use crate::content::{Content, ItemDef, MonsterDef, SigilDef};
+use crate::content::{Content, FloorKind, ItemDef, MonsterDef, SigilDef};
 use crate::fov::{self, SIGHT_RADIUS};
 use crate::geometry::Position;
 use crate::map::{Map, Tile};
@@ -116,7 +125,7 @@ pub fn monsters_per_floor(depth: u32) -> usize {
 pub struct Floor {
     /// The tiles, with [`Tile::StairsDown`] at `stairs`.
     pub(crate) map: Map,
-    /// Floor cell, inside a room, where the player arrives.
+    /// Floor cell, inside a room or the cave, where the player arrives.
     pub(crate) start: Position,
     /// Cell of the stairs down.
     pub(crate) stairs: Position,
@@ -141,8 +150,8 @@ pub struct ItemSpawn {
 }
 
 impl ItemSpawn {
-    /// Returns the floor cell the item lies on: a plain floor cell of a room
-    /// that the player can walk to from the start.
+    /// Returns the floor cell the item lies on: a plain floor cell of a room,
+    /// or of the cave, that the player can walk to from the start.
     pub const fn position(&self) -> Position {
         self.position
     }
@@ -195,7 +204,8 @@ pub struct MonsterSpawn {
 
 impl MonsterSpawn {
     /// Returns the floor cell the monster stands on: inside a room other
-    /// than the start room, out of the player's sight range from the start.
+    /// than the start room, or anywhere in the cave, out of the player's
+    /// sight range from the start.
     pub const fn position(&self) -> Position {
         self.position
     }
@@ -228,7 +238,7 @@ impl Floor {
     }
 
     /// Returns the cell where the player arrives: a floor cell of one of the
-    /// rooms.
+    /// rooms, or of the cave.
     pub const fn start(&self) -> Position {
         self.start
     }
@@ -261,13 +271,31 @@ impl Floor {
     }
 }
 
-/// Builds floor `depth` of the run identified by `seed`.
+/// Builds floor `depth` of the run identified by `seed` as a floor of rooms:
+/// [`generate_of_kind`] with [`FloorKind::Rooms`], whatever kind the
+/// content gives that floor.
 ///
-/// The floor is [`FLOOR_WIDTH`] × [`FLOOR_HEIGHT`] cells of rooms joined by
-/// corridors, enclosed by walls on every edge, and every walkable cell can
-/// be reached from every other one. The number of rooms, from 8 to 16,
-/// varies from floor to floor. The player starts on a random cell of a
-/// random room.
+/// A game without content lays out every floor this way. Tests that walk a
+/// generated floor use it too: the first floor of a seed, always rooms in
+/// the shipped content, is exactly this layout.
+pub fn generate(seed: Seed, depth: u32) -> Floor {
+    generate_of_kind(seed, depth, FloorKind::Rooms)
+}
+
+/// Builds floor `depth` of the run identified by `seed`, laid out as `kind`.
+///
+/// The floor is [`FLOOR_WIDTH`] × [`FLOOR_HEIGHT`] cells enclosed by walls
+/// on every edge, and every walkable cell can be reached from every other
+/// one:
+///
+/// - [`FloorKind::Rooms`]: rooms joined by corridors, from 8 to 16 rooms
+///   depending on the floor. The player starts on a random cell of a random
+///   room.
+/// - [`FloorKind::Caves`]: one cave grown by a cellular automaton, almost
+///   always of 900 open cells or more. The player starts at one end of it:
+///   the walkable cell farthest from a random cell of the cave, so the
+///   crossing spans the whole cave rather than half of it from a start
+///   drawn in its middle.
 ///
 /// The stairs go on the walkable cell farthest from the start in steps (the
 /// [`DijkstraMap`] of the start, ties broken in reading order). Placing them
@@ -275,25 +303,47 @@ impl Floor {
 /// stairs are always in the farthest third of the floor, the guarantee the
 /// game design asks for.
 ///
-/// Calling this twice with the same arguments returns equal floors. `depth`
+/// Every draw comes from `Seed::stream(depth, Purpose::Generation)`, so
+/// calling this twice with the same arguments returns equal floors. `depth`
 /// is the floor number, [`FIRST_DEPTH`] for the first one; any value is
 /// accepted. No monster, glyph nor item is placed: see
 /// [`generate_with_monsters`].
-pub fn generate(seed: Seed, depth: u32) -> Floor {
-    lay_out(&mut seed.stream(depth, Purpose::Generation)).floor
+pub fn generate_of_kind(seed: Seed, depth: u32, kind: FloorKind) -> Floor {
+    lay_out(kind, &mut seed.stream(depth, Purpose::Generation)).floor
 }
 
-/// Builds floor `depth` of the run identified by `seed`, as [`generate`]
-/// does, and places [`monsters_per_floor`] monsters, [`GLYPHS_PER_FLOOR`]
-/// engraved glyphs and [`ITEMS_PER_FLOOR`] items on it.
+/// Returns how floor `depth` of the run identified by `seed` is laid out:
+/// a kind drawn among `content.floor_kind_weights(depth)`, each with a
+/// chance proportional to its weight.
 ///
-/// The map, start and stairs are exactly those of [`generate`] with the same
-/// seed and depth. Then, from the same generation stream, each monster gets
-/// in turn:
+/// The draw is the first of `Seed::stream(depth, Purpose::FloorKind)`, a
+/// stream used for nothing else, so the kind is a pure function of the
+/// seed, the depth and the content, and drawing it never changes the
+/// layout of a floor of that kind. A floor with a single kind always gets
+/// it.
+pub fn floor_kind(seed: Seed, depth: u32, content: &Content) -> FloorKind {
+    let kinds: Vec<(FloorKind, u32)> = content.floor_kind_weights(depth).collect();
+    let table: Vec<(&FloorKind, u32)> =
+        kinds.iter().map(|(kind, weight)| (kind, *weight)).collect();
+    *draw_weighted(&table, &mut seed.stream(depth, Purpose::FloorKind))
+}
+
+/// Builds floor `depth` of the run identified by `seed`, laid out as the
+/// kind [`floor_kind`] draws for it, and places [`monsters_per_floor`]
+/// monsters, [`GLYPHS_PER_FLOOR`] engraved glyphs and [`ITEMS_PER_FLOOR`]
+/// items on it.
 ///
-/// - a cell drawn uniformly among the free floor cells of the rooms, the
-///   start room excluded, that lie out of [`SIGHT_RADIUS`] of the start
-///   (whatever the walls), so the player sees no monster on arrival;
+/// The map, start and stairs are exactly those of [`generate_of_kind`] with
+/// the same seed, depth and kind. Below, the open cells are the cells of the
+/// rooms (room by room in layout order, reading order within a room; the
+/// corridors are left out) on a floor of rooms, and every walkable cell in
+/// reading order in a cave. Then, from the same generation stream, each
+/// monster gets in turn:
+///
+/// - a cell drawn uniformly among the free floor cells of the open cells,
+///   the start room excluded on a floor of rooms, that lie out of
+///   [`SIGHT_RADIUS`] of the start (whatever the walls), so the player sees
+///   no monster on arrival;
 /// - a definition drawn among `content.monster_weights(depth)`, each with a
 ///   chance proportional to its weight, in one draw of the stream;
 /// - a starting energy (see [`MonsterSpawn::energy`]).
@@ -303,7 +353,7 @@ pub fn generate(seed: Seed, depth: u32) -> Floor {
 /// free cell.
 ///
 /// Then, still from the same stream, each glyph gets in turn a cell drawn
-/// uniformly among the plain floor cells of every room (the start room
+/// uniformly among the plain floor cells of the open cells (the start room
 /// included) that hold neither the start, the stairs, a monster nor
 /// another glyph, and a sigil drawn uniformly among the sigils of
 /// `content` whose glyph can appear at `depth` (`SigilDef::can_appear_at`)
@@ -313,7 +363,7 @@ pub fn generate(seed: Seed, depth: u32) -> Floor {
 /// available that deep.
 ///
 /// Last, still from the same stream, each item gets in turn a cell drawn
-/// uniformly among the plain floor cells of every room (the start room
+/// uniformly among the plain floor cells of the open cells (the start room
 /// included) that hold neither the start, the stairs, a monster, a glyph
 /// nor another item, and a definition drawn among
 /// `content.item_weights(depth)` according to the weights, as for monsters;
@@ -325,59 +375,95 @@ pub fn generate(seed: Seed, depth: u32) -> Floor {
 ///
 /// Calling this twice with the same arguments returns equal floors.
 pub fn generate_with_monsters(seed: Seed, depth: u32, content: &Content) -> Floor {
+    let kind = floor_kind(seed, depth, content);
     let mut rng = seed.stream(depth, Purpose::Generation);
     let Layout {
         mut floor,
-        rooms,
+        open_cells,
         start_room,
-    } = lay_out(&mut rng);
-    let cells = monster_cells(&floor, &rooms, start_room);
+    } = lay_out(kind, &mut rng);
+    let cells = monster_cells(&floor, &open_cells, start_room);
     let table: Vec<(&MonsterDef, u32)> = content.monster_weights(depth).collect();
     floor.monsters = draw_monsters(cells, &table, monsters_per_floor(depth), &mut rng);
-    let cells = glyph_cells(&floor, &rooms);
+    let cells = glyph_cells(&floor, &open_cells);
     let sigils: Vec<&SigilDef> = content
         .sigils()
         .iter()
         .filter(|sigil| sigil.can_appear_at(depth))
         .collect();
     floor.glyphs = draw_glyphs(cells, sigils, &mut rng);
-    let cells = item_cells(&floor, &rooms);
+    let cells = item_cells(&floor, &open_cells);
     let table: Vec<(&ItemDef, u32)> = content.item_weights(depth).collect();
     floor.items = draw_items(cells, &table, &mut rng);
     floor
 }
 
-/// A floor without monsters, with the rooms it was carved from.
+/// A floor without monsters, with the cells things may be placed on.
 struct Layout {
     /// The floor: map, start and stairs, no monster.
     floor: Floor,
-    /// Every room of the floor, in the order the layout produced them.
-    rooms: Vec<bsp::Rect>,
-    /// Index in `rooms` of the room holding the start.
-    start_room: usize,
+    /// The cells monsters, glyphs and items may be drawn among, in the order
+    /// the draws index them: room by room in layout order and in reading
+    /// order within a room on a floor of rooms (corridors left out), every
+    /// walkable cell in reading order in a cave. May include the start and
+    /// the stairs, which the placement rules leave out.
+    open_cells: Vec<Position>,
+    /// The room holding the start on a floor of rooms, where no monster
+    /// waits; `None` in a cave, whose start is kept clear by the sight range
+    /// rule alone.
+    start_room: Option<bsp::Rect>,
 }
 
-/// Carves the rooms and corridors, then picks the start and the stairs,
-/// drawing from `rng`.
+/// Lays out a floor of `kind`, then picks the start and the stairs, drawing
+/// from `rng`.
 ///
 /// The stream is left right after the last draw of the layout, ready for
 /// whatever is placed next.
-fn lay_out(rng: &mut ChaCha8Rng) -> Layout {
-    let (mut map, rooms) = bsp::carve(FLOOR_WIDTH, FLOOR_HEIGHT, rng);
+fn lay_out(kind: FloorKind, rng: &mut ChaCha8Rng) -> Layout {
+    match kind {
+        FloorKind::Rooms => lay_out_rooms(rng),
+        FloorKind::Caves => lay_out_cave(rng),
+    }
+}
+
+/// Carves the rooms and corridors, then picks the start in a random room
+/// and the stairs at the farthest cell, drawing from `rng`.
+fn lay_out_rooms(rng: &mut ChaCha8Rng) -> Layout {
+    let (map, rooms) = bsp::carve(FLOOR_WIDTH, FLOOR_HEIGHT, rng);
     let (start_room, start) = choose_start(&rooms, rng);
+    Layout {
+        floor: with_stairs(map, start),
+        open_cells: rooms.iter().flat_map(|room| room.cells()).collect(),
+        start_room: Some(rooms[start_room]),
+    }
+}
+
+/// Grows a cave, then picks the start at one end of it and the stairs at
+/// the farthest cell, drawing from `rng`.
+fn lay_out_cave(rng: &mut ChaCha8Rng) -> Layout {
+    let map = caves::carve(FLOOR_WIDTH, FLOOR_HEIGHT, rng);
+    let open_cells: Vec<Position> = map.positions().filter(|&p| map.is_walkable(p)).collect();
+    let start = choose_cave_start(&map, &open_cells, rng);
+    Layout {
+        floor: with_stairs(map, start),
+        open_cells,
+        start_room: None,
+    }
+}
+
+/// Returns the floor of `map` with the player arriving at `start` and the
+/// stairs down on the walkable cell farthest from it (see
+/// [`farthest_cell`]), with neither monster, glyph nor item.
+fn with_stairs(mut map: Map, start: Position) -> Floor {
     let stairs = farthest_cell(&map, start);
     map.set_tile(stairs, Tile::StairsDown);
-    Layout {
-        floor: Floor {
-            map,
-            start,
-            stairs,
-            monsters: Vec::new(),
-            glyphs: Vec::new(),
-            items: Vec::new(),
-        },
-        rooms,
-        start_room,
+    Floor {
+        map,
+        start,
+        stairs,
+        monsters: Vec::new(),
+        glyphs: Vec::new(),
+        items: Vec::new(),
     }
 }
 
@@ -393,17 +479,39 @@ fn choose_start(rooms: &[bsp::Rect], rng: &mut ChaCha8Rng) -> (usize, Position) 
     (index, rooms[index].random_cell(rng))
 }
 
-/// Returns the cells a monster may be placed on, room by room in layout
-/// order and in reading order within a room: plain floor cells (not the
-/// stairs) of every room but `start_room`, out of sight range of the start.
-fn monster_cells(floor: &Floor, rooms: &[bsp::Rect], start_room: usize) -> Vec<Position> {
-    rooms
+/// Picks the start of a cave: the walkable cell of `map` farthest from a
+/// cell drawn uniformly among `open_cells`, one end of the cave.
+///
+/// # Panics
+///
+/// Panics if `open_cells` is empty; a cave always has open cells.
+fn choose_cave_start(map: &Map, open_cells: &[Position], rng: &mut ChaCha8Rng) -> Position {
+    assert!(!open_cells.is_empty(), "a cave always has open cells");
+    farthest_cell(map, open_cells[rng.random_range(0..open_cells.len())])
+}
+
+/// Returns whether `position` lies inside `room`.
+const fn inside(room: bsp::Rect, position: Position) -> bool {
+    position.x >= room.x
+        && position.x < room.x + room.width
+        && position.y >= room.y
+        && position.y < room.y + room.height
+}
+
+/// Returns the cells a monster may be placed on, in the order of
+/// `open_cells`: plain floor cells (not the stairs) outside `start_room`, out
+/// of sight range of the start.
+fn monster_cells(
+    floor: &Floor,
+    open_cells: &[Position],
+    start_room: Option<bsp::Rect>,
+) -> Vec<Position> {
+    open_cells
         .iter()
-        .enumerate()
-        .filter(|&(index, _)| index != start_room)
-        .flat_map(|(_, room)| room.cells())
+        .copied()
         .filter(|&cell| {
-            floor.map.tile(cell) == Some(Tile::Floor)
+            start_room.is_none_or(|room| !inside(room, cell))
+                && floor.map.tile(cell) == Some(Tile::Floor)
                 && !fov::in_sight_range(floor.start, cell, SIGHT_RADIUS)
         })
         .collect()
@@ -438,14 +546,13 @@ fn draw_monsters(
     monsters
 }
 
-/// Returns the cells a glyph may be engraved on, room by room in layout
-/// order and in reading order within a room: plain floor cells (not the
-/// stairs) of every room that hold neither the start nor a monster of
-/// `floor`.
-fn glyph_cells(floor: &Floor, rooms: &[bsp::Rect]) -> Vec<Position> {
-    rooms
+/// Returns the cells a glyph may be engraved on, in the order of
+/// `open_cells`: plain floor cells (not the stairs) that hold neither the
+/// start nor a monster of `floor`.
+fn glyph_cells(floor: &Floor, open_cells: &[Position]) -> Vec<Position> {
+    open_cells
         .iter()
-        .flat_map(|room| room.cells())
+        .copied()
         .filter(|&cell| {
             floor.map.tile(cell) == Some(Tile::Floor)
                 && cell != floor.start
@@ -471,11 +578,11 @@ fn draw_glyphs(
     glyphs
 }
 
-/// Returns the cells an item may lie on, room by room in layout order and in
-/// reading order within a room: the cells a glyph may be engraved on (see
-/// [`glyph_cells`]) that hold no glyph of `floor`.
-fn item_cells(floor: &Floor, rooms: &[bsp::Rect]) -> Vec<Position> {
-    glyph_cells(floor, rooms)
+/// Returns the cells an item may lie on, in the order of `open_cells`: the
+/// cells a glyph may be engraved on (see [`glyph_cells`]) that hold no glyph
+/// of `floor`.
+fn item_cells(floor: &Floor, open_cells: &[Position]) -> Vec<Position> {
+    glyph_cells(floor, open_cells)
         .into_iter()
         .filter(|&cell| floor.glyphs.iter().all(|glyph| glyph.position != cell))
         .collect()
@@ -567,14 +674,6 @@ mod tests {
         Content::load().expect("the shipped content is valid")
     }
 
-    /// Whether `position` lies inside `room`.
-    const fn inside(room: bsp::Rect, position: Position) -> bool {
-        position.x >= room.x
-            && position.x < room.x + room.width
-            && position.y >= room.y
-            && position.y < room.y + room.height
-    }
-
     /// Every walkable cell of `map`, in reading order.
     fn walkable_cells(map: &Map) -> Vec<Position> {
         map.positions().filter(|&p| map.is_walkable(p)).collect()
@@ -610,35 +709,61 @@ mod tests {
         text
     }
 
+    /// Checks the guarantees every floor of any kind gives: its size, the
+    /// start on a floor cell, the stairs reachable and in the farthest third
+    /// from it, every walkable cell reachable from the start, and walls all
+    /// along the edges.
+    fn check_floor_guarantees(floor: &Floor) -> Result<(), TestCaseError> {
+        let map = floor.map();
+
+        prop_assert_eq!(map.width(), FLOOR_WIDTH);
+        prop_assert_eq!(map.height(), FLOOR_HEIGHT);
+        prop_assert_eq!(map.tile(floor.start()), Some(Tile::Floor));
+        prop_assert_eq!(map.tile(floor.stairs()), Some(Tile::StairsDown));
+
+        // Every room and corridor, or every part of the cave, is reachable
+        // from the start.
+        prop_assert_eq!(flood_fill(map, floor.start()), walkable_cells(map));
+
+        // The stairs are reachable and in the farthest third.
+        let distances = DijkstraMap::new(map, [floor.start()]);
+        let (_, farthest) = distances.farthest().unwrap();
+        let stairs = distances.distance(floor.stairs());
+        prop_assert!(stairs.is_some_and(|d| 3 * d >= 2 * farthest && d > 0));
+
+        for position in map.positions().filter(|&p| on_border(map, p)) {
+            prop_assert_eq!(map.tile(position), Some(Tile::Wall));
+        }
+        Ok(())
+    }
+
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(PROPERTY_CASES))]
 
-        /// The guarantees of every floor, on random seeds and depths.
+        /// The guarantees of every floor of rooms, on random seeds and depths.
         #[test]
         fn every_floor_is_connected_with_far_stairs_and_closed_edges(
             seed in any::<u64>(),
             depth in FIRST_DEPTH..=50,
         ) {
-            let floor = generate(Seed::new(seed), depth);
-            let map = floor.map();
+            check_floor_guarantees(&generate(Seed::new(seed), depth))?;
+        }
 
-            prop_assert_eq!(map.width(), FLOOR_WIDTH);
-            prop_assert_eq!(map.height(), FLOOR_HEIGHT);
-            prop_assert_eq!(map.tile(floor.start()), Some(Tile::Floor));
-            prop_assert_eq!(map.tile(floor.stairs()), Some(Tile::StairsDown));
+        /// The same guarantees for every cave, which is also large enough
+        /// and the same for the same seed and depth.
+        #[test]
+        fn every_cave_is_connected_with_far_stairs_and_closed_edges(
+            seed in any::<u64>(),
+            depth in FIRST_DEPTH..=50,
+        ) {
+            let cave = generate_of_kind(Seed::new(seed), depth, FloorKind::Caves);
 
-            // Every room and corridor is reachable from the start.
-            prop_assert_eq!(flood_fill(map, floor.start()), walkable_cells(map));
-
-            // The stairs are reachable and in the farthest third.
-            let distances = DijkstraMap::new(map, [floor.start()]);
-            let (_, farthest) = distances.farthest().unwrap();
-            let stairs = distances.distance(floor.stairs());
-            prop_assert!(stairs.is_some_and(|d| 3 * d >= 2 * farthest && d > 0));
-
-            for position in map.positions().filter(|&p| on_border(map, p)) {
-                prop_assert_eq!(map.tile(position), Some(Tile::Wall));
-            }
+            check_floor_guarantees(&cave)?;
+            prop_assert!(walkable_cells(cave.map()).len() >= caves::MIN_CAVE_CELLS);
+            prop_assert_eq!(
+                &cave,
+                &generate_of_kind(Seed::new(seed), depth, FloorKind::Caves)
+            );
         }
 
         /// Generation is a pure function of the seed and the depth.
@@ -648,6 +773,147 @@ mod tests {
             depth in FIRST_DEPTH..=50,
         ) {
             prop_assert_eq!(generate(Seed::new(seed), depth), generate(Seed::new(seed), depth));
+        }
+    }
+
+    #[test]
+    fn the_reference_cave_is_frozen() {
+        // Same as the reference floor of rooms: if this snapshot changes,
+        // every cave of every seed changes too.
+        assert_snapshot!(draw(&generate_of_kind(
+            REFERENCE_SEED,
+            MAX_DEPTH,
+            FloorKind::Caves
+        )));
+    }
+
+    #[test]
+    fn caves_and_rooms_of_the_same_floor_differ_and_keep_their_stairs_far() {
+        for seed in 0..50 {
+            let seed = Seed::new(seed);
+            let cave = generate_of_kind(seed, MAX_DEPTH, FloorKind::Caves);
+            let distances = DijkstraMap::new(cave.map(), [cave.start()]);
+
+            assert_ne!(cave.map(), generate(seed, MAX_DEPTH).map(), "{seed}");
+            assert_eq!(
+                distances.farthest(),
+                Some((cave.stairs(), distances.distance(cave.stairs()).unwrap())),
+                "{seed}"
+            );
+            // The start is one end of the cave: no cell lies farther from
+            // the stairs than the start does.
+            let back = DijkstraMap::new(cave.map(), [cave.stairs()]);
+            assert_eq!(
+                back.farthest().map(|(_, steps)| steps),
+                back.distance(cave.start()),
+                "{seed}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_first_floors_are_rooms_and_the_last_one_a_cave() {
+        let content = content();
+        for value in 0..SPAWN_SEEDS {
+            let seed = Seed::new(value);
+            assert_eq!(floor_kind(seed, FIRST_DEPTH, &content), FloorKind::Rooms);
+            assert_eq!(floor_kind(seed, 2, &content), FloorKind::Rooms);
+            assert_eq!(floor_kind(seed, MAX_DEPTH, &content), FloorKind::Caves);
+            assert_eq!(floor_kind(seed, MAX_DEPTH + 5, &content), FloorKind::Caves);
+        }
+        // The first floor of the reference seed is the floor of rooms frozen
+        // in its snapshot, monsters or not.
+        let first = generate_with_monsters(REFERENCE_SEED, FIRST_DEPTH, &content);
+        assert_eq!(first.map(), generate(REFERENCE_SEED, FIRST_DEPTH).map());
+    }
+
+    /// Number of seeds the floor kinds are checked on, at every depth: one
+    /// draw per floor, so 1 000 floors give more draws than
+    /// [`SHARE_TOLERANCE`] asks for.
+    const KIND_SEEDS: u64 = 1000;
+
+    #[test]
+    fn floor_kinds_follow_their_weights_on_1000_seeds() {
+        let content = content();
+        for depth in FIRST_DEPTH..=MAX_DEPTH + 2 {
+            let drawn: Vec<&str> = (0..KIND_SEEDS)
+                .map(|value| floor_kind(Seed::new(value), depth, &content).name())
+                .collect();
+            let table: Vec<(&str, u32)> = content
+                .floor_kind_weights(depth)
+                .map(|(kind, weight)| (kind.name(), weight))
+                .collect();
+
+            assert_follows(&drawn, &table, depth, "floor kind");
+        }
+        // Mixed floors do get both kinds.
+        let kinds: Vec<FloorKind> = (0..KIND_SEEDS)
+            .map(|value| floor_kind(Seed::new(value), 5, &content))
+            .collect();
+        assert!(kinds.contains(&FloorKind::Rooms) && kinds.contains(&FloorKind::Caves));
+    }
+
+    #[test]
+    fn a_floor_is_laid_out_as_its_kind() {
+        let content = content();
+        for value in 0..SPAWN_SEEDS {
+            let seed = Seed::new(value);
+            let depth = FIRST_DEPTH + u32::try_from(value).unwrap() % MAX_DEPTH;
+            let kind = floor_kind(seed, depth, &content);
+            let floor = generate_with_monsters(seed, depth, &content);
+
+            assert_eq!(kind, floor_kind(seed, depth, &content), "{value}");
+            let bare = generate_of_kind(seed, depth, kind);
+            assert_eq!(
+                (&bare.map, bare.start, bare.stairs),
+                (&floor.map, floor.start, floor.stairs),
+                "seed {value}, depth {depth}"
+            );
+        }
+    }
+
+    #[test]
+    fn caves_are_peopled_by_the_same_rules_as_rooms() {
+        let content = content();
+        for value in 0..SPAWN_SEEDS / 2 {
+            let seed = Seed::new(value);
+            let floor = generate_with_monsters(seed, MAX_DEPTH, &content);
+            let context = format!("seed {value}");
+            assert_eq!(
+                floor.map(),
+                generate_of_kind(seed, MAX_DEPTH, FloorKind::Caves).map(),
+                "{context}"
+            );
+
+            assert_eq!(
+                floor.monsters().len(),
+                monsters_per_floor(MAX_DEPTH),
+                "{context}"
+            );
+            assert_eq!(floor.glyphs().len(), GLYPHS_PER_FLOOR, "{context}");
+            assert_eq!(floor.items().len(), ITEMS_PER_FLOOR, "{context}");
+            let distances = DijkstraMap::new(floor.map(), [floor.start()]);
+            let seen_at_start = fov::visible_cells(floor.map(), floor.start(), SIGHT_RADIUS);
+            let mut cells: Vec<Position> = Vec::new();
+            let monsters = floor.monsters().iter().map(MonsterSpawn::position);
+            let glyphs = floor.glyphs().iter().map(Engraving::position);
+            let items = floor.items().iter().map(ItemSpawn::position);
+            for cell in monsters.clone().chain(glyphs).chain(items) {
+                assert_eq!(floor.map().tile(cell), Some(Tile::Floor), "{context}");
+                assert!(
+                    distances.distance(cell).is_some_and(|steps| steps > 0),
+                    "{context}: {cell:?} not reachable from the start"
+                );
+                assert!(!cells.contains(&cell), "{context}: {cell:?} twice");
+                cells.push(cell);
+            }
+            for cell in monsters {
+                assert!(
+                    !fov::in_sight_range(floor.start(), cell, SIGHT_RADIUS),
+                    "{context}: {cell:?} within sight range"
+                );
+                assert!(!seen_at_start.contains(&cell), "{context}: {cell:?} seen");
+            }
         }
     }
 
@@ -694,13 +960,14 @@ mod tests {
             let floor = generate_with_monsters(seed, depth, &content);
             let context = format!("seed {value}, depth {depth}");
 
-            // Deterministic, and the layout is that of `generate`.
+            // Deterministic, and the layout is that of `generate_of_kind`.
             assert_eq!(
                 floor,
                 generate_with_monsters(seed, depth, &content),
                 "{context}"
             );
-            let bare = generate(seed, depth);
+            let kind = floor_kind(seed, depth, &content);
+            let bare = generate_of_kind(seed, depth, kind);
             assert_eq!(
                 (&bare.map, bare.start, bare.stairs),
                 (&floor.map, floor.start, floor.stairs),
@@ -709,9 +976,11 @@ mod tests {
             assert!(bare.monsters().is_empty(), "{context}");
             assert!(bare.glyphs().is_empty(), "{context}");
 
-            let layout = lay_out(&mut seed.stream(depth, Purpose::Generation));
-            let start_room = layout.rooms[layout.start_room];
-            assert!(inside(start_room, floor.start()), "{context}");
+            let layout = lay_out(kind, &mut seed.stream(depth, Purpose::Generation));
+            assert_eq!(layout.start_room.is_some(), kind == FloorKind::Rooms);
+            if let Some(start_room) = layout.start_room {
+                assert!(inside(start_room, floor.start()), "{context}");
+            }
             let seen_at_start = fov::visible_cells(floor.map(), floor.start(), SIGHT_RADIUS);
             let allowed: Vec<&str> = content.monsters_at(depth).map(MonsterDef::id).collect();
 
@@ -725,11 +994,11 @@ mod tests {
                 let cell = spawn.position();
                 assert_eq!(floor.map().tile(cell), Some(Tile::Floor), "{context}");
                 assert!(
-                    !inside(start_room, cell),
+                    layout.start_room.is_none_or(|room| !inside(room, cell)),
                     "{context}: {cell:?} in start room"
                 );
                 assert!(
-                    layout.rooms.iter().any(|&room| inside(room, cell)),
+                    layout.open_cells.contains(&cell),
                     "{context}: {cell:?} outside the rooms"
                 );
                 assert!(
@@ -768,8 +1037,8 @@ mod tests {
             let again = generate_with_monsters(seed, depth, &content);
             assert_eq!(floor.glyphs(), again.glyphs(), "{context}");
             let mut rng = seed.stream(depth, Purpose::Generation);
-            let layout = lay_out(&mut rng);
-            let cells = monster_cells(&layout.floor, &layout.rooms, layout.start_room);
+            let layout = lay_out(floor_kind(seed, depth, &content), &mut rng);
+            let cells = monster_cells(&layout.floor, &layout.open_cells, layout.start_room);
             let table: Vec<(&MonsterDef, u32)> = content.monster_weights(depth).collect();
             assert_eq!(
                 floor.monsters(),
@@ -799,7 +1068,7 @@ mod tests {
                     "{context}: {cell:?} not reachable from the start"
                 );
                 assert!(
-                    layout.rooms.iter().any(|&room| inside(room, cell)),
+                    layout.open_cells.contains(&cell),
                     "{context}: {cell:?} outside the rooms"
                 );
                 assert!(
@@ -870,7 +1139,8 @@ mod tests {
             assert_eq!(bare.glyphs(), floor.glyphs(), "{context}");
             assert!(generate(seed, depth).items().is_empty(), "{context}");
 
-            let layout = lay_out(&mut seed.stream(depth, Purpose::Generation));
+            let kind = floor_kind(seed, depth, &content);
+            let layout = lay_out(kind, &mut seed.stream(depth, Purpose::Generation));
             let distances = DijkstraMap::new(floor.map(), [floor.start()]);
             let allowed: Vec<&str> = content.items_at(depth).map(ItemDef::id).collect();
             assert_eq!(floor.items().len(), ITEMS_PER_FLOOR, "{context}");
@@ -883,7 +1153,7 @@ mod tests {
                     "{context}: {cell:?} not reachable from the start"
                 );
                 assert!(
-                    layout.rooms.iter().any(|&room| inside(room, cell)),
+                    layout.open_cells.contains(&cell),
                     "{context}: {cell:?} outside the rooms"
                 );
                 assert!(
@@ -1055,8 +1325,8 @@ mod tests {
     /// the test cannot fail by chance from one run to the next.
     const SHARE_TOLERANCE: f64 = 0.06;
 
-    /// Checks that `drawn`, the identifiers drawn on floor `depth` over
-    /// [`TABLE_SEEDS`] seeds, follow `table`, the weights of that floor:
+    /// Checks that `drawn`, the identifiers drawn on floor `depth` over at
+    /// least 600 draws, follow `table`, the weights of that floor:
     /// nothing outside the table, every entry at its share within
     /// [`SHARE_TOLERANCE`].
     fn assert_follows(drawn: &[&str], table: &[(&str, u32)], depth: u32, what: &str) {

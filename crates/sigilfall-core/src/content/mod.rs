@@ -1,11 +1,13 @@
-//! The game's data: creature, sigil and item definitions and the spawn
-//! tables, read from RON files and validated.
+//! The game's data: creature, sigil and item definitions, the spawn
+//! tables and the floor kinds, read from RON files and validated.
 //!
 //! Exposes [`Content`], with [`Content::load`] for the files built into the
 //! game, [`Content::parse`], [`Content::parse_files`],
-//! [`Content::parse_all`] and [`Content::parse_with_spawns`] for any text,
+//! [`Content::parse_all`], [`Content::parse_with_spawns`] and
+//! [`Content::parse_with_floors`] for any text,
 //! [`MonsterDef`] and [`Family`], [`SigilDef`], [`Effect`] and
-//! [`Targeting`], [`ItemDef`], [`ItemEffect`] and [`ItemFamily`], the bounds
+//! [`Targeting`], [`ItemDef`], [`ItemEffect`] and [`ItemFamily`],
+//! [`FloorKind`], the bounds
 //! of a definition ([`MAX_DEPTH`] for every floor number, [`MAX_WEIGHT`]),
 //! and the errors [`ContentError`] and [`FieldProblem`]. The files are
 //! embedded in the binary at compile time (`include_str!`), so an installed
@@ -15,14 +17,18 @@
 //! included: an item teaching a sigil must name a sigil of the sigil file,
 //! and a spawn rule a monster or an item of theirs. The spawn tables give,
 //! floor by floor, the weight of each creature and item
-//! ([`Content::monster_weights`], [`Content::item_weights`]); drawing
-//! monsters or placing items on a floor, recognising a trace
+//! ([`Content::monster_weights`], [`Content::item_weights`]), and the floor
+//! kinds how each floor is laid out ([`Content::floor_kind_weights`]);
+//! drawing monsters, placing items or laying a floor out, recognising a
+//! trace
 //! (`sigil` module of the crate), casting a sigil and using an item are not
 //! done here.
 
 mod check;
 mod entry_file;
 mod error;
+mod floor;
+mod floor_file;
 mod item;
 mod item_file;
 mod monster;
@@ -33,11 +39,13 @@ mod spawn;
 mod spawn_file;
 
 pub use error::{ContentError, FieldProblem};
+pub use floor::FloorKind;
 pub use item::{ItemDef, ItemEffect, ItemFamily};
 pub use monster::{Family, MAX_ATTACK, MAX_DEFENSE, MAX_HP, MAX_SPEED, MonsterDef};
 pub use sigil::{Effect, MAX_POWER, SigilDef, Targeting};
 pub use spawn::MAX_WEIGHT;
 
+use floor::FloorTable;
 use spawn::SpawnTable;
 
 /// Deepest floor the content is written for: the highest `min_depth` of a
@@ -76,6 +84,10 @@ pub const ITEMS_FILE: &str = "content/items.ron";
 /// in error messages.
 pub const SPAWNS_FILE: &str = "content/spawns.ron";
 
+/// Path of the floor file relative to the `sigilfall-core` crate, as named
+/// in error messages.
+pub const FLOORS_FILE: &str = "content/floors.ron";
+
 /// The monster file shipped with the game.
 const MONSTERS_RON: &str = include_str!("../../content/monsters.ron");
 
@@ -87,6 +99,9 @@ const ITEMS_RON: &str = include_str!("../../content/items.ron");
 
 /// The spawn file shipped with the game.
 const SPAWNS_RON: &str = include_str!("../../content/spawns.ron");
+
+/// The floor file shipped with the game.
+const FLOORS_RON: &str = include_str!("../../content/floors.ron");
 
 /// An item file that defines no item, for [`Content::parse_files`].
 const NO_ITEMS_RON: &str = "[]";
@@ -102,8 +117,9 @@ const NO_ITEMS_RON: &str = "[]";
 /// (`Effect::targetings`). Items may be absent; every sigil an item teaches
 /// is one of the sigils, and its page is never found shallower than its
 /// glyph. Every `min_depth` lies from `generation::FIRST_DEPTH` to
-/// [`MAX_DEPTH`], and every floor holds at least one monster with a
-/// positive weight.
+/// [`MAX_DEPTH`], every floor holds at least one monster with a
+/// positive weight, and every floor has at least one kind
+/// ([`Content::floor_kind_weights`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Content {
     /// Monster definitions, in file order.
@@ -114,11 +130,13 @@ pub struct Content {
     items: Vec<ItemDef>,
     /// Weight of each monster and item, floor by floor.
     spawns: SpawnTable,
+    /// Weight of each kind of floor, floor by floor.
+    floors: FloorTable,
 }
 
 impl Content {
     /// Parses and validates the content files built into the game, spawn
-    /// tables included.
+    /// tables and floor kinds included.
     ///
     /// Called once at start-up. A test checks that the shipped files are
     /// valid, so an error here means the data was edited without running the
@@ -126,9 +144,9 @@ impl Content {
     ///
     /// # Errors
     ///
-    /// Same as [`Content::parse_with_spawns`].
+    /// Same as [`Content::parse_with_floors`].
     pub fn load() -> Result<Self, ContentError> {
-        Self::parse_with_spawns(MONSTERS_RON, SIGILS_RON, ITEMS_RON, SPAWNS_RON)
+        Self::parse_with_floors(MONSTERS_RON, SIGILS_RON, ITEMS_RON, SPAWNS_RON, FLOORS_RON)
     }
 
     /// Parses and validates `monsters`, the text of a monster file, with the
@@ -175,6 +193,11 @@ impl Content {
     /// entries, which test files replace; to give weights, use
     /// [`Content::parse_with_spawns`].
     ///
+    /// The floor kinds are those of the floor file shipped with the game
+    /// (`content/floors.ron`): they refer to no other file, so they suit
+    /// any test files. To give other kinds, use
+    /// [`Content::parse_with_floors`].
+    ///
     /// # Errors
     ///
     /// The first fault found, naming its file:
@@ -200,11 +223,13 @@ impl Content {
         let sigils = sigil::validate(entry_file::read(sigils)?)?;
         let items = item::validate(entry_file::read(items)?, &sigils)?;
         let spawns = SpawnTable::uniform(&monsters, &items);
+        let floors = floor::validate(entry_file::read(FLOORS_RON)?)?;
         Ok(Self {
             monsters,
             sigils,
             items,
             spawns,
+            floors,
         })
     }
 
@@ -245,6 +270,39 @@ impl Content {
         Ok(content)
     }
 
+    /// Parses and validates `monsters`, `sigils`, `items`, `spawns` and
+    /// `floors`, the texts of a monster file, a sigil file, an item file, a
+    /// spawn file and a floor file, in that order: every file of the game.
+    ///
+    /// The first four are read as by [`Content::parse_with_spawns`].
+    /// `floors` is a RON list of `Floor(...)` rules giving each kind of
+    /// floor a weight on a band of floors; see `content/floors.ron` for the
+    /// fields and how weights are used.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Content::parse_with_spawns`] for the first four texts,
+    /// then the first fault of `floors`, naming the floor file:
+    /// - [`ContentError::Syntax`] as for the other files, an unknown kind
+    ///   included (with the rule and the field `kind`);
+    /// - [`ContentError::InvalidField`] naming the rule, by the kind it
+    ///   weighs and its position, and the field, when a field is missing, a
+    ///   floor or the weight is out of bounds, or the band shares a floor
+    ///   with an earlier rule of the same kind ([`FieldProblem::Overlap`]);
+    /// - [`ContentError::NoFloorKindAtDepth`] when a floor up to
+    ///   [`MAX_DEPTH`] has no kind.
+    pub fn parse_with_floors(
+        monsters: &str,
+        sigils: &str,
+        items: &str,
+        spawns: &str,
+        floors: &str,
+    ) -> Result<Self, ContentError> {
+        let mut content = Self::parse_with_spawns(monsters, sigils, items, spawns)?;
+        content.floors = floor::validate(entry_file::read(floors)?)?;
+        Ok(content)
+    }
+
     /// Returns every monster definition, in file order.
     pub fn monsters(&self) -> &[MonsterDef] {
         &self.monsters
@@ -281,6 +339,19 @@ impl Content {
                 let weight = self.spawns.monster_weight(index, depth);
                 (weight > 0).then_some((monster, weight))
             })
+    }
+
+    /// Returns the kinds floor `depth` may have, in file order of their
+    /// rules, each with its weight there: the generation lays the floor out
+    /// as a kind drawn with a chance of its weight divided by the sum of
+    /// the weights listed (see `generation::floor_kind`).
+    ///
+    /// Only positive weights are listed, each kind at most once. Floors
+    /// deeper than [`MAX_DEPTH`] have the kinds of [`MAX_DEPTH`], and a
+    /// `depth` shallower than the first floor those of the first floor:
+    /// never empty.
+    pub fn floor_kind_weights(&self, depth: u32) -> impl Iterator<Item = (FloorKind, u32)> {
+        self.floors.weights(depth)
     }
 
     /// Returns every sigil definition, in file order: the order

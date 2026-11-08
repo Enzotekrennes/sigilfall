@@ -90,6 +90,22 @@ pub enum ContentError {
         /// Deepest floor the content is written for (`content::MAX_DEPTH`).
         max_depth: u32,
     },
+    /// No rule of the floor file covers this floor, so the generation would
+    /// not know how to lay it out.
+    #[error(
+        "{file}: no rule gives a kind to floor {depth}; every floor from \
+         {first_depth} to {max_depth} needs one"
+    )]
+    NoFloorKindAtDepth {
+        /// Path of the floor file, relative to the crate.
+        file: &'static str,
+        /// The floor left without kind.
+        depth: u32,
+        /// Number of the first floor.
+        first_depth: u32,
+        /// Deepest floor the content is written for (`content::MAX_DEPTH`).
+        max_depth: u32,
+    },
     /// A monster or an item has no spawn rule, so it would never appear:
     /// most likely a rule was forgotten when the entry was added.
     #[error("{file}: no rule places {entry}, so it would never appear")]

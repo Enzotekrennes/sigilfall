@@ -57,8 +57,8 @@ impl Game {
 mod tests {
     use super::*;
     use crate::action::Action;
-    use crate::content::Content;
-    use crate::generation::{self, FIRST_DEPTH};
+    use crate::content::{Content, FloorKind};
+    use crate::generation::{self, FIRST_DEPTH, Floor};
     use crate::geometry::{Direction, Position};
     use crate::path::flood_fill;
     use crate::path::test_maps::from_rows;
@@ -71,6 +71,9 @@ mod tests {
 
     /// Number of seeds whose first floor is explored to the end.
     const EXPLORED_SEEDS: u64 = 50;
+
+    /// Number of seeds whose cave is explored to the end.
+    const EXPLORED_CAVES: u64 = 20;
 
     /// The content shipped with the game.
     fn content() -> Content {
@@ -257,8 +260,14 @@ mod tests {
     /// Panics, naming the seed, if exploring takes more steps or leaves a
     /// reachable cell unseen.
     fn explore_first_floors(seeds: std::ops::Range<u64>) {
+        explore_floors(seeds, |seed| generation::generate(seed, FIRST_DEPTH));
+    }
+
+    /// Explores the floor `floor_of` builds for every seed in `seeds` to the
+    /// end, with the checks of [`explore_first_floors`].
+    fn explore_floors(seeds: std::ops::Range<u64>, floor_of: impl Fn(Seed) -> Floor) {
         for seed in seeds {
-            let floor = generation::generate(Seed::new(seed), FIRST_DEPTH);
+            let floor = floor_of(Seed::new(seed));
             let mut game = Game::on_floor(Seed::new(seed), floor);
             let reachable = flood_fill(game.map(), game.player_actor().position());
 
@@ -286,6 +295,25 @@ mod tests {
     #[test]
     fn generated_floors_are_explored_to_the_end_in_bounded_steps_second_half() {
         explore_first_floors(EXPLORED_SEEDS / 2..EXPLORED_SEEDS);
+    }
+
+    /// Explores the cave of every seed in `seeds` to the end, with the
+    /// checks of [`explore_first_floors`]: caves are wider open than rooms,
+    /// with pillars and dead ends the way must go around.
+    fn explore_caves(seeds: std::ops::Range<u64>) {
+        explore_floors(seeds, |seed| {
+            generation::generate_of_kind(seed, FIRST_DEPTH, FloorKind::Caves)
+        });
+    }
+
+    #[test]
+    fn caves_are_explored_to_the_end_in_bounded_steps_first_half() {
+        explore_caves(0..EXPLORED_CAVES / 2);
+    }
+
+    #[test]
+    fn caves_are_explored_to_the_end_in_bounded_steps_second_half() {
+        explore_caves(EXPLORED_CAVES / 2..EXPLORED_CAVES);
     }
 
     #[test]

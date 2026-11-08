@@ -1,0 +1,32 @@
+// Floor kinds: how each floor of the dungeon is laid out, floor by floor.
+// Loaded by `Content::load` with the other files and checked before a game
+// starts. Each `Floor(...)` rule gives one kind of floor a weight on a band
+// of floors. Every field is required:
+//
+// - kind:       how the floor is laid out: Rooms (rectangular rooms joined
+//               by corridors) or Caves (one natural cave grown by a
+//               cellular automaton).
+// - from_depth: first floor of the band, from 1 to 10 (the deepest floor
+//               the content is written for).
+// - to_depth:   last floor of the band, included, from `from_depth` to 10.
+//               Floors below 10 use the weights of floor 10.
+// - weight:     relative chance of the kind on those floors, from 1 to 99.
+//               On a floor, the kind is drawn among the kinds covering it
+//               with a chance of its weight divided by the sum of their
+//               weights. A kind alone on a floor is always chosen there.
+//
+// Two rules of the same kind must not share a floor, and every floor from
+// 1 to 10 needs at least one kind.
+//
+// The first two floors are always rooms: the first floor of a seed stays the
+// one it has always been, and a new player learns the game in rooms before
+// meeting a cave. Caves then grow more common with depth, and the last floor
+// written for is always a cave.
+[
+    Floor(kind: Rooms, from_depth: 1, to_depth: 2, weight: 1),
+    Floor(kind: Rooms, from_depth: 3, to_depth: 6, weight: 2),
+    Floor(kind: Caves, from_depth: 3, to_depth: 6, weight: 1),
+    Floor(kind: Rooms, from_depth: 7, to_depth: 9, weight: 1),
+    Floor(kind: Caves, from_depth: 7, to_depth: 9, weight: 2),
+    Floor(kind: Caves, from_depth: 10, to_depth: 10, weight: 1),
+]
