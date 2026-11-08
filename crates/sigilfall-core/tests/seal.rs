@@ -1,10 +1,10 @@
-//! Acceptance tests of F14, "victory at the bottom", core half (task T33,
-//! decision D23): the bottom floor has no stairs but a seal, reachable and
-//! on the cell farthest from the start, whether the floor is laid out in
-//! rooms or as a cave; breaking the seal wins the run and ends the game;
-//! trying to break it elsewhere is refused at no cost; a game on the bottom
-//! floor is saved and read back. The floors above keep their stairs and are
-//! checked cell for cell by `frozen_floors.rs`.
+//! Victory at the bottom, core half (decision D23): the bottom floor has no
+//! stairs but a seal, reachable and on the cell farthest from the start,
+//! whether the floor is laid out in rooms or as a cave; breaking the seal
+//! wins the run and ends the game; trying to break it elsewhere is refused at
+//! no cost; a game on the bottom floor is saved and read back. The floors
+//! above keep their stairs and are checked cell for cell by
+//! `frozen_floors.rs`.
 //!
 //! Written against the public API only. Distances are recomputed here with
 //! a plain breadth-first search over the eight moves of the game, never with

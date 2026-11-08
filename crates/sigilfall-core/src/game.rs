@@ -1,16 +1,18 @@
 //! A game in progress and its single entry point, [`Game::submit`].
 //!
-//! Exposes [`Game`], [`Status`], [`VisibleMonster`], [`VisibleItem`] and
-//! [`PLAYER_START`].
+//! Exposes [`Game`], [`Status`], [`VisibleMonster`] and [`VisibleItem`]; with
+//! the `test-support` feature, also `PLAYER_START` and the helpers that build
+//! hand-made rooms for tests (`Game::in_fixed_room`).
+//!
 //! The game owns the run's seed (and the date of a daily run, see
-//! [`Game::daily`]), the depth of the current floor, the world
-//! (map, actors, items, glyphs and the player's inventory, in the `world`
-//! submodule), the scheduler and the gameplay random stream. A new game
-//! starts on the first generated floor of its seed, with its monsters,
-//! glyphs and items (see the `generation` module). The player's
-//! action is applied, then the other actors take their turns until the
-//! player may act again, and everything that happened is returned as
-//! [`Event`]s. The game produces no text and draws nothing.
+//! [`Game::daily`]), the depth of the current floor, the world (map, actors,
+//! items, glyphs and the player's inventory, in the `world` submodule), the
+//! scheduler and the gameplay random stream. A new game starts on the first
+//! generated floor of its seed, with its monsters, glyphs and items (see the
+//! `generation` module). The player's action is applied, then the other
+//! actors take their turns until the player may act again, and everything
+//! that happened is returned as [`Event`]s. The game produces no text and
+//! draws nothing.
 //!
 //! The game also keeps the player's field of view up to date: it is computed
 //! when the game starts and again after each action of the player, and the
@@ -25,13 +27,14 @@
 //! the player's do, the game is over ([`Status::GameOver`]) and
 //! [`Game::submit`] no longer does anything.
 //!
-//! Standing on the stairs, the player goes down with `Action::Descend` to
-//! the next floor of the seed, keeping its hit points, essence, inventory and
+//! Standing on the stairs, the player goes down with `Action::Descend` to the
+//! next floor of the seed, keeping its hit points, essence, inventory and
 //! grimoire; the rules live in the `descent` submodule. The bottom floor has
 //! a seal instead of stairs: the same action taken on it wins the run
-//! ([`Status::Won`]), and [`Game::submit`] no longer does anything either. Every floor has its
-//! own gameplay stream (decision D5), so a floor plays out the same for a
-//! given seed and the same actions there, whatever happened above.
+//! ([`Status::Won`]), and [`Game::submit`] no longer does anything either.
+//! Every floor has its own gameplay stream (decision D5), so a floor plays
+//! out the same for a given seed and the same actions there, whatever
+//! happened above.
 //!
 //! Sigils are cast with `Action::Cast`, whose rules (cost per stroke,
 //! essence, effects, backlash) live in the `cast` submodule. The player
@@ -72,7 +75,9 @@ use crate::action::{self, Action, ActionOutcome};
 use crate::actor::{Actor, ActorId, ActorKind};
 use crate::ai;
 use crate::combat::{self, Combatant};
-use crate::content::{Content, Family, ItemDef, ItemFamily, MonsterDef, SigilDef};
+use crate::content::{Content, Family, ItemFamily};
+#[cfg(any(test, feature = "test-support"))]
+use crate::content::{ItemDef, MonsterDef, SigilDef};
 use crate::event::Event;
 use crate::fov::{self, SIGHT_RANGE};
 use crate::generation::{self, Engraving, FIRST_DEPTH, Floor, ItemSpawn, MonsterSpawn};
@@ -91,6 +96,7 @@ use world::World;
 /// A floor cell near the left wall whose eight neighbours are all floor, so
 /// every direction can be tried on the first turn, and away from the pillar
 /// at `map::FIXED_ROOM_PILLAR`.
+#[cfg(any(test, feature = "test-support"))]
 pub const PLAYER_START: Position = Position::new(5, 5);
 
 /// A game in progress: the floor with its actors and items, and the flow of
@@ -110,7 +116,7 @@ pub struct Game {
     /// for each staircase taken.
     depth: u32,
     /// The game data the floors below are generated from, or `None` for a
-    /// game started without it ([`Game::on_floor`], [`Game::in_fixed_room`]),
+    /// game started without it ([`Game::on_floor`], `Game::in_fixed_room`),
     /// whose floors below are bare layouts.
     content: Option<Content>,
     /// The current floor: map, actors, items, glyphs, and the player's
@@ -269,6 +275,7 @@ impl Game {
     /// [`Game::spawn_monster`], glyphs with [`Game::engrave`], items with
     /// [`Game::place_item`]. The room has no stairs, so the player never
     /// leaves it.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn in_fixed_room(seed: Seed) -> Self {
         Self::start(seed, Map::fixed_room(), PLAYER_START, &[])
     }
@@ -347,6 +354,7 @@ impl Game {
     ///
     /// Panics if `position` is not walkable or already holds an actor:
     /// placing a monster there is a bug in the calling code.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn spawn_monster(&mut self, position: Position, definition: &MonsterDef) -> ActorId {
         assert!(
             self.world.map.is_walkable(position) && self.world.actor_at(position).is_none(),
@@ -374,6 +382,7 @@ impl Game {
     ///
     /// Panics if `position` is not walkable or already holds a glyph:
     /// engraving there is a bug in the calling code.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn engrave(&mut self, position: Position, sigil: &SigilDef) {
         assert!(
             self.world.map.is_walkable(position) && self.world.engraving_at(position).is_none(),
@@ -398,6 +407,7 @@ impl Game {
     /// Panics if `position` is not walkable or already holds an item: a cell
     /// holds at most one item, so placing one there is a bug in the calling
     /// code.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn place_item(&mut self, position: Position, definition: &ItemDef) -> ItemId {
         self.world
             .place_item(Item::on_floor(definition.clone(), position))
@@ -449,13 +459,13 @@ impl Game {
     /// passing either way.
     ///
     /// Items are picked up ([`Action::PickUp`]), used ([`Action::Use`]) and
-    /// dropped ([`Action::Drop`]) for their own costs (`schedule::PICK_UP_COST`,
-    /// `schedule::USE_COST`, `schedule::DROP_COST`); see the `inventory`
-    /// submodule for their rules. Picking up from an empty cell or into a
-    /// full inventory, using or dropping an item the player does not carry,
-    /// using a page that teaches nothing new, and dropping onto a cell that
-    /// already holds an item are refused with no cost and no time passing,
-    /// like a move into a wall.
+    /// dropped ([`Action::Drop`]) for their own costs
+    /// (`schedule::PICK_UP_COST`, `schedule::USE_COST`,
+    /// `schedule::DROP_COST`); see the `inventory` submodule for their rules.
+    /// Picking up from an empty cell or into a full inventory, using or
+    /// dropping an item the player does not carry, using a page that teaches
+    /// nothing new, and dropping onto a cell that already holds an item are
+    /// refused with no cost and no time passing, like a move into a wall.
     ///
     /// After an action that took time, the field of view is computed again
     /// from the player's position (see [`Game::is_visible`]) before the other
@@ -498,7 +508,7 @@ impl Game {
     }
 
     /// Returns the seed of this run, as given to [`Game::new`] or
-    /// [`Game::in_fixed_room`].
+    /// `Game::in_fixed_room` (with the `test-support` feature).
     pub const fn seed(&self) -> Seed {
         self.seed
     }

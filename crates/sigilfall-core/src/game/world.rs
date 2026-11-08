@@ -3,9 +3,10 @@
 //!
 //! Exposes to the `game` module [`World`], the state the rules read and
 //! change, with the queries every rule needs (who stands where, what lies
-//! where), the moves of items between the floor and the player's
-//! inventory, and the change of floor down the stairs. It applies no rule of the game: time, fights, casting and
-//! the effects of items live in `game` and its submodules.
+//! where), the moves of items between the floor and the player's inventory,
+//! and the change of floor down the stairs. It applies no rule of the game:
+//! time, fights, casting and the effects of items live in `game` and its
+//! submodules.
 
 use slotmap::SlotMap;
 

@@ -43,8 +43,8 @@ mod sigils;
 mod title_screen;
 mod victory_screen;
 
-/// Seed of every test game: its written form, `7F3A-91C2-0B5E-D4A8`,
-/// is the one of the game screen mock-up in `docs/design.md`.
+/// Seed of every test game: its written form, `7F3A-91C2-0B5E-D4A8`, is the
+/// one shown to players as an example.
 const SEED: Seed = Seed::new(0x7F3A_91C2_0B5E_D4A8);
 
 /// A new application on [`SEED`] in the fixed room, drawn in the

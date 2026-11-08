@@ -6,11 +6,12 @@
 //!
 //! Exposes [`describe`], which turns the events of one `Game::submit` into
 //! [`Message`]s, the opening messages ([`welcome`], [`welcome_back`],
-//! [`save_set_aside`]), the save notice [`save_not_deleted`], why automatic
-//! exploration stopped ([`exploration_halted`]), the words of
-//! the death summary (its [`epitaph`], [`cause_of_death`], the labels of its
-//! counts, [`cast_breakdown`] and the [`share_line`]) and of the victory
-//! screen ([`victory_line`], [`victory_outcome`]), monster, sigil and item names
+//! [`save_set_aside`]), why a save was refused ([`save_refusal`]), the save
+//! notice [`save_not_deleted`], why automatic exploration stopped
+//! ([`exploration_halted`]), the words of the death summary (its
+//! [`epitaph`], [`cause_of_death`], the labels of its counts,
+//! [`cast_breakdown`] and the [`share_line`]) and of the victory screen
+//! ([`victory_line`], [`victory_outcome`]), monster, sigil and item names
 //! ([`monster_name`], [`sigil_name`], [`item_name`]), what a sigil or an
 //! item does in a few words ([`effect_summary`], [`item_summary`]), the time
 //! a cast takes ([`cast_time`]), why the game refused an item
@@ -19,11 +20,12 @@
 //! [`abandon_warning`], [`invalid_seed`], [`auto_colors`],
 //! [`options_unreadable`], [`options_not_saved`]…), and the fixed labels of
 //! every screen and of the key help. The messages about the save and options
-//! files quote paths and errors that come from outside the game: they are
-//! bounded ([`MAX_REASON_CHARS`], [`ELLIPSIS`]) so that they always fit the
-//! rows the screen gives them. Keeping the words here, away from the
-//! drawing code, is what decision D10 asks: a translation would only touch
-//! this file.
+//! files quote paths and errors that come from outside the game: what they
+//! quote is bounded ([`MAX_REASON_CHARS`], [`MAX_QUOTED_CHARS`],
+//! [`ELLIPSIS`]) so that they always fit the rows the screen gives them, and
+//! made [`printable`] so that it never acts on the terminal. Keeping the
+//! words here, away from the drawing code, is what decision D10 asks: a
+//! translation would only touch this file.
 //!
 //! The game itself never writes text (decision D4): it reports events, and
 //! this module chooses what the player reads about them.
@@ -40,6 +42,7 @@ use sigilfall_core::game::{Game, Status};
 use sigilfall_core::generation;
 use sigilfall_core::item::{INVENTORY_CAPACITY, ItemId, ItemRefusal};
 use sigilfall_core::rng::{DailyDate, Seed};
+use sigilfall_core::save::SaveError;
 use sigilfall_core::schedule::{MOVE_COST, STROKE_COST, cast_cost};
 use sigilfall_core::sigil::{CastQuality, Node};
 use sigilfall_core::stats::{CastCounts, Stats};
@@ -50,24 +53,41 @@ use crate::theme::ColorSupport;
 use crate::ui::log::TEXT_WIDTH;
 
 /// Mark that stands for the part of a text left out: the end of a reason
-/// cut at [`MAX_REASON_CHARS`], or the start of a path cut to fit a line.
+/// cut at [`MAX_REASON_CHARS`] or of a quote cut at [`MAX_QUOTED_CHARS`],
+/// or the start of a path cut to fit a line.
 pub const ELLIPSIS: char = '…';
 
-/// Most characters of a reason that comes from outside the game (the save
-/// reader's error, the system's) in a message about a file; a longer one
-/// keeps its first characters and ends with [`ELLIPSIS`] (fix B2 of the F9
-/// test).
+/// Mark shown in place of a control character (escape, bell, carriage
+/// return…) of a text that comes from a file or the system, so such a text
+/// can never move the cursor, retitle or clear the terminal it is written
+/// to.
+pub const CONTROL_MARK: char = '?';
+
+/// Most characters of a reason that comes from the system (an error of the
+/// file system) or from the options file, in a message about a file; a
+/// longer one keeps its first characters and ends with [`ELLIPSIS`].
 ///
-/// Such a reason can be as long as the file it is about: the save reader
-/// quotes what it found, so a corrupt save of 20 kB gives a reason of 20 kB,
-/// and a message that long either scrolled out of the log at once or hid,
-/// on the title screen, where the unreadable save was kept. 72 characters
-/// keep the usual reasons whole ("the save is unreadable at line 1, column
-/// 20002: Expected colon" has 62), and keep even a reason of a single word,
-/// with the brackets and the full stop around it, on one line of the log
-/// ([`TEXT_WIDTH`]): every message about a file then fits the rows it is
-/// given, path included.
+/// Such a reason can be as long as the file it is about, and a message that
+/// long either scrolled out of the log at once or hid, on the title screen,
+/// what happened to the file. 72 characters keep the usual reasons whole,
+/// and keep even a reason of a single word, with the brackets and the full
+/// stop around it, on one line of the log ([`TEXT_WIDTH`]): every message
+/// about a file then fits the rows it is given, path included.
 pub const MAX_REASON_CHARS: usize = 72;
+
+/// Most characters of a piece of a save quoted in the reason it was refused
+/// for (an identifier, what the reader found); a longer one keeps its first
+/// characters and ends with [`ELLIPSIS`].
+///
+/// Only the quote is cut, never the sentence around it, so the cause stays
+/// whole: 40 characters hold every identifier of the shipped content and the
+/// reader's usual words ("Expected colon"), while a corrupt save of 20 kB,
+/// which the reader may quote in full, still gives a reason that fits the
+/// rows a message about the save is given.
+pub const MAX_QUOTED_CHARS: usize = 40;
+
+/// Reason given for a save that is not UTF-8 text.
+pub const SAVE_NOT_TEXT: &str = "the save is not text";
 
 /// Most characters of a file path in a message: one line of the log or of
 /// a title notice ([`TEXT_WIDTH`]), less the punctuation that follows the
@@ -79,8 +99,8 @@ const MAX_PATH_CHARS: usize = TEXT_WIDTH - 1;
 pub const HP_LABEL: &str = "HP";
 
 /// Mark written before a value that warns of a danger, so the warning reads
-/// without colour: health below a quarter of the maximum (`docs/design.md`,
-/// "PV"), essence too low to cast, a node the trace refused.
+/// without colour: health below a quarter of the maximum, essence too low
+/// to cast, a node the trace refused.
 pub const WARNING_MARK: &str = "!";
 
 /// Label of the player's essence, in the side panel and the sigil overlay.
@@ -149,10 +169,10 @@ pub const EXPECTED_LABEL: &str = "expected";
 /// Label before the nodes the player linked, on a verdict.
 pub const TRACED_LABEL: &str = "traced";
 
-/// Verdict word of an unstable cast, as the mock-up writes it.
+/// Verdict word of an unstable cast, in capitals so it reads without colour.
 pub const UNSTABLE_WORD: &str = "UNSTABLE";
 
-/// Verdict word of a fizzled cast, as the mock-up writes it.
+/// Verdict word of a fizzled cast, in capitals so it reads without colour.
 pub const FAILED_WORD: &str = "FAILED";
 
 /// How far an unstable trace was from its sigil: decision D7 makes it
@@ -172,8 +192,8 @@ pub const FAILED_OUTCOME: &str = "The spell fizzles.";
 /// which is never cast.
 pub const EMPTY_TRACE: &str = "Link at least one node first.";
 
-/// Title of the end screen, letter-spaced as in the death summary of
-/// `docs/design.md`.
+/// Title of the end screen, letter-spaced as the title of the victory
+/// screen is, so it reads as a heading without colour.
 pub const DEATH_TITLE: &str = "T H E   D E S C E N T   E N D S";
 
 /// Lines under the death summary's title, one per run, chosen from the
@@ -563,15 +583,60 @@ pub fn options_not_saved(error: &str) -> String {
     format!("{error}. The options apply until you quit.")
 }
 
-/// The notice of the title screen when the save could not be read back
-/// at launch: `reason` (a sentence of `persist::Loaded::SetAside`), and
-/// `moved_to`, where the unreadable save was kept.
+/// Why the save could not be read back, as the player reads it: the error
+/// of the save reader, `error`, cause first, with only what it quotes from
+/// the file (an identifier, the words of the reader) cut at
+/// [`MAX_QUOTED_CHARS`], and every control character shown as
+/// [`CONTROL_MARK`].
 ///
-/// A long `reason` is cut (see [`MAX_REASON_CHARS`]), and so is the start
-/// of a path longer than a line (see [`bounded_path`]): the notice takes 4
+/// The sentence around a quote is the game's own and always shown whole, such
+/// as "floor 10, the bottom floor, has 2 seals (inconsistent save)" or "the
+/// save references monster `dragon`, absent from the content".
+pub fn save_refusal(error: &SaveError) -> String {
+    match error {
+        SaveError::Malformed {
+            line,
+            column,
+            message,
+        } => format!(
+            "the save is unreadable at line {line}, column {column}: {}",
+            quoted(message)
+        ),
+        SaveError::UnknownReference { kind, id } => {
+            format!(
+                "the save references {kind} `{}`, absent from the content",
+                quoted(id)
+            )
+        }
+        SaveError::UnsupportedVersion { .. } | SaveError::Inconsistent(_) | SaveError::Write(_) => {
+            printable(&error.to_string())
+        }
+    }
+}
+
+/// Reason given for a save larger than `limit` bytes, which is not read.
+pub fn save_too_large(limit: u64) -> String {
+    format!("the save is larger than {}", file_size(limit))
+}
+
+/// `bytes` as a reason names a size: in whole mebibytes, such as "4 MiB",
+/// for the limits of the files the game reads.
+pub fn file_size(bytes: u64) -> String {
+    /// Bytes in a mebibyte.
+    const MEBIBYTE: u64 = 1024 * 1024;
+    format!("{} MiB", bytes / MEBIBYTE)
+}
+
+/// The notice of the title screen when the save could not be read back at
+/// launch: `reason` (a sentence of [`save_refusal`], through
+/// `persist::Loaded::SetAside`), and `moved_to`, where the unreadable save
+/// was kept.
+///
+/// The reason is shown whole, its quotes already cut, and the start of a
+/// path longer than a line is cut (see [`bounded_path`]): the notice takes 4
 /// of the 5 rows the title screen gives its notices, never more.
 pub fn save_set_aside_notice(reason: &str, moved_to: &str) -> String {
-    let (reason, moved_to) = (bounded_reason(reason), bounded_path(moved_to));
+    let (reason, moved_to) = (printable(reason), bounded_path(moved_to));
     format!("Your saved game could not be read: {reason}. It was kept as {moved_to}.")
 }
 
@@ -630,17 +695,17 @@ pub fn welcome_back() -> Message {
 }
 
 /// The message that opens a new run when the save could not be read back:
-/// `reason` is why (a sentence of `persist::Loaded::SetAside`), and
-/// `moved_to` the path the save was renamed to, where it can still be
-/// looked at.
+/// `reason` is why (a sentence of [`save_refusal`], through
+/// `persist::Loaded::SetAside`), and `moved_to` the path the save was
+/// renamed to, where it can still be looked at.
 ///
-/// The path comes last and a long `reason` is cut (see
-/// [`MAX_REASON_CHARS`]), as is the start of a path longer than a line (see
-/// [`bounded_path`]): the message takes at most 4 lines, so it shows whole
-/// above the welcome line in the 5 rows of the log of an 80 × 24 screen,
-/// with the name of the file kept aside.
+/// The path comes last and the start of a path longer than a line is cut
+/// (see [`bounded_path`]); the reason is shown whole, its quotes already
+/// cut: the message takes at most 4 lines, so it shows whole above the
+/// welcome line in the 5 rows of the log of an 80 × 24 screen, with the
+/// name of the file kept aside.
 pub fn save_set_aside(reason: &str, moved_to: &str) -> Message {
-    let (reason, moved_to) = (bounded_reason(reason), bounded_path(moved_to));
+    let (reason, moved_to) = (printable(reason), bounded_path(moved_to));
     Message::new(
         Tone::Danger,
         format!(
@@ -651,8 +716,8 @@ pub fn save_set_aside(reason: &str, moved_to: &str) -> Message {
 }
 
 /// The message logged when the save of a finished game (death or victory)
-/// could not be deleted: deleting it is tried again when the player quits, and a failure
-/// then is reported on leaving.
+/// could not be deleted: deleting it is tried again when the player quits,
+/// and a failure then is reported on leaving.
 pub fn save_not_deleted() -> Message {
     Message::new(
         Tone::Danger,
@@ -719,23 +784,54 @@ pub fn exploration_halted(halt: &Halt, content: &Content) -> Option<Message> {
     Some(Message::new(tone, text))
 }
 
-/// `reason` as a message about a file shows it: whole when it has at most
-/// [`MAX_REASON_CHARS`] characters, otherwise its first characters, without
-/// the spaces they end with, followed by [`ELLIPSIS`], [`MAX_REASON_CHARS`]
-/// at most in all.
+/// `reason` as a message about a file shows it: [`printable`], then whole
+/// when it has at most [`MAX_REASON_CHARS`] characters, otherwise cut as
+/// [`bounded`] cuts.
 fn bounded_reason(reason: &str) -> String {
-    if reason.chars().count() <= MAX_REASON_CHARS {
-        return reason.to_owned();
+    bounded(&printable(reason), MAX_REASON_CHARS)
+}
+
+/// `text`, a piece of a file quoted in a reason: [`printable`], then whole
+/// when it has at most [`MAX_QUOTED_CHARS`] characters, otherwise cut as
+/// [`bounded`] cuts.
+fn quoted(text: &str) -> String {
+    bounded(&printable(text), MAX_QUOTED_CHARS)
+}
+
+/// `text` whole when it has at most `limit` characters, otherwise its first
+/// characters, without the spaces they end with, followed by [`ELLIPSIS`],
+/// `limit` characters at most in all.
+fn bounded(text: &str, limit: usize) -> String {
+    if text.chars().count() <= limit {
+        return text.to_owned();
     }
-    let kept: String = reason.chars().take(MAX_REASON_CHARS - 1).collect();
+    let kept: String = text.chars().take(limit - 1).collect();
     format!("{}{ELLIPSIS}", kept.trim_end())
 }
 
-/// `path` as a message about a file shows it: whole when it fits on a line
-/// with the punctuation after it ([`MAX_PATH_CHARS`]), otherwise
-/// [`ELLIPSIS`] followed by its last characters, [`MAX_PATH_CHARS`] in all,
-/// so the folder it is in and the name of the file stay readable.
+/// `text` with every control character (`char::is_control`: escape, bell,
+/// line breaks, tabulations…) replaced by [`CONTROL_MARK`], so a text read
+/// from a file or given by the system can be shown on a screen or written
+/// to the error output without acting on the terminal.
+pub fn printable(text: &str) -> String {
+    text.chars()
+        .map(|character| {
+            if character.is_control() {
+                CONTROL_MARK
+            } else {
+                character
+            }
+        })
+        .collect()
+}
+
+/// `path` as a message about a file shows it, [`printable`]: whole when it
+/// fits on a line with the punctuation after it ([`MAX_PATH_CHARS`]),
+/// otherwise [`ELLIPSIS`] followed by its last characters,
+/// [`MAX_PATH_CHARS`] in all, so the folder it is in and the name of the
+/// file stay readable.
 fn bounded_path(path: &str) -> String {
+    let path = &printable(path);
     let length = path.chars().count();
     if length <= MAX_PATH_CHARS {
         return path.to_owned();
@@ -795,7 +891,7 @@ fn bounded_path(path: &str) -> String {
 ///   ([`Tone::Info`]): "There is nothing here to pick up.", "Your pack is
 ///   full (10/10): the Healing Draught stays on the floor.", and the
 ///   sentences of [`item_refusal`];
-///   a descent: "You descend to depth 2." ([`Tone::Info`]: the status line
+/// - a descent: "You descend to depth 2." ([`Tone::Info`]: the status line
 ///   and the new floor already show the change, and the line marks in the
 ///   history where the floor above ends); a descent to the bottom floor
 ///   (`generation::is_bottom_floor` of the new depth) also tells it is the
@@ -2544,6 +2640,93 @@ mod tests {
     }
 
     #[test]
+    fn a_refused_save_gives_its_cause_whole_and_cuts_only_what_it_quotes() {
+        use sigilfall_core::save::Reference;
+
+        // The sentences of the game are never cut, however long.
+        let cause =
+            "the hit points of the actor in slot 4294967295 is -2147483648, expected 0 to 999";
+        assert_eq!(
+            save_refusal(&SaveError::Inconsistent(cause.to_owned())),
+            format!("{cause} (inconsistent save)")
+        );
+        assert_eq!(
+            save_refusal(&SaveError::Inconsistent(
+                "floor 10, the bottom floor, has 2 seals".to_owned()
+            )),
+            "floor 10, the bottom floor, has 2 seals (inconsistent save)"
+        );
+        // What the reader quotes from the file is cut, the sentence kept.
+        let found = format!("found `{}`", "x".repeat(20_000));
+        let malformed = save_refusal(&SaveError::Malformed {
+            line: 1,
+            column: 20_002,
+            message: found,
+        });
+        assert!(
+            malformed.starts_with("the save is unreadable at line 1, column 20002: found `x"),
+            "{malformed}"
+        );
+        assert!(malformed.ends_with(ELLIPSIS), "{malformed}");
+        let quote = malformed.split(": ").nth(1).unwrap();
+        assert_eq!(quote.chars().count(), MAX_QUOTED_CHARS, "{malformed}");
+        let unknown = save_refusal(&SaveError::UnknownReference {
+            kind: Reference::Monster,
+            id: "d".repeat(500),
+        });
+        assert!(
+            unknown.starts_with("the save references monster `d"),
+            "{unknown}"
+        );
+        assert!(
+            unknown.ends_with(&format!("{ELLIPSIS}`, absent from the content")),
+            "{unknown}"
+        );
+        // A short quote is kept whole.
+        assert_eq!(
+            save_refusal(&SaveError::Malformed {
+                line: 3,
+                column: 7,
+                message: "Expected colon".to_owned()
+            }),
+            "the save is unreadable at line 3, column 7: Expected colon"
+        );
+    }
+
+    #[test]
+    fn no_control_character_of_a_file_reaches_the_screen_or_the_error_output() {
+        use sigilfall_core::save::Reference;
+
+        let hostile = "dra\u{1b}[2Jgon\u{7}\r\n\u{9b}31m";
+        let refusal = save_refusal(&SaveError::UnknownReference {
+            kind: Reference::Monster,
+            id: hostile.to_owned(),
+        });
+        assert_eq!(
+            refusal,
+            "the save references monster `dra?[2Jgon????31m`, absent from the content"
+        );
+        assert_eq!(
+            save_refusal(&SaveError::Malformed {
+                line: 1,
+                column: 2,
+                message: hostile.to_owned()
+            }),
+            "the save is unreadable at line 1, column 2: dra?[2Jgon????31m"
+        );
+        for text in [
+            save_set_aside(hostile, hostile).text,
+            save_set_aside_notice(hostile, hostile),
+            save_not_deleted_notice(hostile, hostile),
+            finished_save_not_deleted_notice(hostile, hostile),
+            options_unreadable(hostile),
+        ] {
+            assert!(!text.chars().any(char::is_control), "{text:?}");
+        }
+        assert_eq!(printable("plain text"), "plain text");
+    }
+
+    #[test]
     fn a_long_reason_is_cut_with_an_ellipsis_and_a_short_one_kept_whole() {
         let short = "the save is unreadable at line 1, column 20002: Expected colon";
         assert_eq!(bounded_reason(short), short);
@@ -2583,12 +2766,17 @@ mod tests {
     #[test]
     fn every_message_about_a_file_keeps_its_path_whole_or_its_end() {
         let reason = "x".repeat(20_000);
+        let refusal = save_refusal(&SaveError::Malformed {
+            line: 1,
+            column: 1,
+            message: reason.clone(),
+        });
         let path = format!(r"C:\{}\save.ron.bad", "p".repeat(104));
         assert_eq!(path.chars().count(), 120);
         let shown = bounded_path(&path);
         for text in [
-            save_set_aside(&reason, &path).text,
-            save_set_aside_notice(&reason, &path),
+            save_set_aside(&refusal, &path).text,
+            save_set_aside_notice(&refusal, &path),
             save_not_deleted_notice(&path, &reason),
             finished_save_not_deleted_notice(&path, &reason),
         ] {

@@ -31,7 +31,7 @@ fn the_release_files_agree_on_targets_trigger_installers_and_tool_version() {
     let install_dist =
         fs::read_to_string(root.join(".github/actions/install-dist/action.yml")).unwrap();
 
-    // One binary per system the brief names: Windows, Linux, macOS.
+    // One binary per system the README names: Windows, Linux, macOS.
     let targets = [
         "aarch64-apple-darwin",
         "x86_64-apple-darwin",
@@ -130,7 +130,7 @@ fn the_release_files_agree_on_targets_trigger_installers_and_tool_version() {
     assert!(workflow.contains("gh release create"));
     assert!(
         workflow.contains("artifacts_matrix"),
-        "the matrix comes from the plan of dist"
+        "the build matrix comes from `dist plan`"
     );
     // The runner overrides name targets of the list, nothing else.
     for line in section(&dist, "[dist.github-custom-runners]", "\n[")

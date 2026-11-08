@@ -2,12 +2,12 @@
 //!
 //! Exposes to the crate [`GameRecord`], the whole save, and the records of
 //! its parts: [`DailyRecord`], [`MapRecord`], [`ActorRecord`] and
-//! [`ActorKindRecord`], [`ItemRecord`] and [`EngravingRecord`]. A record holds plain values only:
-//! definitions are named by identifier and actors and items by their saved
-//! keys (`SlotKey`), so a record can be read without the content. Turning a
-//! game into records and back, with every check, is done by the `game`
-//! module (its `saved` submodule); the map, being self-contained, is turned
-//! back here.
+//! [`ActorKindRecord`], [`ItemRecord`] and [`EngravingRecord`]. A record
+//! holds plain values only: definitions are named by identifier and actors
+//! and items by their saved keys (`SlotKey`), so a record can be read without
+//! the content. Turning a game into records and back, with every check, is
+//! done by the `game` module (its `saved` submodule); the map, being
+//! self-contained, is turned back here.
 //!
 //! Every record refuses unknown fields, so a misspelt or foreign field is
 //! reported instead of ignored.

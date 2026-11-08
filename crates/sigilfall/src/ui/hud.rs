@@ -5,13 +5,12 @@
 //! Exposes [`render`], the health thresholds ([`HP_HIGH_ABOVE_PERCENT`],
 //! [`HP_LOW_BELOW_PERCENT`]), the bar's width ([`HP_BAR_WIDTH`]), the
 //! [`HealthLevel`] they decide and the fewest rows the sigil names keep
-//! ([`SIGIL_MIN_ROWS`]). The layout follows the game screen of
-//! `docs/design.md`: a border down the left, "HP" with its value, the bar,
-//! "Essence" with its value, a blank row, "SIGILS" with the count known out
-//! of those that exist and their names, a blank row, then "IN VIEW" with
-//! the player, one line per kind of monster, one per kind of item, one per
-//! kind of engraved glyph and one for the way down in view: the stairs, or
-//! on the bottom floor the seal that ends the run.
+//! ([`SIGIL_MIN_ROWS`]). The layout: a border down the left, "HP" with its
+//! value, the bar, "Essence" with its value, a blank row, "SIGILS" with the
+//! count known out of those that exist and their names, a blank row, then "IN
+//! VIEW" with the player, one line per kind of monster, one per kind of item,
+//! one per kind of engraved glyph and one for the way down in view: the
+//! stairs, or on the bottom floor the seal that ends the run.
 //!
 //! Each monster entry ends with that monster's hit points, current out of
 //! maximum ("4/9"), right-aligned like the player's value above and in the
@@ -53,16 +52,16 @@ use crate::messages;
 use crate::theme::Theme;
 
 /// Health above this share of the maximum, in percent, is drawn in the
-/// `hp_high` colour (`docs/design.md`: "PV au-dessus de 50 %").
+/// `hp_high` colour.
 pub const HP_HIGH_ABOVE_PERCENT: i32 = 50;
 
 /// Health below this share of the maximum, in percent, is drawn in the
-/// `hp_low` colour and marked with `!` (`docs/design.md`: "PV sous 25 %").
-/// From this share up to [`HP_HIGH_ABOVE_PERCENT`] included, it is `hp_mid`.
+/// `hp_low` colour and marked with `!`. From this share up to
+/// [`HP_HIGH_ABOVE_PERCENT`] included, it is `hp_mid`.
 pub const HP_LOW_BELOW_PERCENT: i32 = 25;
 
-/// Cells of the health bar, as `docs/design.md` sets it: 18 of the panel's
-/// 19 content columns, each worth one eighteenth of the maximum.
+/// Cells of the health bar: 18 of the panel's 19 content columns, each worth
+/// one eighteenth of the maximum.
 pub const HP_BAR_WIDTH: u16 = 18;
 
 /// Fewest rows the names of the sigils known keep, however long the "in
@@ -130,12 +129,11 @@ impl HealthLevel {
     }
 }
 
-/// Returns how many of the bar's `width` cells are filled for `hp` hit
-/// points out of `max_hp`: the share rounded up, so a living player always
-/// has at least one cell (18/30 fills 11 cells, as in the mock-up), but
-/// capped one cell short of full while any hit point is missing, so only
-/// full health fills the whole bar. Health of 0 or less, or a maximum of 0
-/// or less, give an empty bar.
+/// Returns how many of the bar's `width` cells are filled for `hp` hit points
+/// out of `max_hp`: the share rounded up, so a living player always has at
+/// least one cell (18/30 fills 11 cells), but capped one cell short of full
+/// while any hit point is missing, so only full health fills the whole bar.
+/// Health of 0 or less, or a maximum of 0 or less, give an empty bar.
 pub fn filled_cells(hp: i32, max_hp: i32, width: u16) -> u16 {
     if hp <= 0 || max_hp <= 0 {
         return 0;
@@ -407,15 +405,15 @@ impl MonsterKind<'_> {
     }
 }
 
-/// The entries of the "in view" block: the player, then one entry per kind
-/// of monster in view, in the order of `Game::visible_monsters`, then one
-/// per kind of item in view, in the order of `Game::visible_items`, then
-/// the engraved glyphs in view, unread ones first, then the stairs down or
-/// the seal when in view, each with the count of its kind. A monster entry
-/// also carries the health of the most wounded monster of its kind in view.
+/// The entries of the "in view" block: the player, then one entry per kind of
+/// monster in view, in the order of `Game::visible_monsters`, then one per
+/// kind of item in view, in the order of `Game::visible_items`, then the
+/// engraved glyphs in view, unread ones first, then the stairs down or the
+/// seal when in view, each with the count of its kind. A monster entry also
+/// carries the health of the most wounded monster of its kind in view.
 /// Monsters come first since they threaten the player; items, which the
-/// player may pick up, come before the glyphs, as in the mock-up. Names are
-/// kept whole here: [`entry_lines`] fits them to the panel.
+/// player may pick up, come before the glyphs. Names are kept whole here:
+/// [`entry_lines`] fits them to the panel.
 fn in_view_entries(game: &Game, content: &Content, theme: &Theme) -> Vec<Entry> {
     let mut entries = vec![Entry {
         glyph: theme.glyphs.player,
@@ -701,7 +699,11 @@ mod tests {
             17,
             "wounded is never full"
         );
-        assert_eq!(filled_cells(18, 30, HP_BAR_WIDTH), 11, "as in the mock-up");
+        assert_eq!(
+            filled_cells(18, 30, HP_BAR_WIDTH),
+            11,
+            "18/30 rounds up to 11 cells"
+        );
         assert_eq!(filled_cells(1, 30, HP_BAR_WIDTH), 1, "alive shows a cell");
         assert_eq!(filled_cells(0, 30, HP_BAR_WIDTH), 0);
         assert_eq!(filled_cells(-3, 30, HP_BAR_WIDTH), 0);

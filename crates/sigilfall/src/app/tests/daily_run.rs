@@ -400,7 +400,7 @@ fn daily_entry_row(app: &App) -> String {
         .expect("a Daily entry")
 }
 
-// --- Scenario 1: the same UTC date gives the same dungeon -------------------
+// --- The same UTC date gives the same dungeon -------------------
 
 #[test]
 fn two_players_of_the_same_utc_date_get_the_same_dungeon_whatever_the_hour() {
@@ -415,7 +415,7 @@ fn two_players_of_the_same_utc_date_get_the_same_dungeon_whatever_the_hour() {
     let mut screens = Vec::new();
     let mut states = Vec::new();
     for time in hours {
-        let folder = ScratchFolder::new("f11-same-date");
+        let folder = ScratchFolder::new("same-date");
         let app = launch_with_terminal(
             &folder,
             &["--daily"],
@@ -449,7 +449,7 @@ fn two_players_of_the_same_utc_date_get_the_same_dungeon_whatever_the_hour() {
     );
 
     // Starting it from the title menu is the same run.
-    let folder = ScratchFolder::new("f11-same-date-title");
+    let folder = ScratchFolder::new("same-date-title");
     let mut from_title = launch_with_terminal(
         &folder,
         &[],
@@ -465,7 +465,7 @@ fn two_players_of_the_same_utc_date_get_the_same_dungeon_whatever_the_hour() {
 
     // The dungeon of the daily seed, replayed with --seed any other day: the
     // same map, a "Seed" on the status line instead of the date.
-    let other = ScratchFolder::new("f11-same-date-seed");
+    let other = ScratchFolder::new("same-date-seed");
     let by_seed = launch_with_terminal(
         &other,
         &["--seed", &Seed::daily(day).to_string()],
@@ -490,7 +490,7 @@ fn two_players_of_the_same_utc_date_get_the_same_dungeon_whatever_the_hour() {
 #[test]
 fn the_date_turns_at_midnight_utc_and_the_next_day_is_another_dungeon() {
     let last = midnight(2026, 11, 9) - 1;
-    let before = ScratchFolder::new("f11-midnight-a");
+    let before = ScratchFolder::new("midnight-a");
     let one = launch_with_terminal(
         &before,
         &["--daily"],
@@ -498,7 +498,7 @@ fn the_date_turns_at_midnight_utc_and_the_next_day_is_another_dungeon() {
         &clock_at(last),
     )
     .unwrap();
-    let after = ScratchFolder::new("f11-midnight-b");
+    let after = ScratchFolder::new("midnight-b");
     let two = launch_with_terminal(
         &after,
         &["--daily"],
@@ -517,7 +517,7 @@ fn the_date_turns_at_midnight_utc_and_the_next_day_is_another_dungeon() {
 
     // A title left open across midnight changes its date, and "Daily" then
     // starts the new day's dungeon.
-    let folder = ScratchFolder::new("f11-midnight-title");
+    let folder = ScratchFolder::new("midnight-title");
     let clock = clock_at(last);
     let mut title = launch_with_terminal(&folder, &[], ColorSupport::TrueColor, &clock).unwrap();
     assert!(
@@ -542,7 +542,7 @@ fn the_date_turns_at_midnight_utc_and_the_next_day_is_another_dungeon() {
         (midnight(2028, 2, 28), "2028-02-29"),
         (midnight(2028, 2, 29), "2028-03-01"),
     ] {
-        let folder = ScratchFolder::new("f11-boundary");
+        let folder = ScratchFolder::new("boundary");
         let app = launch_with_terminal(
             &folder,
             &["--daily"],
@@ -559,7 +559,7 @@ fn the_date_turns_at_midnight_utc_and_the_next_day_is_another_dungeon() {
     // Thirty consecutive days: thirty different first floors.
     let mut seen = std::collections::BTreeSet::new();
     for offset in 0..30 {
-        let folder = ScratchFolder::new("f11-thirty");
+        let folder = ScratchFolder::new("thirty");
         let app = launch_with_terminal(
             &folder,
             &["--daily"],
@@ -614,7 +614,7 @@ fn daily_cannot_be_combined_with_seed_in_any_order() {
 
 #[test]
 fn daily_is_refused_while_a_game_is_saved_and_the_save_is_left_alone() {
-    let folder = ScratchFolder::new("f11-daily-saved");
+    let folder = ScratchFolder::new("daily-saved");
     let game = Game::new(Seed::from(42), &shipped());
     folder.save_file().write(&game).unwrap();
     let saved = fs::read(folder.save_file().path()).unwrap();
@@ -635,7 +635,7 @@ fn daily_is_refused_while_a_game_is_saved_and_the_save_is_left_alone() {
 
 #[test]
 fn the_title_lists_daily_after_seed_with_the_date_of_the_clock() {
-    let folder = ScratchFolder::new("f11-title");
+    let folder = ScratchFolder::new("title");
     let app = launch_with_terminal(
         &folder,
         &[],
@@ -669,7 +669,7 @@ fn the_title_lists_daily_after_seed_with_the_date_of_the_clock() {
 
 #[test]
 fn a_daily_run_resumed_three_days_later_is_still_the_run_of_its_date() {
-    let folder = ScratchFolder::new("f11-resume");
+    let folder = ScratchFolder::new("resume");
     let day = date(2026, 11, 8);
     let start = clock_at(midnight(2026, 11, 8) + 9 * 3600);
     let mut app =
@@ -712,7 +712,7 @@ fn a_daily_run_resumed_three_days_later_is_still_the_run_of_its_date() {
     }
 
     // It plays on as if it had never stopped, and keeps the date.
-    let control_folder = ScratchFolder::new("f11-resume-control");
+    let control_folder = ScratchFolder::new("resume-control");
     let mut control = launch_with_terminal(
         &control_folder,
         &["--daily"],
@@ -750,7 +750,7 @@ fn a_daily_run_resumed_three_days_later_is_still_the_run_of_its_date() {
     assert!(rows(&again, 80, 24)[0].contains("Daily 2026-11-08"));
 
     // A run of a plain seed shows its seed after a resume, never a date.
-    let plain = ScratchFolder::new("f11-resume-plain");
+    let plain = ScratchFolder::new("resume-plain");
     let mut run = launch_with_arguments(&plain, &["--seed", "42"]).unwrap();
     run.handle_key(press(KeyCode::Char('q')));
     run.save_on_exit().unwrap();
@@ -763,7 +763,7 @@ fn a_daily_run_resumed_three_days_later_is_still_the_run_of_its_date() {
     );
 }
 
-// --- Scenario 2: the end of a run gives one line to share ----------------------
+// --- The end of a run gives one line to share ----------------------
 
 /// A game with one monster of each of `kinds` beside the player, the glyph
 /// of Ember on a free cell near it, and a lead homunculus that starts at
@@ -836,7 +836,7 @@ const fn key_of(direction: Direction) -> char {
 /// the glyph, fights whatever stands beside, casts each of `traces` and
 /// waits until the player dies. `None` if the player survives 400 turns.
 fn play_to_the_end(game: Game, glyph: Direction, traces: &[&str], time: u64) -> Option<App> {
-    let folder = ScratchFolder::new("f11-share");
+    let folder = ScratchFolder::new("share");
     folder.save_file().write(&game).unwrap();
     let mut app =
         launch_with_terminal(&folder, &[], ColorSupport::TrueColor, &clock_at(time)).unwrap();
@@ -1080,7 +1080,7 @@ fn two_players_who_play_the_same_daily_run_share_the_same_line() {
 
 #[test]
 fn no_line_to_share_is_shown_while_the_game_is_on_and_none_after_returning_to_the_title() {
-    let folder = ScratchFolder::new("f11-no-line");
+    let folder = ScratchFolder::new("no-line");
     let app = launch_with_arguments(&folder, &["--daily"]).unwrap();
     for (width, height) in SIZES {
         assert!(

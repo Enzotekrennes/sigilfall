@@ -10,7 +10,7 @@ use ratatui::crossterm::event::KeyCode;
 
 #[test]
 fn the_key_help_of_every_screen_fits_in_80_columns_whole() {
-    let folder = ScratchFolder::new("f10-help");
+    let folder = ScratchFolder::new("help");
     save_game(&folder, 7, 1);
 
     let mut screens: Vec<(&str, App, Vec<&str>)> = Vec::new();
@@ -85,7 +85,7 @@ fn the_key_help_of_every_screen_fits_in_80_columns_whole() {
         }
     }
     // The ASCII game help is the same words with plain arrows.
-    let ascii = ScratchFolder::new("f10-help-ascii");
+    let ascii = ScratchFolder::new("help-ascii");
     let mut app = launch_with_arguments(&ascii, &["--ascii", "--seed", "42"]).unwrap();
     app.handle_key(press(KeyCode::Char('.')));
     let help = rows(&app, 80, 24).pop().unwrap();

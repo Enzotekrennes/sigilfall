@@ -1,16 +1,15 @@
-//! Acceptance tests of F9 (save, permadeath, summary), core half, written
+//! Saved and resumed runs, permadeath and the summary, core half, written
 //! against the public API only.
 //!
-//! They check the first scenario at the level of the game state: a run saved
-//! at any moment and read back goes on exactly as the run that was never
-//! interrupted, random stream included, across several floors, with a pack,
-//! a grimoire, steadied casts and wounded monsters. A bot that is a pure
-//! function of the public state plays the run and its reloaded twin side by
-//! side, and every event, every actor and the whole text of the save are
-//! compared. They also check the third scenario at the level of the format
-//! (unreadable texts of every kind are errors, never panics) and the
-//! numbers of the second one (the statistics equal a tally of the events,
-//! and the seed shown replays the first floor).
+//! They check at the level of the game state that a run saved at any moment
+//! and read back goes on exactly as the run that was never interrupted,
+//! random stream included, across several floors, with a pack, a grimoire,
+//! steadied casts and wounded monsters. A bot that is a pure function of the
+//! public state plays the run and its reloaded twin side by side, and every
+//! event, every actor and the whole text of the save are compared. They also
+//! check at the level of the format that unreadable texts of every kind are
+//! errors, never panics, and the numbers of the summary (the statistics equal
+//! a tally of the events, and the seed shown replays the first floor).
 //!
 //! The monsters of the runs are slow and weak but have many hit points, so
 //! the bot survives several floors and leaves wounded monsters behind. Every
@@ -319,7 +318,7 @@ fn run_with_checkpoints(seed: Seed, content: &Content) -> Option<(Coverage, u32)
     None
 }
 
-// --- Scenario 1: quit, relaunch, the same state, random stream included ---
+// --- Quit, relaunch, the same state, random stream included ---
 
 #[test]
 fn a_run_saved_at_any_moment_goes_on_exactly_as_if_it_was_never_stopped() {
@@ -500,7 +499,7 @@ fn the_position_of_the_random_stream_is_what_the_future_depends_on() {
     );
 }
 
-// --- Scenario 3: unreadable saves are errors, never panics ---
+// --- Unreadable saves are errors, never panics ---
 
 #[test]
 fn texts_that_are_not_saves_are_refused_with_an_error() {
@@ -637,7 +636,7 @@ fn a_save_of_a_dead_game_reads_back_dead_and_stays_dead() {
     assert_eq!(save::to_string(&back).unwrap(), text);
 }
 
-// --- Scenario 2: the numbers of the summary come from the game ---
+// --- The numbers of the summary come from the game ---
 
 /// Counts tallied by the test from the events, for comparison with
 /// `Game::stats`.

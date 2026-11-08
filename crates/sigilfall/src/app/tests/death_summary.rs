@@ -1,9 +1,9 @@
-//! The death summary (T25), driven by simulated keys and read from the
-//! rendered screen: after a real death on a generated floor every count
-//! shown equals `Game::stats`; the list of creatures slain is capped, most
-//! slain first; the seed shown replays the run; the summary fits 80 × 24
-//! and centres on larger screens; it is drawn with the theme's tokens in
-//! the four rendering modes, and in plain ASCII with the ASCII glyphs.
+//! The death summary, driven by simulated keys and read from the rendered
+//! screen: after a real death on a generated floor every count shown equals
+//! `Game::stats`; the list of creatures slain is capped, most slain first;
+//! the seed shown replays the run; the summary fits 80 × 24 and centres on
+//! larger screens; it is drawn with the theme's tokens in the four rendering
+//! modes, and in plain ASCII with the ASCII glyphs.
 
 use clap::Parser as _;
 use ratatui::style::{Color, Modifier, Style};
@@ -43,7 +43,7 @@ const REAL_SEEDS: [u64; 6] = [0, 3, 42, 99, 1234, 7];
 /// on its seed.
 const MAX_REAL_TURNS: u64 = 3000;
 
-/// The four rendering modes of `docs/design.md`.
+/// The four rendering modes ([`ColorMode`]).
 const MODES: [ColorMode; 4] = [
     ColorMode::TrueColorDark,
     ColorMode::TrueColorLight,

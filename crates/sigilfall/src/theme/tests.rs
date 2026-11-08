@@ -1,5 +1,6 @@
 //! Tests of the theme: colour detection, mode selection, and the contrast
-//! guarantees of `docs/design.md` recomputed from the token values.
+//! guarantees of the visual identity (ARCHITECTURE.md) recomputed from the
+//! token values.
 
 use std::collections::HashMap;
 
@@ -8,11 +9,11 @@ use super::*;
 /// WCAG 2.x minimum contrast for text and meaningful glyphs.
 const TEXT_CONTRAST: f64 = 4.5;
 
-/// WCAG 2.x minimum contrast for ambient graphics (tokens marked ³ in
-/// `docs/design.md`).
+/// WCAG 2.x minimum contrast for ambient graphics (floor, borders,
+/// remembered walls…), which carry no information of their own.
 const GRAPHIC_CONTRAST: f64 = 3.0;
 
-/// Tokens held to [`GRAPHIC_CONTRAST`] only (marked ³ in `docs/design.md`).
+/// Tokens held to [`GRAPHIC_CONTRAST`] only: the ambient graphics.
 const AMBIENT_TOKENS: [&str; 6] = [
     "border",
     "floor",
@@ -22,7 +23,8 @@ const AMBIENT_TOKENS: [&str; 6] = [
     "sigil_node",
 ];
 
-/// Tokens also drawn on `bg_panel` (marked ᴾ in `docs/design.md`).
+/// Tokens also drawn on `bg_panel`, the surface of the overlays, and held
+/// to their minimum there too.
 const PANEL_TOKENS: [&str; 10] = [
     "text",
     "text_muted",
@@ -89,7 +91,7 @@ fn theme(mode: ColorMode) -> Theme {
 
 /// RGB value of `color`: as is for 24-bit colours, and from Campbell, the
 /// default scheme of Windows Terminal, for the 16 named colours (the scheme
-/// `docs/design.md` measures the ANSI 16 column on).
+/// the 16-colour theme is measured on).
 fn rgb(color: Color) -> (u8, u8, u8) {
     match color {
         Color::Rgb(r, g, b) => (r, g, b),
@@ -260,7 +262,7 @@ fn contrast_formula_matches_the_figures_of_the_design() {
     assert_eq!(ratio(light.player, light.bg), 6.06);
     assert_eq!(ratio(ansi.text, ansi.bg), 17.47);
     assert_eq!(ratio(ansi.item, ansi.bg), 4.95);
-    // The seal (T34), on bg: the map is never drawn on a panel.
+    // The seal, on bg: the map is never drawn on a panel.
     assert_eq!(ratio(dark.seal, dark.bg), 9.87);
     assert_eq!(ratio(dark.seal_remembered, dark.bg), 5.70);
     assert_eq!(ratio(light.seal, light.bg), 6.0);
@@ -300,8 +302,8 @@ fn light_true_colour_tokens_reach_aa_contrast() {
 
 #[test]
 fn the_selection_figures_of_the_design_hold() {
-    // "bg_selection" paragraph of docs/design.md: the lowest ratios of the
-    // selected line, in the light theme.
+    // The lowest ratios of the selected line, in the light theme, as the
+    // values of the theme were chosen to reach them.
     let light = theme(ColorMode::TrueColorLight);
     let on_selection = |token: Style| {
         let ratio = contrast(token.fg.unwrap(), light.bg_selection.bg.unwrap());

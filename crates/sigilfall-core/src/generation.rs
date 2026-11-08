@@ -55,8 +55,8 @@ use crate::schedule::ACTION_THRESHOLD;
 
 /// Number of columns of a floor.
 ///
-/// Decision D11 of the plan: floors are larger than the 58 × 16 map area of
-/// an 80 × 24 terminal, and a camera follows the player.
+/// Decision D11: floors are larger than the 58 × 16 map area of an 80 × 24
+/// terminal, and a camera follows the player.
 pub const FLOOR_WIDTH: usize = 80;
 
 /// Number of rows of a floor (decision D11, see [`FLOOR_WIDTH`]).
@@ -115,8 +115,8 @@ pub const ITEMS_PER_FLOOR: usize = 3;
 ///
 /// [`MONSTERS_PER_FLOOR`] on the first floor, then
 /// [`EXTRA_MONSTERS_PER_DEPTH`] more for each floor below it, up to
-/// [`MAX_MONSTERS_PER_FLOOR`] (reached on floor 7). A `depth` shallower
-/// than the first floor counts as the first. Fewer are placed only when the rooms
+/// [`MAX_MONSTERS_PER_FLOOR`] (reached on floor 7). A `depth` shallower than
+/// the first floor counts as the first. Fewer are placed only when the rooms
 /// lack free cells.
 pub fn monsters_per_floor(depth: u32) -> usize {
     let below_first = usize::try_from(depth.saturating_sub(FIRST_DEPTH)).unwrap_or(usize::MAX);
@@ -360,9 +360,9 @@ pub fn floor_kind(seed: Seed, depth: u32, content: &Content) -> FloorKind {
 /// The map, start and stairs (or seal) are exactly those of
 /// [`generate_of_kind`] with the same seed, depth and kind. Below, the open
 /// cells are the cells of the rooms (room by room in layout order, reading
-/// order within a room; the corridors are left out) on a floor of rooms,
-/// and every walkable cell in reading order in a cave. Then, from the same generation stream, each
-/// monster gets in turn:
+/// order within a room; the corridors are left out) on a floor of rooms, and
+/// every walkable cell in reading order in a cave. Then, from the same
+/// generation stream, each monster gets in turn:
 ///
 /// - a cell drawn uniformly among the free floor cells of the open cells,
 ///   the start room excluded on a floor of rooms, that lie out of

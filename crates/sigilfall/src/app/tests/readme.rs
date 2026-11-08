@@ -154,7 +154,8 @@ fn every_key_the_readme_gives_for_the_other_screens_does_what_it_says() {
         "q does not quit the grid"
     );
 
-    // The inventory: Up and Down or k and j, Home and End, digits, Enter or u, d, Escape.
+    // The inventory: Up and Down or k and j, Home and End, digits, Enter or
+    // u, d, Escape.
     assert_eq!(
         input::inventory_command_for(key(KeyCode::Up)),
         Some(InventoryCommand::Previous)
@@ -347,9 +348,6 @@ fn the_environment_variables_and_files_of_the_readme_are_the_real_ones() {
             if path.is_dir() {
                 pending.push(path);
             } else if path.extension().is_some_and(|extension| extension == "rs")
-                && !path
-                    .file_name()
-                    .is_some_and(|name| name.to_string_lossy().contains("acceptance"))
                 && !path.components().any(|part| part.as_os_str() == "tests")
             {
                 let source = fs::read_to_string(&path).unwrap();
@@ -378,7 +376,7 @@ fn the_environment_variables_and_files_of_the_readme_are_the_real_ones() {
     }
 
     // The files: save.ron and options.ron beside each other, save.ron.bad.
-    let folder = ScratchFolder::new("f10-readme-files");
+    let folder = ScratchFolder::new("readme-files");
     assert_eq!(folder.save_file().path().file_name().unwrap(), "save.ron");
     assert_eq!(
         folder.options_file().path().file_name().unwrap(),
@@ -402,11 +400,16 @@ fn the_environment_variables_and_files_of_the_readme_are_the_real_ones() {
 #[test]
 fn the_data_folder_the_readme_names_for_each_system_is_the_one_the_program_asks_the_system_for() {
     // The program asks the `directories` crate for the data folder of the
-    // application "Sigilfall" (read from the source, because the constant is
-    // private); that crate's rules give the three paths of the README.
-    let persist = include_str!("../../persist.rs");
-    assert!(persist.contains("const APPLICATION: &str = \"Sigilfall\";"));
-    assert!(persist.contains("ProjectDirs::from(\"\", \"\", APPLICATION)"));
+    // application "Sigilfall"; that crate's rules give the three paths of
+    // the README.
+    assert_eq!(crate::persist::APPLICATION, "Sigilfall");
+    let asked = crate::persist::system_data_folder();
+    assert_eq!(
+        asked,
+        directories::ProjectDirs::from("", "", "Sigilfall")
+            .map(|dirs| dirs.data_dir().to_path_buf()),
+        "the program asks the system for the folder of the application Sigilfall"
+    );
     for row in [
         "`%APPDATA%\\Sigilfall\\data`",
         "`$XDG_DATA_HOME/sigilfall`",
@@ -456,19 +459,27 @@ fn the_files_the_readme_points_to_exist_and_the_placeholders_are_the_known_ones(
     ] {
         assert!(README.contains(link), "the README links {link}");
     }
-    // Placeholders to fill in phase 6, and nothing else of that kind.
-    assert!(README.contains("github.com/OWNER/sigilfall"));
+    // The repository the installers download from, and no placeholder left.
+    assert!(README.contains("github.com/Enzotekrennes/sigilfall"));
+    assert!(!README.contains("OWNER"), "no placeholder account is left");
+    let manifest = fs::read_to_string(root.join("Cargo.toml")).unwrap();
+    assert!(
+        manifest.contains("repository = \"https://github.com/Enzotekrennes/sigilfall\""),
+        "Cargo.toml names the same repository"
+    );
+    assert!(!manifest.contains("OWNER"), "no placeholder in Cargo.toml");
+    // The demo is recorded by CI from demo.tape before the first release:
+    // until then the README points to a file that does not exist yet.
     assert!(README.contains("assets/demo.gif"));
     assert!(
         !root.join("assets/demo.gif").exists(),
-        "assets/demo.gif is still to be recorded by CI (phase 6): when it exists, delete this check"
+        "assets/demo.gif is still to be recorded by CI: when it exists, delete this check"
     );
     let toolchain = fs::read_to_string(root.join("rust-toolchain.toml")).unwrap();
     assert!(
         toolchain.contains("channel = \"stable\""),
         "README: the toolchain is pinned to stable"
     );
-    let manifest = fs::read_to_string(root.join("Cargo.toml")).unwrap();
     assert!(
         manifest.contains("rust-version = \"1.88\""),
         "README: minimum supported version 1.88"

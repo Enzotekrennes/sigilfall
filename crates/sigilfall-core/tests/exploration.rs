@@ -1,10 +1,10 @@
-//! Acceptance tests of F12, "Exploration automatique", core half: what
-//! `Action::Explore` does to the game.
+//! Automatic exploration, core half: what `Action::Explore` does to the
+//! game.
 //!
 //! Written against the public API of the core crate only. The nearest
 //! unexplored place, the cells the player knows and the distances to the
 //! frontier are recomputed here with a plain breadth-first search from the
-//! rules of the design, not with `sigilfall_core::explore`, so a bug shared
+//! rules of exploration, not with `sigilfall_core::explore`, so a bug shared
 //! by the code and its own tests cannot hide.
 //!
 //! What the tests call the *known* floor is the set of cells the player has
@@ -193,10 +193,10 @@ fn all_reachable(game: &Game, start: Position) -> Vec<Position> {
     seen.into_iter().collect()
 }
 
-// --- Scenario 1: toward the nearest unexplored place ------------------------
+// --- Toward the nearest unexplored place ------------------------
 
 #[test]
-fn scenario_1_each_step_goes_one_closer_to_the_nearest_unexplored_cell_through_known_cells() {
+fn each_step_goes_one_closer_to_the_nearest_unexplored_cell_through_known_cells() {
     let mut steps = Vec::new();
     for n in 0..4 {
         let mut game = rooms_game(n);
@@ -211,7 +211,7 @@ fn scenario_1_each_step_goes_one_closer_to_the_nearest_unexplored_cell_through_k
 }
 
 #[test]
-fn scenario_1_the_floor_is_known_as_far_as_the_player_can_walk_when_exploration_ends() {
+fn the_floor_is_known_as_far_as_the_player_can_walk_when_exploration_ends() {
     for (label, mut game) in [
         ("rooms", rooms_game(11)),
         ("rooms", rooms_game(12)),
@@ -239,7 +239,7 @@ fn scenario_1_the_floor_is_known_as_far_as_the_player_can_walk_when_exploration_
 /// On 40 seeds of each kind, exploring takes a bounded, reasonable number of
 /// steps: the walk never loops.
 #[test]
-fn scenario_1_exploration_ends_in_a_bounded_number_of_steps_on_40_seeds_of_each_kind() {
+fn exploration_ends_in_a_bounded_number_of_steps_on_40_seeds_of_each_kind() {
     let mut worst = 0;
     for n in 100..140 {
         for (label, mut game) in [("rooms", rooms_game(n)), ("cave", cave_game(n))] {
@@ -261,10 +261,10 @@ fn scenario_1_exploration_ends_in_a_bounded_number_of_steps_on_40_seeds_of_each_
     println!("most steps to explore a bare floor over 80 floors: {worst}");
 }
 
-// --- Scenario 2: nothing left, nothing happens ------------------------------
+// --- Nothing left, nothing happens ------------------------------
 
 #[test]
-fn scenario_2_an_explored_floor_is_refused_and_no_time_passes() {
+fn an_explored_floor_is_refused_and_no_time_passes() {
     let mut game = rooms_game(7);
     explore_checked(&mut game, "rooms 7");
     let before = save::to_string(&game).unwrap();
@@ -293,7 +293,7 @@ fn scenario_2_an_explored_floor_is_refused_and_no_time_passes() {
 /// The hand-made room (30 x 12) is wider than the sight range: it takes a
 /// few steps to see it all, and then the key is refused like on any floor.
 #[test]
-fn scenario_2_the_fixed_room_is_explored_in_a_few_steps_and_then_refused() {
+fn the_fixed_room_is_explored_in_a_few_steps_and_then_refused() {
     let mut game = Game::in_fixed_room(Seed::new(12));
     let mut steps = 0;
     let events = loop {

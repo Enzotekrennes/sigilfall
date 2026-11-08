@@ -675,11 +675,11 @@ fn every_title_step_keeps_the_terminal_colours_in_monochrome() {
     }
 }
 
-// --- Scenario 1: the title screen offers every entry ------------------------
+// --- The title screen offers every entry ------------------------
 
 #[test]
 fn the_title_lists_new_game_seed_daily_options_and_quit_in_that_order_without_a_save() {
-    let folder = ScratchFolder::new("f10-title-empty");
+    let folder = ScratchFolder::new("title-empty");
     let app = launch_with_arguments(&folder, &[]).unwrap();
 
     for (width, height) in SIZES {
@@ -702,7 +702,7 @@ fn the_title_lists_new_game_seed_daily_options_and_quit_in_that_order_without_a_
 
 #[test]
 fn with_a_save_continue_comes_first_is_chosen_and_says_where_the_game_stands() {
-    let folder = ScratchFolder::new("f10-title-save");
+    let folder = ScratchFolder::new("title-save");
     save_game(&folder, 42, 4);
     let app = launch_with_arguments(&folder, &[]).unwrap();
 
@@ -726,7 +726,7 @@ fn with_a_save_continue_comes_first_is_chosen_and_says_where_the_game_stands() {
 
 #[test]
 fn the_menu_wraps_around_and_every_entry_does_what_it_says() {
-    let folder = ScratchFolder::new("f10-title-keys");
+    let folder = ScratchFolder::new("title-keys");
     let mut app = launch_with_arguments(&folder, &[]).unwrap();
 
     app.handle_key(press(KeyCode::Up));
@@ -802,7 +802,7 @@ fn a_valid_seed_starts_the_game_of_that_seed_whatever_form_it_is_typed_in() {
         ("42 ", 42),
     ];
     for (typed, value) in accepted {
-        let folder = ScratchFolder::new("f10-seed-valid");
+        let folder = ScratchFolder::new("seed-valid");
         let mut app = launch_with_arguments(&folder, &[]).unwrap();
         submit_seed(&mut app, typed);
         assert_eq!(app.state(), State::Playing, "{typed:?}");
@@ -813,10 +813,10 @@ fn a_valid_seed_starts_the_game_of_that_seed_whatever_form_it_is_typed_in() {
         );
     }
     // The seed typed is the seed of --seed.
-    let typed_folder = ScratchFolder::new("f10-seed-typed");
+    let typed_folder = ScratchFolder::new("seed-typed");
     let mut typed = launch_with_arguments(&typed_folder, &[]).unwrap();
     submit_seed(&mut typed, "7F3A-91C2-0B5E-D4A8");
-    let flag_folder = ScratchFolder::new("f10-seed-flag");
+    let flag_folder = ScratchFolder::new("seed-flag");
     let flagged = launch_with_arguments(&flag_folder, &["--seed", "7F3A-91C2-0B5E-D4A8"]).unwrap();
     assert_eq!(rows(&typed, 80, 24), rows(&flagged, 80, 24));
     assert_eq!(rows(&typed, 120, 40), rows(&flagged, 120, 40));
@@ -839,7 +839,7 @@ fn an_invalid_seed_is_refused_with_a_reason_and_the_entry_stays_open() {
         (&long, "is not a seed"),
     ];
     for (typed, reason) in refused {
-        let folder = ScratchFolder::new("f10-seed-invalid");
+        let folder = ScratchFolder::new("seed-invalid");
         let mut app = launch_with_arguments(&folder, &[]).unwrap();
         submit_seed(&mut app, typed);
         assert!(
@@ -873,7 +873,7 @@ fn an_invalid_seed_is_refused_with_a_reason_and_the_entry_stays_open() {
 
 #[test]
 fn the_seed_field_edits_like_a_text_field_and_a_q_is_a_letter() {
-    let folder = ScratchFolder::new("f10-seed-edit");
+    let folder = ScratchFolder::new("seed-edit");
     let mut app = launch_with_arguments(&folder, &[]).unwrap();
     go_to(&mut app, TitleItem::Seed);
     app.handle_key(press(KeyCode::Enter));
@@ -913,7 +913,7 @@ fn the_seed_field_edits_like_a_text_field_and_a_q_is_a_letter() {
 
 #[test]
 fn abandoning_a_saved_game_asks_first_and_only_the_second_answer_deletes_it() {
-    let folder = ScratchFolder::new("f10-confirm");
+    let folder = ScratchFolder::new("confirm");
     save_game(&folder, 42, 4);
     let saved = fs::read(folder.save_file().path()).unwrap();
     let mut app = launch_with_arguments(&folder, &[]).unwrap();
@@ -1003,7 +1003,7 @@ fn abandoning_a_saved_game_asks_first_and_only_the_second_answer_deletes_it() {
 
 #[test]
 fn a_seed_and_the_daily_dungeon_ask_before_abandoning_a_save_too_and_ctrl_c_keeps_it() {
-    let folder = ScratchFolder::new("f10-confirm-others");
+    let folder = ScratchFolder::new("confirm-others");
     save_game(&folder, 42, 2);
     let saved = fs::read(folder.save_file().path()).unwrap();
     let mut app = launch_with_arguments(&folder, &[]).unwrap();

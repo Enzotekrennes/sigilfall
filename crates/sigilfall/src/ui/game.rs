@@ -3,22 +3,20 @@
 //! with the monsters in view and the player, side panel, message log, key
 //! help.
 //!
-//! Exposes [`render`]. The layout follows the game screen of
-//! `docs/design.md`: status line on the first row, map below it on the
-//! left, side panel on the right (drawn by `ui::hud`), message log under
-//! both (drawn by `ui::log`), key help on the last row. The map is seen
-//! through a
-//! [`Camera`] that follows the player, and each map cell is drawn according
-//! to what the player knows of it ([`Sight`]): in full when in view, only
-//! its landmarks when explored but out of view, not at all when never seen.
-//! Engraved glyphs are landmarks: `§` until the player knows their sigil,
-//! `≡` after, dimmer once out of view. So are the stairs down, `▼`, and on
-//! the bottom floor the seal that takes their place, `◎`, whose key help
-//! then says "unseal" instead of "descend". Items and monsters are drawn only on
-//! cells in view, items with their family's glyph in `item`, monsters with
-//! their family's letter and colour, monsters over items, and the player is
-//! drawn over everything else. While the player casts or looks at the
-//! inventory, the sigil overlay (`ui::sigil`) or the inventory
+//! Exposes [`render`]. The layout: status line on the first row, map below it
+//! on the left, side panel on the right (drawn by `ui::hud`), message log
+//! under both (drawn by `ui::log`), key help on the last row. The map is seen
+//! through a [`Camera`] that follows the player, and each map cell is drawn
+//! according to what the player knows of it ([`Sight`]): in full when in
+//! view, only its landmarks when explored but out of view, not at all when
+//! never seen. Engraved glyphs are landmarks: `§` until the player knows
+//! their sigil, `≡` after, dimmer once out of view. So are the stairs down,
+//! `▼`, and on the bottom floor the seal that takes their place, `◎`, whose
+//! key help then says "unseal" instead of "descend". Items and monsters are
+//! drawn only on cells in view, items with their family's glyph in `item`,
+//! monsters with their family's letter and colour, monsters over items, and
+//! the player is drawn over everything else. While the player casts or looks
+//! at the inventory, the sigil overlay (`ui::sigil`) or the inventory
 //! (`ui::inventory`) covers the map, and the key help names the keys of the
 //! overlay instead of those of the game.
 
@@ -42,18 +40,18 @@ use crate::theme::Theme;
 
 /// Width of the side panel, in columns, its left border included.
 ///
-/// `docs/design.md` gives the panel 21 columns of content plus a one-column
-/// border, which leaves a 58-column map on an 80-column terminal.
+/// The panel has 21 columns of content plus a one-column border, which leaves
+/// a 58-column map on an 80-column terminal.
 const SIDE_PANEL_WIDTH: u16 = 22;
 
 /// Height of the message log, in rows, its title separator included.
 ///
-/// `docs/design.md` gives the log five lines under a one-row separator,
-/// which leaves a 16-row map on a 24-row terminal.
+/// The log has five lines under a one-row separator, which leaves a 16-row
+/// map on a 24-row terminal.
 const LOG_HEIGHT: u16 = 6;
 
-/// Empty columns kept at each end of the status line, as in the mock-up of
-/// `docs/design.md`, so its text never touches the terminal's edges.
+/// Empty columns kept at each end of the status line, so its text never
+/// touches the terminal's edges.
 const STATUS_MARGIN: u16 = 1;
 
 /// The areas of the game screen, as laid out by [`GameLayout::new`].
@@ -72,8 +70,8 @@ struct GameLayout {
 }
 
 impl GameLayout {
-    /// Splits `area` as on the game screen of `docs/design.md`: status
-    /// line, map and side panel side by side, log, key help.
+    /// Splits `area` into the areas of the game screen: status line, map and
+    /// side panel side by side, log, key help.
     ///
     /// Beyond 80 × 24 only the map grows; the panel keeps its width and the
     /// log its height.
@@ -179,11 +177,10 @@ fn status_line(game: &Game, theme: &Theme) -> Line<'static> {
     ])
 }
 
-/// Builds what names the run at the right end of the status line: the
-/// seed, such as "Seed 7F3A-91C2-0B5E-D4A8", or for a daily run its date,
-/// such as "Daily 2026-11-08". Label in the muted style, value in the title
-/// style, as `docs/design.md` asks, right-aligned in the area it is drawn
-/// in.
+/// Builds what names the run at the right end of the status line: the seed,
+/// such as "Seed 7F3A-91C2-0B5E-D4A8", or for a daily run its date, such as
+/// "Daily 2026-11-08". Label in the muted style, value in the title style,
+/// right-aligned in the area it is drawn in.
 ///
 /// The seed is written in its shareable form (see `Seed`'s `Display`), which
 /// `--seed` accepts back to replay the run. A daily run shows its date
@@ -310,10 +307,10 @@ impl Sight {
 /// given what the player knows of it, or `None` when the cell is left as
 /// the background.
 ///
-/// The rule of `docs/design.md`: a cell in view is drawn in full with the
+/// The rule of sight on the map: a cell in view is drawn in full with the
 /// "seen" tokens; an explored cell out of view shows only its landmarks
-/// (walls, stairs and the seal today; arches when they exist), in
-/// the `*_remembered` tokens, and never its floor; a cell never seen shows
+/// (walls, stairs and the seal today; arches when they exist), in the
+/// `*_remembered` tokens, and never its floor; a cell never seen shows
 /// nothing. The three states therefore differ by glyph as well as by colour:
 /// out of view, the floor around the landmarks disappears, which tells them
 /// apart without colour or Unicode.
@@ -357,7 +354,7 @@ const fn item_look(item: &VisibleItem<'_>, theme: &Theme) -> (char, Style) {
 /// whether the player of `game` knows its sigil and what the player knows
 /// of its cell, or `None` on a cell never seen.
 ///
-/// The rule of T12 for landmarks: a glyph in view is drawn in full (`§` in
+/// The rule for landmarks: a glyph in view is drawn in full (`§` in
 /// `engraving_unread`, `≡` in `engraving_read`); an explored glyph out of
 /// view keeps its glyph in the dimmer `*_remembered` token, and its floor
 /// disappears around it. `§` and `≡` tell read from unread without colour,
@@ -468,7 +465,7 @@ mod tests {
     use super::*;
     use crate::theme::{ColorMode, GlyphSet};
 
-    /// The four rendering modes of `docs/design.md`.
+    /// The four rendering modes ([`ColorMode`]).
     const MODES: [ColorMode; 4] = [
         ColorMode::TrueColorDark,
         ColorMode::TrueColorLight,
@@ -661,7 +658,8 @@ mod tests {
 
     #[test]
     fn remembered_walls_take_the_values_of_the_design_in_every_mode() {
-        // "wall_seen" and "wall_remembered" rows of docs/design.md.
+        // The values chosen for the tokens wall_seen and wall_remembered,
+        // written out so a change of the theme is noticed.
         let expected = [
             (
                 ColorMode::TrueColorDark,
@@ -810,8 +808,8 @@ mod tests {
             speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
     ]"#;
 
-    /// Which colour token a family is drawn with, as `docs/design.md`
-    /// assigns it: written out here rather than taken from
+    /// Which colour token a family is drawn with (flesh hostile, spirit
+    /// arcane): written out here rather than taken from
     /// [`Theme::creature`], so a wrong mapping there fails the tests.
     #[derive(Debug, Clone, Copy)]
     enum Token {
@@ -831,9 +829,8 @@ mod tests {
         }
     }
 
-    /// Every form of [`EVERY_FORM`], with the letter and the token
-    /// `docs/design.md` gives it ("Créatures") and the cell
-    /// [`room_with_every_form`] places it on.
+    /// Every form of [`EVERY_FORM`], with the letter and the token of its
+    /// family and the cell [`room_with_every_form`] places it on.
     ///
     /// The cells form two rows of five, two and six rows below the player
     /// of [`explored_fixed_room`] at (19, 1), east of the pillar so nothing
@@ -946,7 +943,8 @@ mod tests {
 
     #[test]
     fn monster_colours_take_the_values_of_the_design_in_every_mode() {
-        // "monster_hostile" and "monster_arcane" rows of docs/design.md.
+        // The values chosen for the tokens monster_hostile and
+        // monster_arcane, written out so a change of the theme is noticed.
         let expected = [
             (
                 ColorMode::TrueColorDark,
@@ -1005,8 +1003,8 @@ mod tests {
         }
     }
 
-    /// Seed of the generated floor of the snapshot: the one of the game
-    /// screen mock-up in `docs/design.md`, as in the application tests.
+    /// Seed of the generated floor of the snapshot: the one shown to players
+    /// as an example, as in the application tests.
     const GENERATED_SEED: Seed = Seed::new(0x7F3A_91C2_0B5E_D4A8);
 
     /// Offsets from the start cell of [`GENERATED_SEED`]'s first floor to
@@ -1079,8 +1077,8 @@ mod tests {
     }
 
     /// Items of [`room_with_items`], with the glyph of their family in
-    /// Unicode and in ASCII (`docs/design.md`, "Objets") and their cell: in
-    /// view, in a row two cells below the player of [`explored_fixed_room`].
+    /// Unicode and in ASCII and their cell: in view, in a row two cells below
+    /// the player of [`explored_fixed_room`].
     const ITEMS: [(&str, char, char, Position); 3] = [
         ("healing_draught", '¡', '!', Position::new(18, 3)),
         ("veil_page", '¶', '?', Position::new(19, 3)),
@@ -1134,7 +1132,8 @@ mod tests {
 
     #[test]
     fn item_colours_take_the_values_of_the_design_in_every_mode() {
-        // "item" row of docs/design.md.
+        // The values chosen for the token item, written out so a change of
+        // the theme is noticed.
         let expected = [
             (ColorMode::TrueColorDark, Color::Rgb(0x8D, 0xBD, 0xE6)),
             (ColorMode::TrueColorLight, Color::Rgb(0x21, 0x56, 0x85)),

@@ -213,9 +213,9 @@ pub enum OptionsCommand {
 ///   with or without Num Lock, where Home, Page Up, End and Page Down are the
 ///   diagonals) and the vi keys `h j k l y u b n`;
 /// - wait: `.`, `5` or the keypad centre key without Num Lock;
-/// - trace a sigil: `t`, as in the mock-ups of `docs/design.md` (the
+/// - trace a sigil: `t`, shown in the key help (the
 ///   digits are taken by movement, and `t` is not a vi key);
-/// - pick up the item underfoot: `g`, as in the mock-up, or `,`, the key
+/// - pick up the item underfoot: `g`, shown in the key help, or `,`, the key
 ///   of other roguelikes; neither is a vi key;
 /// - open the inventory: `i`;
 /// - go down the stairs: `>`, the key of the genre, or

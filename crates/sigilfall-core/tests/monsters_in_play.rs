@@ -1,12 +1,11 @@
-//! Acceptance tests of F4 on the real game: monsters appear out of sight of
-//! the start, are listed for drawing only when the player sees them, never
-//! block the player without a visible reason, and the combat of T15 does
-//! not break the pursuit.
+//! Monsters in the real game: they appear out of sight of the start, are
+//! listed for drawing only when the player sees them, never block the player
+//! without a visible reason, and fights do not break the pursuit.
 //!
 //! Written against the public API of the core crate only, on games built the
 //! way the binary builds them (`Game::new(seed, &Content::load())`). The
-//! player is driven by the tests, which may look at every actor (a tester's
-//! privilege) to decide where to go; the game itself is only observed.
+//! player is driven by the tests, which may look at every actor (a privilege of
+//! the tests) to decide where to go; the game itself is only observed.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -22,7 +21,8 @@ use sigilfall_core::geometry::{Direction, Position};
 use sigilfall_core::map::Map;
 use sigilfall_core::rng::Seed;
 
-/// Seeds named by the acceptance brief.
+/// The reference seeds of the tests, among them the seed shown to players
+/// as an example.
 fn named_seeds() -> Vec<Seed> {
     vec![
         Seed::from(0),
@@ -214,7 +214,8 @@ fn monsters_start_on_distinct_cells_and_not_on_the_stairs() {
             distinct.len(),
             "seed {seed}: two actors share a cell"
         );
-        // The stairs are the farthest cell: a Tile::StairsDown cell is never occupied.
+        // The stairs are the farthest cell: a Tile::StairsDown cell is never
+        // occupied.
         for cell in cells {
             assert_ne!(
                 game.map().tile(cell),
@@ -274,7 +275,7 @@ fn monsters_are_listed_only_while_their_cell_is_visible() {
     );
 }
 
-// --- A walking tester: pursuit and combat together ------------------------
+// --- A walker: pursuit and combat together --------------------------------
 
 /// What a scripted play-through found.
 #[derive(Default, Debug)]

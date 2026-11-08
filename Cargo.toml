@@ -10,10 +10,9 @@ edition = "2024"
 rust-version = "1.88"
 authors = ["Enzo Abel"]
 license = "MIT OR Apache-2.0"
-# OWNER is a placeholder until the GitHub repository exists (phase 6): the
-# release installers download from this URL, so replace it before tagging.
-repository = "https://github.com/OWNER/sigilfall"
-homepage = "https://github.com/OWNER/sigilfall"
+# The release installers download from this repository.
+repository = "https://github.com/Enzotekrennes/sigilfall"
+homepage = "https://github.com/Enzotekrennes/sigilfall"
 readme = "README.md"
 keywords = ["roguelike", "game", "terminal", "tui", "sigil"]
 categories = ["games", "command-line-utilities"]
@@ -31,3 +30,14 @@ missing_docs_in_private_items = "warn"
 [profile.dist]
 inherits = "release"
 lto = "thin"
+
+# Debug builds and tests with optimised game rules. The tests of generation,
+# sight and pursuit play thousands of seeds, which unoptimised code made
+# slow on every CI system (the cave tests took 87 s, 5 s optimised).
+# Debug assertions and overflow checks stay on; only the terminal binary
+# keeps opt-level 0, for quick rebuilds of the screens.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev.package.sigilfall-core]
+opt-level = 2

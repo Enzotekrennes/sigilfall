@@ -345,7 +345,7 @@ struct DemoRun {
 
 /// Replays `keys` from the title screen of a fresh folder.
 fn replay(keys: &[KeyEvent]) -> DemoRun {
-    let folder = ScratchFolder::new("f10-demo");
+    let folder = ScratchFolder::new("demo");
     let mut app = launch_with_arguments(&folder, &[]).unwrap();
     let mut last = None;
     for key in keys {

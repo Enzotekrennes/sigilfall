@@ -2,8 +2,9 @@
 //!
 //! Exposes [`Tile`] and [`Map`], with bounds-checked access where anything
 //! outside the grid counts as impassable and opaque, [`Map::can_step`], the
-//! one rule deciding which single steps are allowed, [`Map::blocks_sight`],
-//! and [`Map::fixed_room`], a hand-made room kept for tests.
+//! one rule deciding which single steps are allowed, and [`Map::blocks_sight`].
+//! With the `test-support` feature, `Map::fixed_room` also builds a
+//! hand-made room for tests.
 //!
 //! The map also keeps the player's sight: which cells are visible right now
 //! and which have been seen at least once (remembered). Computing what is
@@ -16,18 +17,21 @@ use crate::geometry::{Direction, Position};
 ///
 /// Kept well under 80 columns so the whole room fits on an 80 × 24 terminal
 /// before the scrolling camera exists.
+#[cfg(any(test, feature = "test-support"))]
 const FIXED_ROOM_WIDTH: usize = 30;
 
 /// Height of the room built by [`Map::fixed_room`], walls included.
 ///
 /// Kept well under the roughly 18 map rows left on an 80 × 24 terminal once
 /// the status bar and message log are drawn.
+#[cfg(any(test, feature = "test-support"))]
 const FIXED_ROOM_HEIGHT: usize = 12;
 
 /// Position of the single wall pillar inside [`Map::fixed_room`].
 ///
 /// Placed near the centre, away from the outer walls, so collisions with an
 /// obstacle can be tested from all eight sides.
+#[cfg(any(test, feature = "test-support"))]
 pub const FIXED_ROOM_PILLAR: Position = Position::new(15, 6);
 
 /// What occupies one cell of the map.
@@ -106,6 +110,7 @@ impl Map {
     /// The room is 30 columns by 12 rows, walls included. Its layout never
     /// changes, which makes it the ground of the movement and scheduling
     /// tests; games are played on generated floors.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn fixed_room() -> Self {
         let mut map = Self::new(FIXED_ROOM_WIDTH, FIXED_ROOM_HEIGHT, Tile::Floor);
         for (index, tile) in map.tiles.iter_mut().enumerate() {
@@ -161,9 +166,9 @@ impl Map {
 
     /// Returns whether `position` stops sight.
     ///
-    /// Walls do; floor, stairs and the seal do not ([`Tile::blocks_sight`]). Cells
-    /// outside the map always block sight, so nothing is ever seen past the
-    /// edge of the map.
+    /// Walls do; floor, stairs and the seal do not ([`Tile::blocks_sight`]).
+    /// Cells outside the map always block sight, so nothing is ever seen past
+    /// the edge of the map.
     pub fn blocks_sight(&self, position: Position) -> bool {
         self.tile(position).is_none_or(Tile::blocks_sight)
     }

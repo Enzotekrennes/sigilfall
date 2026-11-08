@@ -1,6 +1,6 @@
-//! Acceptance tests of F4, scenarios 1 and 2, and the "lost sight" rule:
-//! monsters spend energy by speed, chase by the shortest path while they see
-//! the player, then go to the last cell where they saw it and wait there.
+//! Pursuit: monsters spend energy by speed, chase by the shortest path while
+//! they see the player, then go to the last cell where they saw it and wait
+//! there.
 //!
 //! Written against the public API of the core crate only. Every distance
 //! is recomputed here with a plain breadth-first search over `Map::can_step`,
@@ -21,8 +21,8 @@ use sigilfall_core::geometry::{Direction, Position};
 use sigilfall_core::map::Map;
 use sigilfall_core::rng::Seed;
 
-/// Seeds named by the acceptance brief, plus the extra ones used when a
-/// scenario needs many floors.
+/// The reference seeds of the tests, among them the seed shown to players as
+/// an example, plus the extra ones used when a check needs many floors.
 fn named_seeds() -> Vec<Seed> {
     vec![
         Seed::from(0),
@@ -165,10 +165,10 @@ fn farthest_hidden_cell(game: &Game) -> Position {
         .expect("a floor has cells out of sight")
 }
 
-// --- Scenario 1: energy and speed ------------------------------------------
+// --- Energy and speed ------------------------------------------
 
 #[test]
-fn scenario_1_a_speed_200_monster_acts_twice_per_normal_action() {
+fn a_speed_200_monster_acts_twice_per_normal_action() {
     let content = content_with_speeds(&[200]);
     for seed in named_seeds() {
         let mut game = empty_floor(seed);
@@ -188,7 +188,7 @@ fn scenario_1_a_speed_200_monster_acts_twice_per_normal_action() {
 }
 
 #[test]
-fn scenario_1_on_a_generated_floor_every_monster_acts_twice_from_the_first_turn() {
+fn on_a_generated_floor_every_monster_acts_twice_from_the_first_turn() {
     // The real path: monsters placed by the generator, with their random
     // starting energy, all of speed 200 (a content file that holds only that).
     let content = content_with_speeds(&[200]);
@@ -216,7 +216,7 @@ fn scenario_1_on_a_generated_floor_every_monster_acts_twice_from_the_first_turn(
 }
 
 #[test]
-fn scenario_1_still_holds_when_the_normal_action_is_a_move() {
+fn still_holds_when_the_normal_action_is_a_move() {
     // The player walks back and forth: cost of a move equals cost of a wait.
     let content = content_with_speeds(&[200]);
     for seed in named_seeds() {
@@ -240,7 +240,7 @@ fn scenario_1_still_holds_when_the_normal_action_is_a_move() {
 }
 
 #[test]
-fn scenario_1_the_player_turn_counter_ignores_monster_turns() {
+fn the_player_turn_counter_ignores_monster_turns() {
     let content = content_with_speeds(&[200]);
     let mut game = empty_floor(Seed::from(42));
     let hidden = farthest_hidden_cell(&game);
@@ -312,10 +312,10 @@ fn a_fast_monster_that_sees_the_player_covers_two_cells_per_turn() {
     );
 }
 
-// --- Scenario 2: pursuit by the shortest path -----------------------------
+// --- Pursuit by the shortest path -----------------------------
 
 #[test]
-fn scenario_2_a_monster_that_sees_the_player_closes_in_by_a_shortest_path() {
+fn a_monster_that_sees_the_player_closes_in_by_a_shortest_path() {
     let content = content_with_speeds(&[100]);
     let mut seeds = named_seeds();
     seeds.extend((1000..1015).map(Seed::from));
@@ -370,12 +370,13 @@ fn scenario_2_a_monster_that_sees_the_player_closes_in_by_a_shortest_path() {
         cases >= 20,
         "only {cases} cases found, the test is too weak"
     );
-    println!("scenario 2: {cases} approaches checked, {detours} of them needing a detour");
+    println!("shortest path: {cases} approaches checked, {detours} of them needing a detour");
 }
 
 #[test]
 fn a_monster_does_not_move_before_the_player_acts_and_does_not_skip_its_turn() {
-    // Every turn of a visible speed 100 monster is one step or one blow, never a wait.
+    // Every turn of a visible speed 100 monster is one step or one blow,
+    // never a wait.
     let content = content_with_speeds(&[100]);
     let base = empty_floor(Seed::from(42));
     let player = at(&base, base.player());

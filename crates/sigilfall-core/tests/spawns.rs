@@ -1,11 +1,10 @@
-//! Acceptance tests of F8 (floors and difficulty), spawn half, on the core
-//! crate.
+//! Spawns and difficulty, on the core crate.
 //!
-//! Written against the public API only. They check the second acceptance
-//! scenario (a floor is populated from the spawn table of its depth), that
-//! the draw follows the weights, that difficulty can be measured and rises
-//! with depth, and that `content/spawns.ron` is validated with errors that
-//! name the file, the rule and the field.
+//! Written against the public API only. They check that a floor is populated
+//! from the spawn table of its depth, that the draw follows the weights, that
+//! difficulty can be measured and rises with depth, and that
+//! `content/spawns.ron` is validated with errors that name the file, the rule
+//! and the field.
 //!
 //! The expected table is read from the text of the shipped `spawns.ron` by
 //! a small reader of its own (`table`), not from `Content`, so a bug in the
@@ -106,7 +105,7 @@ fn seeds(count: u64) -> impl Iterator<Item = Seed> {
     (0..count).map(Seed::from)
 }
 
-// --- Scenario 2: monsters come from the table of the depth --------------------
+// --- Monsters come from the table of the depth --------------------
 
 #[test]
 fn the_reader_of_this_file_found_every_shipped_rule() {
@@ -130,7 +129,7 @@ fn the_reader_of_this_file_found_every_shipped_rule() {
 }
 
 #[test]
-fn scenario_2_the_content_gives_every_floor_the_weights_written_in_the_file() {
+fn the_content_gives_every_floor_the_weights_written_in_the_file() {
     let rules = table(SPAWNS);
     let content = shipped();
     for depth in FIRST_DEPTH..=DEEPEST_CHECKED {
@@ -152,7 +151,7 @@ fn scenario_2_the_content_gives_every_floor_the_weights_written_in_the_file() {
 }
 
 #[test]
-fn scenario_2_every_monster_and_item_of_a_floor_is_in_the_table_of_its_depth() {
+fn every_monster_and_item_of_a_floor_is_in_the_table_of_its_depth() {
     let rules = table(SPAWNS);
     let content = shipped();
     for depth in FIRST_DEPTH..=DEEPEST_CHECKED {
@@ -179,7 +178,7 @@ fn scenario_2_every_monster_and_item_of_a_floor_is_in_the_table_of_its_depth() {
 }
 
 #[test]
-fn scenario_2_deeper_floors_bring_in_their_new_creatures_and_drop_none_without_a_rule() {
+fn deeper_floors_bring_in_their_new_creatures_and_drop_none_without_a_rule() {
     let content = shipped();
     let kinds_at = |depth: u32| -> Vec<String> {
         let mut kinds: Vec<String> = seeds(SAMPLE_SEEDS)
@@ -209,7 +208,7 @@ fn scenario_2_deeper_floors_bring_in_their_new_creatures_and_drop_none_without_a
 }
 
 #[test]
-fn scenario_2_the_draw_follows_the_weights_of_the_floor() {
+fn the_draw_follows_the_weights_of_the_floor() {
     let rules = table(SPAWNS);
     let content = shipped();
     // First floor (equal weights), a middle one and the deepest.
@@ -236,7 +235,7 @@ fn scenario_2_the_draw_follows_the_weights_of_the_floor() {
 }
 
 #[test]
-fn scenario_2_the_items_of_a_floor_also_follow_the_table() {
+fn the_items_of_a_floor_also_follow_the_table() {
     let rules = table(SPAWNS);
     let content = shipped();
     for depth in [1, 2, 7] {
@@ -262,7 +261,7 @@ fn scenario_2_the_items_of_a_floor_also_follow_the_table() {
 }
 
 #[test]
-fn scenario_2_a_spawn_file_that_changes_the_table_changes_the_floor_without_recompiling() {
+fn a_spawn_file_that_changes_the_table_changes_the_floor_without_recompiling() {
     // The rats of floors 2 and 3 go from weight 4 to the highest weight, 99.
     let rule = r#"Spawn(of: Monster("ossuary_rat"), from_depth: 2, to_depth: 3, weight: 4)"#;
     assert!(

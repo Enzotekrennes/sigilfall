@@ -7,12 +7,12 @@
 //! floor reached and the player's turns. The binary only reads it
 //! (`Game::stats`).
 //!
-//! Stats are part of the state of a game: a save keeps them, last, as
-//! `stats: (turns: 12, deepest: 2, kills: {"ossuary_rat": 3}, casts: (pure:
-//! 1, unstable: 0, fizzled: 0), glyphs_learnt: 1, items_used: 0)` (one field
-//! per line), and a game read back goes on counting from there. This module neither names
-//! nor draws anything: monster names and the layout of the summary belong
-//! to the binary.
+//! Stats are part of the state of a game: a save keeps them, last, as `stats:
+//! (turns: 12, deepest: 2, kills: {"ossuary_rat": 3}, casts: (pure: 1,
+//! unstable: 0, fizzled: 0), glyphs_learnt: 1, items_used: 0)` (one field per
+//! line), and a game read back goes on counting from there. This module
+//! neither names nor draws anything: monster names and the layout of the
+//! summary belong to the binary.
 
 use std::collections::BTreeMap;
 

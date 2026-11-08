@@ -1,6 +1,6 @@
-//! Acceptance tests of F13, "Grottes selon l'étage": which kind of floor each
-//! depth gets (`content/floors.ron`), how the file is validated, and how
-//! monsters, glyphs and items are placed in a cave.
+//! Floor kinds: which kind of floor each depth gets (`content/floors.ron`),
+//! how the file is validated, and how monsters, glyphs and items are placed
+//! in a cave.
 //!
 //! Written against the public API of the core crate only. The floor file is
 //! read here with a small parser of its own, so the expected weights do not

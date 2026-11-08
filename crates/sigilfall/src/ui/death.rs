@@ -3,17 +3,15 @@
 //!
 //! Exposes [`render`] and [`MAX_KILL_ROWS`], and to the victory screen
 //! (`ui::victory`) the part both end screens share, [`render_summary`]:
-//! everything below the lines that say how the run ended. The screen follows the
-//! "Récapitulatif de mort" mock-up of `docs/design.md`, from top to bottom:
-//! the title, an epitaph chosen from the seed, the cause of death with the
-//! depth and the turn, the counts of the run (deepest floor, turns,
-//! creatures slain by kind, glyphs learnt, sigils cast by quality, items
-//! used), the seed in a frame, the command that replays it, the line to
-//! share (`messages::share_line`: the daily date or the seed, then the
-//! depth, or "victory" for a won run, turns, kills and casts), and the key
-//! help. Every count comes from
-//! `Game::stats`, which the game keeps from its events; this module only
-//! lays them out.
+//! everything below the lines that say how the run ended. From top to bottom,
+//! the screen shows the title, an epitaph chosen from the seed, the cause of
+//! death with the depth and the turn, the counts of the run (deepest floor,
+//! turns, creatures slain by kind, glyphs learnt, sigils cast by quality,
+//! items used), the seed in a frame, the command that replays it, the line to
+//! share (`messages::share_line`: the daily date or the seed, then the depth,
+//! or "victory" for a won run, turns, kills and casts), and the key help.
+//! Every count comes from `Game::stats`, which the game keeps from its
+//! events; this module only lays them out.
 //!
 //! The summary is centred as a block, with the counts aligned on their
 //! dots, and fits an 80 × 24 screen; larger screens centre it with more
@@ -45,8 +43,8 @@ pub const MAX_KILL_ROWS: usize = 4;
 /// Width of a count's label with its leader dots, as in "Turns ........ ",
 /// so the values line up in one column.
 ///
-/// The longest label, "Creatures slain", is 15 characters: 22 leaves it
-/// at least a space and five dots, as in the mock-up.
+/// The longest label, "Creatures slain", is 15 characters: 22 leaves it at
+/// least a space and five dots before its value.
 const LABEL_WIDTH: usize = 22;
 
 /// Blank columns between a value and its detail (the creatures slain by
@@ -63,10 +61,10 @@ const SEED_LABEL_GAP: usize = 3;
 /// the rows above the last one, and the key help on the last row. Monster
 /// names come from `content`.
 ///
-/// The cause line is only written when the player died
-/// (`Status::GameOver`); called on a game still in progress or won (a
-/// caller's mistake: `ui::render` sends a won game to `ui::victory`), the
-/// screen still shows the counts and the seed. The background is expected to be painted already,
+/// The cause line is only written when the player died (`Status::GameOver`);
+/// called on a game still in progress or won (a caller's mistake:
+/// `ui::render` sends a won game to `ui::victory`), the screen still shows
+/// the counts and the seed. The background is expected to be painted already,
 /// and an area too small for the text is clipped without panicking.
 pub fn render(frame: &mut Frame, area: Rect, game: &Game, content: &Content, theme: &Theme) {
     let mut head = vec![

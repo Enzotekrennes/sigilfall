@@ -12,13 +12,13 @@
 //! screen (`ui::title`), unless `--seed` or `--daily` asks for a game at
 //! once. The title menu lists "Continue" while a game is saved, "New game",
 //! "Seed", where the player types the seed of the new game, "Daily", the
-//! daily dungeon of today's UTC date (`Game::daily`), "Options" and "Quit".
-//! A new game that would replace a saved one asks first
-//! ([`State::Confirm`]), and deletes the save once the player agrees. The
-//! options screen ([`State::Options`], `ui::options`) changes the glyphs,
-//! the colours and the theme: each change is applied to the screen at
-//! once and written to the options file (`persist::OptionsFile`); `--ascii` keeps ASCII glyphs
-//! for the session whatever the option says.
+//! daily dungeon of today's UTC date (`Game::daily`), "Options" and "Quit". A
+//! new game that would replace a saved one asks first ([`State::Confirm`]),
+//! and deletes the save once the player agrees. The options screen
+//! ([`State::Options`], `ui::options`) changes the glyphs, the colours and
+//! the theme: each change is applied to the screen at once and written to the
+//! options file (`persist::OptionsFile`); `--ascii` keeps ASCII glyphs for
+//! the session whatever the option says.
 //!
 //! The application keeps the message log of the game in progress: the
 //! events of each action are turned into English lines by the `messages`
@@ -29,8 +29,8 @@
 //! title screen. For [`END_SCREEN_GRACE`] after the end, every key but
 //! Ctrl+C is thrown away, so a key the player was already pressing (the
 //! Enter of a deadly cast, a held movement key, the `>` that broke the
-//! seal) never closes a summary nobody has seen. The time, and today's UTC date, are read from a [`Clock`], which
-//! tests replace.
+//! seal) never closes a summary nobody has seen. The time, and today's UTC
+//! date, are read from a [`Clock`], which tests replace.
 //!
 //! The quit keys are `q`, on the game, end and title screens, and Ctrl+C
 //! everywhere; quitting a game saves it. Escape never quits: it closes the
@@ -72,9 +72,9 @@
 //! The launched application is tied to the player's save file
 //! (`persist::SaveFile`): "Continue" resumes the saved game, the save is
 //! deleted the moment the game is over (death or victory), before the end
-//! screen is drawn, and
-//! [`App::save_on_exit`] writes the game in progress when the event loop
-//! ends. The rules of the launch are given at [`App::launch`].
+//! screen is drawn, and [`App::save_on_exit`] writes the game in progress
+//! when the event loop ends. The rules of the launch are given at
+//! [`App::launch`].
 
 pub(crate) mod exploring;
 
@@ -117,7 +117,7 @@ use crate::ui::title::{Confirmation, NewRun, SeedEntry, TitleItem, TitleMenu, Ti
 use crate::ui::{self, MenuScreen, Overlay};
 
 /// How long the end screen ignores every key but Ctrl+C once the game is
-/// over, by death or by victory (fix B1 of the F9 test).
+/// over, by death or by victory.
 ///
 /// The death comes from a key the player was in the middle of typing: the
 /// Enter that validates a deadly trace, a movement key held down to walk
@@ -255,14 +255,13 @@ impl App {
     ///   deleted, and "Continue" is not listed.
     ///
     /// With `--seed`, a new game of that seed starts at once, without the
-    /// title, unless a game in progress is saved: the launch is then
-    /// refused, so a seed typed out of habit never wipes a run (decision of
-    /// T24, kept by T26: the refusal comes before the terminal changes,
-    /// works the same from a script, and says how to continue or abandon
-    /// the game on the title screen). `--daily` follows the same rules with
-    /// the daily dungeon of today's UTC date, read from the system's clock.
-    /// A save set aside or finished is handled as above, the options notice
-    /// going to the log.
+    /// title, unless a game in progress is saved: the launch is then refused,
+    /// so a seed typed out of habit never wipes a run (the refusal comes
+    /// before the terminal changes, works the same from a script, and says
+    /// how to continue or abandon the game on the title screen). `--daily`
+    /// follows the same rules with the daily dungeon of today's UTC date,
+    /// read from the system's clock. A save set aside or finished is handled
+    /// as above, the options notice going to the log.
     ///
     /// # Errors
     ///
@@ -384,9 +383,9 @@ impl App {
     /// Makes the application read the time from `clock`, so tests decide
     /// when the end screen's grace period ([`END_SCREEN_GRACE`]) is over.
     ///
-    /// Give it before the player dies: the grace period starts at the
-    /// instant `clock` reads at the end of the game. On an application already on
-    /// the end screen, the period restarts from `clock`'s current time.
+    /// Give it before the player dies: the grace period starts at the instant
+    /// `clock` reads at the end of the game. On an application already on the
+    /// end screen, the period restarts from `clock`'s current time.
     #[cfg(test)]
     pub fn with_clock(mut self, clock: ManualClock) -> Self {
         if self.ended_at.is_some() {
@@ -863,9 +862,9 @@ impl App {
     /// goes back to the title screen (see [`App::back_to_title`]), `q` and
     /// Ctrl+C quit.
     ///
-    /// Until [`END_SCREEN_GRACE`] has passed since the end of the game,
-    /// only Ctrl+C works: Enter and `q` are thrown away, and do not wait for the end of
-    /// the period to act.
+    /// Until [`END_SCREEN_GRACE`] has passed since the end of the game, only
+    /// Ctrl+C works: Enter and `q` are thrown away, and do not wait for the
+    /// end of the period to act.
     fn handle_end_key(&mut self, key: KeyEvent) {
         match input::end_command_for(key) {
             None => {}
@@ -880,8 +879,8 @@ impl App {
     /// Leaves the finished game for the title menu.
     ///
     /// The save of the finished game was deleted when it ended (death or
-    /// victory); if that failed, it is tried again here, and a second failure is shown on
-    /// the title screen. Nothing is left to continue.
+    /// victory); if that failed, it is tried again here, and a second failure
+    /// is shown on the title screen. Nothing is left to continue.
     fn back_to_title(&mut self) {
         if let Some(save) = &self.save
             && let Err(error) = save.delete()

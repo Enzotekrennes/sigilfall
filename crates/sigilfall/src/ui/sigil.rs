@@ -4,8 +4,7 @@
 //! an imperfect cast.
 //!
 //! Exposes [`render`] and the overlay's size ([`OVERLAY_WIDTH`],
-//! [`OVERLAY_HEIGHT`]). The layout follows the "Surcouche de tracé de
-//! sigil" mock-up of `docs/design.md`: a `bg_panel` frame over the map (the
+//! [`OVERLAY_HEIGHT`]). The layout: a `bg_panel` frame over the map (the
 //! side panel and the log stay in view), the grid on the left laid out like
 //! a numeric keypad, 6 columns and 3 rows between two nodes so diagonals
 //! fall at 45°, and the grimoire on the right (`ui::grimoire`). Under them,
@@ -34,11 +33,11 @@ use crate::theme::Theme;
 
 /// Width of the overlay, frame included.
 ///
-/// The map's width on an 80-column screen (58 columns) but one, so the
-/// frame never touches the side panel's border: the mock-up's 50 columns
-/// plus room for the effect of each sigil in the grimoire, which decision
-/// D12 asks to show with its name and pattern. Wider terminals show the
-/// map around it.
+/// The map's width on an 80-column screen (58 columns) but one, so the frame
+/// never touches the side panel's border: 50 columns for the grid and the
+/// grimoire, plus room for the effect of each sigil in the grimoire, which
+/// decision D12 asks to show with its name and pattern. Wider terminals show
+/// the map around it.
 pub const OVERLAY_WIDTH: u16 = 57;
 
 /// Height of the overlay, frame included: the grid's 7 rows, the 4 lines
@@ -46,7 +45,8 @@ pub const OVERLAY_WIDTH: u16 = 57;
 /// which fits the 16 rows of the map on a 24-row screen.
 pub const OVERLAY_HEIGHT: u16 = 15;
 
-/// Columns between two nodes of a row of the grid, as in the mock-up.
+/// Columns between two nodes of a row of the grid, wide enough for a
+/// diagonal stroke to read.
 const NODE_STEP_X: u16 = 6;
 
 /// Rows between two nodes of a column of the grid, half of
@@ -63,15 +63,16 @@ const GRID_WIDTH: u16 = NODE_STEP_X * (GRID_SIDE - 1) + 1;
 /// Rows of the grid, from the top node to the bottom one.
 const GRID_HEIGHT: u16 = NODE_STEP_Y * (GRID_SIDE - 1) + 1;
 
-/// Column of the grid's left nodes inside the frame, as in the mock-up.
+/// Column of the grid's left nodes inside the frame, two columns in from
+/// its border.
 const GRID_LEFT: u16 = 2;
 
 /// Row of the grid's top nodes inside the frame, under one blank row.
 const GRID_TOP: u16 = 1;
 
 /// Column of the grimoire and of the verdict inside the frame: three blank
-/// columns right of the grid (one less than the mock-up, for the effects
-/// of the grimoire).
+/// columns right of the grid, so the grimoire has room for the effect of
+/// each sigil.
 const COLUMN_LEFT: u16 = GRID_LEFT + GRID_WIDTH + 3;
 
 /// Row of the first line under the grid (trace, time, essence, notice),
@@ -188,10 +189,10 @@ fn sigil_name(game: &Game, index: usize) -> &str {
 /// touch `frame`, sides and corners: a one-cell gutter, cut to `area`.
 ///
 /// On an 80 × 24 screen the 57 × 15 frame leaves one map column between it
-/// and the side panel's border, and one map row under it. Left as they
-/// were, they showed a sliver of the map, "│▒│ Essence", which reads as a
-/// drawing fault; blank, they match the mock-ups of `docs/design.md`. On a
-/// wider screen the map stays in view beyond this gutter.
+/// and the side panel's border, and one map row under it. Left as they were,
+/// they showed a sliver of the map, "│▒│ Essence", which reads as a drawing
+/// fault; blank, they frame the overlay cleanly. On a wider screen the map
+/// stays in view beyond this gutter.
 fn clear_gutter(buffer: &mut Buffer, area: Rect, frame: Rect, theme: &Theme) {
     let (left, top) = (
         frame.left().saturating_sub(1),
@@ -214,9 +215,9 @@ fn clear_gutter(buffer: &mut Buffer, area: Rect, frame: Rect, theme: &Theme) {
 }
 
 /// Clears `frame` to the panel background and draws its rounded border
-/// (`border`), with `title` (`text_title`) on the top edge after one
-/// stroke, as in the mock-up: "╭─ Trace a sigil ──╮". The inventory
-/// (`ui::inventory`) draws its frame the same way.
+/// (`border`), with `title` (`text_title`) on the top edge after one stroke:
+/// "╭─ Trace a sigil ──╮". The inventory (`ui::inventory`) draws its frame
+/// the same way.
 ///
 /// The cells of the map `area` that touch the frame are blanked first (see
 /// [`clear_gutter`]), so no stray map glyph sits against it.
@@ -398,7 +399,7 @@ fn draw_verdict(buffer: &mut Buffer, inner: Rect, game: &Game, verdict: &Verdict
     } else {
         messages::FAILED_OUTCOME
     };
-    // The outcome sits level with the grid's bottom row, as in the mock-up.
+    // The outcome sits level with the grid's bottom row, beside it.
     let bottom_row = usize::from(GRID_HEIGHT - 1);
     lines.resize(bottom_row, Line::default());
     lines.push(Line::styled(outcome, theme.text));

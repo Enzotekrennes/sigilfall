@@ -5,7 +5,7 @@
 //              digits and underscores, starting with a letter. Never rename.
 // - name:      name shown to the player.
 // - family:    Vermin, Acolyte, Homunculus, Eye or Spectre; gives the letter
-//              drawn on the map (see docs/design.md).
+//              drawn on the map (lower case; upper case for the elite).
 // - elite:     true for the strong form of the family (upper-case letter).
 // - speed:     energy gained per tick; 100 is the player's speed, 200 acts
 //              twice per player move.
@@ -20,15 +20,15 @@
 // reckless player (death on floors 2 to 4) and a careful one (median floor
 // 6 or 7, a few victories): change them with that test in view.
 //
-// The two elites were made weaker in task T36. With 28 hit points and a
-// defense of 4, the player's attack of 4, the lead homunculus took about 25
-// blows of one point each and killed most careful runs on floors 5 to 7;
-// the hierophant, with 20 hit points, came next. Now the lead homunculus
-// has 16 hit points, a defense of 2 (about two points a blow) and an attack
-// of 5, the hierophant 14 hit points, a defense of 1 and an attack of 4:
-// still the strongest creatures of their floors, with the most hit points
-// and, for the lead homunculus, the hardest blows. Each change was needed:
-// without the lower attacks, 2 runs out of 80 broke the seal at most.
+// The two elites are held to what a careful player can beat on floors 5 to
+// 7 (decision D24). Against the player's attack of 4, the lead homunculus
+// has 16 hit points and a defense of 2 (about two points a blow) and attacks
+// for 5; the hierophant has 14 hit points, a defense of 1 and attacks for 4.
+// They stay the strongest creatures of their floors, with the most hit
+// points and, for the lead homunculus, the hardest blows. A defense of 4
+// would leave one point a blow, some 25 blows to kill a lead homunculus,
+// and most careful runs would end on those floors; higher attacks would
+// leave the seal out of reach of almost every run.
 [
     Monster(
         id: "ossuary_rat",

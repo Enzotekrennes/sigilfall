@@ -15,6 +15,14 @@ categories.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Hand-made ground for tests: `Game::in_fixed_room`, `Game::spawn_monster`,
+# `Game::engrave`, `Game::place_item`, `game::PLAYER_START` and
+# `Map::fixed_room`. A feature rather than public items, so they stay out of
+# the documented API and of release builds; both crates enable it through
+# their dev-dependencies, so it is on for every test and never for players.
+test-support = []
+
 [dependencies]
 rand = { version = "0.10.3", default-features = false }
 rand_chacha = { version = "0.10.0", default-features = false, features = ["serde"] }
@@ -26,3 +34,5 @@ thiserror = "2.0.21"
 [dev-dependencies]
 insta = "1.49.0"
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }
+# The crate itself, with its test helpers, for its own integration tests.
+sigilfall-core = { path = ".", features = ["test-support"] }

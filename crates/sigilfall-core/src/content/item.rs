@@ -2,10 +2,10 @@
 //!
 //! Exposes [`ItemDef`], the validated description of one kind of item, its
 //! [`ItemEffect`] and its [`ItemFamily`], which gives the glyph drawn for it
-//! (see `docs/design.md`). [`validate`] turns the raw entries read from the
-//! item file into definitions, or reports the first fault with the entry and
-//! field in cause: a missing field, a strength out of bounds, a sigil that
-//! the sigil file does not define, a repeated identifier.
+//! (see `theme::glyphs` in the binary). [`validate`] turns the raw entries
+//! read from the item file into definitions, or reports the first fault with
+//! the entry and field in cause: a missing field, a strength out of bounds, a
+//! sigil that the sigil file does not define, a repeated identifier.
 //!
 //! This module describes items; placing them on a floor and using them is
 //! done by the generation and the game.
@@ -60,7 +60,8 @@ impl ItemEffect {
     }
 }
 
-/// A family of items, drawn with its own glyph (see `docs/design.md`).
+/// A family of items, drawn with its own glyph (`theme::glyphs` in the
+/// binary).
 ///
 /// Only the families of the shipped effects exist; the weapons and
 /// talismans of the design join them with their effects.

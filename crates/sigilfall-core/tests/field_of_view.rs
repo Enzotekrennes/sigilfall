@@ -1,7 +1,7 @@
-//! Acceptance tests of F3 (field of view and fog), core half.
+//! Field of view and fog, core half.
 //!
-//! They check the three scenarios of the plan and the revised rules of
-//! decision D15 (an ellipse reaching 16 cells along a row and 8 along a
+//! They check what is shown, symmetry, monsters out of view, and the rules
+//! of decision D15 (an ellipse reaching 16 cells along a row and 8 along a
 //! column, light passing a diagonal gap, walls seen as soon as part of their
 //! face is lit) against the public API only, and against an oracle written
 //! here: whether a straight line between two points crosses the open
@@ -331,7 +331,7 @@ fn generated_floors(count: u64) -> Vec<(String, sigilfall_core::generation::Floo
 }
 
 // ---------------------------------------------------------------------------
-// Scenario 1: only what is in view is shown clearly, what was seen is kept
+// Only what is in view is shown clearly, what was seen is kept
 // ---------------------------------------------------------------------------
 
 /// What the game reports as visible equals a fresh computation from the
@@ -410,7 +410,7 @@ fn cells_outside_the_ellipse_of_every_position_visited_stay_unknown() {
 }
 
 // ---------------------------------------------------------------------------
-// Scenario 2: symmetry
+// Symmetry
 // ---------------------------------------------------------------------------
 
 /// If A sees B then B sees A, on real rooms and caves, for the player's
@@ -630,7 +630,8 @@ fn no_cell_is_seen_beyond_the_range_on_generated_floors() {
 #[test]
 fn sight_goes_through_a_diagonal_gap_that_an_actor_can_walk_through() {
     // A divider at column 7 with a diagonal step: walls (7,3) and (8,4) touch
-    // only by their corners; (7,4) and (8,3) are the two floor cells of the gap.
+    // only by their corners; (7,4) and (8,3) are the two floor cells of the
+    // gap.
     let rows = [
         "###############",
         "#......#......#",
@@ -837,7 +838,7 @@ fn a_floor_cell_in_range_with_a_clear_line_is_never_hidden() {
 }
 
 // ---------------------------------------------------------------------------
-// Scenario 3: monsters out of the field of view
+// Monsters out of the field of view
 // ---------------------------------------------------------------------------
 
 /// `visible_monsters` lists exactly the monsters on a visible cell, on real
@@ -1014,7 +1015,7 @@ fn no_monster_is_in_view_from_the_start_of_a_floor() {
 }
 
 // ---------------------------------------------------------------------------
-// Sight against the reach of spells (decision D15; B2 of F3, task T32)
+// Sight against the reach of spells (decisions D15 and D19)
 // ---------------------------------------------------------------------------
 
 /// Shipped sigils learnt by walking over their glyphs, as the game teaches
@@ -1075,11 +1076,11 @@ fn missed(events: &[sigilfall_core::event::Event], sigil: &str) -> bool {
     })
 }
 
-/// B2 of the F3 test, settled by task T32: a spell on the nearest foe in
-/// sight (Ember, Veil) reaches the foes in sight within the disc of radius 8
-/// it had before the 16 × 8 view (`sigil::NEAREST_FOE_REACH`), so a foe seen
-/// 9 to 16 cells away along a row is out of its reach, as it is out of the
-/// reach of a spell aimed in a direction (Lance), which still stops at 8.
+/// A spell on the nearest foe in sight (Ember, Veil) reaches the foes in
+/// sight within the disc of radius 8 it had before the 16 × 8 view
+/// (`sigil::NEAREST_FOE_REACH`), so a foe seen 9 to 16 cells away along a row
+/// is out of its reach, as it is out of the reach of a spell aimed in a
+/// direction (Lance), which still stops at 8.
 #[test]
 fn a_spell_on_the_nearest_foe_in_sight_and_an_aimed_one_both_stop_at_8_along_a_row() {
     let snail = snail();

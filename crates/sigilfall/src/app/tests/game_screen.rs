@@ -687,9 +687,9 @@ fn drawing_the_screen_again_and_again_never_makes_time_pass() {
 
 #[test]
 fn a_new_game_starts_with_the_clock_at_one_and_counts_player_actions() {
-    // The status line shows the turn the player is about to play:
-    // "Turn 1" before any action, one more per move or wait, and
-    // nothing more for a refused move (B1).
+    // The status line shows the turn the player is about to play: "Turn 1"
+    // before any action, one more per move or wait, and nothing more for a
+    // refused move.
     let mut app = new_app();
     assert_eq!(app.game().player_turns(), 0);
     assert_eq!(turn_shown(&app), 1);
@@ -748,8 +748,8 @@ fn the_seed_stays_at_the_right_end_of_a_wider_terminal() {
 
 #[test]
 fn game_keys_do_nothing_below_80_by_24_but_quitting_works() {
-    // B2: the resize message hides the game, so nothing is played
-    // blind; only the quit keys still act.
+    // The resize message hides the game, so nothing is played blind; only the
+    // quit keys still act.
     for (width, height) in [(79, 24), (80, 23), (40, 10), (0, 0)] {
         let mut app = new_app();
         drop(render(&app, width, height));

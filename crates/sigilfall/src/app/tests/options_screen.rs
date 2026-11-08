@@ -425,11 +425,11 @@ fn the_options_screen_reads_without_colour_in_every_mode() {
     }
 }
 
-// --- Scenario 2: the options apply at once and are kept ---------------------
+// --- The options apply at once and are kept ---------------------
 
 #[test]
 fn the_glyph_option_redraws_at_once_and_the_choice_is_kept_for_the_next_session() {
-    let folder = ScratchFolder::new("f10-glyphs");
+    let folder = ScratchFolder::new("glyphs");
     let mut app = launch_with_arguments(&folder, &[]).unwrap();
     assert_eq!(
         app.options().glyphs,
@@ -516,7 +516,7 @@ fn the_glyph_option_redraws_at_once_and_the_choice_is_kept_for_the_next_session(
 
 #[test]
 fn the_colour_options_apply_at_once_and_are_kept() {
-    let folder = ScratchFolder::new("f10-colours");
+    let folder = ScratchFolder::new("colours");
     let mut app = launch_with_arguments(&folder, &[]).unwrap();
     let auto = paint(&buffer(&app, 80, 24));
     assert!(auto.rgb && !auto.named, "true colour by default: {auto:?}");
@@ -575,7 +575,7 @@ fn the_colour_options_apply_at_once_and_are_kept() {
 
 #[test]
 fn the_light_theme_paints_a_light_page_at_once_is_kept_and_needs_true_colour() {
-    let folder = ScratchFolder::new("f10-light");
+    let folder = ScratchFolder::new("light");
     let mut app = launch_with_arguments(&folder, &[]).unwrap();
     let dark = background_brightness(&buffer(&app, 80, 24)).expect("a 24-bit background");
     assert!(dark < 60, "the dark theme paints ink: {dark}");
@@ -666,7 +666,7 @@ fn every_screen(support: ColorSupport, options: Options) -> Vec<(&'static str, A
         detected: support,
         forced_ascii: false,
     };
-    let folder = ScratchFolder::new("f10-screens");
+    let folder = ScratchFolder::new("screens");
     save_game(&folder, 7, 3);
     // The options reach the screens through the file, as a player's do.
     folder.options_file().write(&options).unwrap();
@@ -774,7 +774,7 @@ fn the_explicit_ascii_and_monochrome_choices_hold_on_every_screen() {
 
 #[test]
 fn ascii_on_the_command_line_beats_the_saved_option_for_the_session_only() {
-    let folder = ScratchFolder::new("f10-ascii-flag");
+    let folder = ScratchFolder::new("ascii-flag");
     folder.options_file().write(&Options::default()).unwrap();
     let saved = options_text(&folder);
     assert!(saved.contains("glyphs: Unicode"));
@@ -818,7 +818,7 @@ fn ascii_on_the_command_line_beats_the_saved_option_for_the_session_only() {
     assert!(!text(&plain).is_ascii());
 
     // And an option saved as ASCII needs no flag.
-    let other = ScratchFolder::new("f10-ascii-option");
+    let other = ScratchFolder::new("ascii-option");
     other
         .options_file()
         .write(&Options {
@@ -862,7 +862,7 @@ fn an_options_file_that_cannot_be_read_gives_the_defaults_a_notice_and_is_replac
         ("only a number", b"42".to_vec()),
     ];
     for (name, bytes) in cases {
-        let folder = ScratchFolder::new("f10-corrupt-options");
+        let folder = ScratchFolder::new("corrupt-options");
         fs::write(folder.options_file().path(), &bytes).unwrap();
 
         let mut app =
@@ -940,7 +940,7 @@ fn an_options_file_that_cannot_be_read_gives_the_defaults_a_notice_and_is_replac
 
 #[test]
 fn an_options_file_that_is_a_folder_or_cannot_be_written_never_crashes_the_game() {
-    let folder = ScratchFolder::new("f10-options-folder");
+    let folder = ScratchFolder::new("options-folder");
     fs::create_dir(folder.options_file().path()).unwrap();
     let mut app = launch_with_arguments(&folder, &[]).unwrap();
     assert!(text(&app).contains("options file could not be read"));
@@ -974,7 +974,7 @@ fn an_options_file_that_is_a_folder_or_cannot_be_written_never_crashes_the_game(
 
 #[test]
 fn the_data_folder_is_created_when_the_first_option_is_kept() {
-    let folder = ScratchFolder::new("f10-created");
+    let folder = ScratchFolder::new("created");
     let nested: PathBuf = folder.path().join("a").join("b");
     let options = OptionsFile::in_folder(&nested);
     assert!(!nested.exists());

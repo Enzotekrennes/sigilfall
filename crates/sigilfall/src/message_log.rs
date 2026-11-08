@@ -16,7 +16,7 @@ use std::collections::VecDeque;
 pub const HISTORY_LIMIT: usize = 100;
 
 /// What kind of news a message brings, which gives its prefix and colour
-/// (`docs/design.md`, "Préfixes du journal").
+/// (see `ui::log`): the prefix carries the tone without colour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tone {
     /// Neutral information, such as a blow the player struck (no prefix).

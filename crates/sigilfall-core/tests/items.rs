@@ -1,21 +1,20 @@
-//! Acceptance tests of F7 (items and inventory) on the core crate.
+//! Items and inventory, on the core crate.
 //!
-//! Written against the public API only. They check the three acceptance
-//! scenarios at the level of events and game state: an item on the floor
-//! picked up appears in the inventory, a healing draught drunk restores hit
-//! points without passing the maximum, and a full inventory leaves the item
-//! on the floor. Beyond them they check dropping, the refusals that cost no
-//! time, the essence phial capped at the maximum, the ink that makes the
-//! next two unstable casts pure, the page that teaches Veil, items out of
-//! sight and the deterministic replay. The screens are checked by the
-//! binary's tests.
+//! Written against the public API only. They check at the level of events and
+//! game state: an item on the floor picked up appears in the inventory, a
+//! healing draught drunk restores hit points without passing the maximum, and
+//! a full inventory leaves the item on the floor. Beyond them they check
+//! dropping, the refusals that cost no time, the essence phial capped at the
+//! maximum, the ink that makes the next two unstable casts pure, the page
+//! that teaches Veil, items out of sight and the deterministic replay. The
+//! screens are checked by the binary's tests.
 //!
-//! The rules are written out again here from the design (100 energy to pick
-//! up or use, 50 to drop, ten slots, 30 hit points, 6 essence at most) rather
-//! than read from the `schedule` or `item` constants, so that a silent change
-//! of a rule is noticed. The cost of an action is measured, not computed: it
-//! is the energy the player had, plus what it gained while the clock ran,
-//! minus what it has left. Every loop is bounded.
+//! The rules are written out again here (100 energy to pick up or use, 50 to
+//! drop, ten slots, 30 hit points, 6 essence at most) rather than read from
+//! the `schedule` or `item` constants, so that a silent change of a rule is
+//! noticed. The cost of an action is measured, not computed: it is the energy
+//! the player had, plus what it gained while the clock ran, minus what it has
+//! left. Every loop is bounded.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -68,7 +67,8 @@ const FOE_CELL: Position = Position::new(9, 3);
 /// cells away).
 const FAR_CELL: Position = Position::new(25, 3);
 
-/// Seeds named by the acceptance brief.
+/// The reference seeds of the tests, among them the seed shown to players
+/// as an example.
 fn named_seeds() -> Vec<Seed> {
     vec![
         Seed::from(0),
@@ -227,7 +227,7 @@ fn wounded(seed: Seed, deficit: i32, striker: &str) -> Game {
     game
 }
 
-// --- Scenario 1: an item on the floor, picked up, is in the inventory -------
+// --- An item on the floor, picked up, is in the inventory -------
 
 #[test]
 fn a_picked_up_item_leaves_the_floor_and_joins_the_inventory() {
@@ -333,7 +333,7 @@ fn items_of_a_generated_floor_can_all_be_walked_to_and_picked_up() {
     }
 }
 
-// --- Scenario 2: a healing draught restores hit points, capped --------------
+// --- A healing draught restores hit points, capped --------------
 
 #[test]
 fn a_healing_draught_restores_its_power_when_the_wound_is_deeper() {
@@ -460,7 +460,7 @@ fn only_the_item_used_is_spent() {
     assert_eq!(carried(&game), vec![ink, phial]);
 }
 
-// --- Scenario 3: a full inventory leaves the item on the floor --------------
+// --- A full inventory leaves the item on the floor --------------
 
 #[test]
 fn with_a_full_inventory_the_item_stays_on_the_floor_and_nothing_is_paid() {

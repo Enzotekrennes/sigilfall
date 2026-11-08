@@ -1,18 +1,17 @@
-//! Acceptance tests that re-check F8 (floors and difficulty) and F14
-//! (victory at the bottom) after task T36, on the public API of the core.
-//!
-//! Three things changed in T36 and are checked here from the outside:
+//! The deep floors and the bottom of the dungeon, checked from the outside
+//! on the public API of the core:
 //!
 //! - a save that contradicts itself about the way down is refused by the
 //!   reader: the bottom floor without a seal, with stairs, or a seal or a
-//!   victory on a floor above it. Each damaged save is made by editing the
-//!   text a real game wrote, so the reader is faced with what a player who
-//!   edits the file by hand would produce;
-//! - the spawn tables of the deep floors changed: the numbers written below
-//!   come from the journal of T36, not from `spawns.ron`, so a table edited
-//!   later without the plan being updated is noticed;
-//! - the two elites got weaker but must stay the strongest creatures of
-//!   their family, and a floor must stay the same for the same seed.
+//!   victory on a floor above it, or more than one seal. Each damaged save is
+//!   made by editing the text a real game wrote, so the reader is faced with
+//!   what a player who edits the file by hand would produce;
+//! - the spawn tables of the deep floors (decision D24): the numbers are
+//!   written out below rather than read from `spawns.ron`, so a table
+//!   edited without the decision being revisited is noticed;
+//! - the two elites, weakened by the same decision, must stay the strongest
+//!   creatures of their family, and a floor must stay the same for the same
+//!   seed.
 //!
 //! Every loop is bounded.
 
@@ -124,7 +123,7 @@ fn refusal(text: &str) -> String {
     }
 }
 
-// --- B1: saves that contradict themselves about the way down -----------------------------
+// --- Saves that contradict themselves about the way down ---
 
 #[test]
 fn an_untouched_save_of_the_bottom_floor_and_of_a_floor_above_reads_back() {
@@ -161,6 +160,14 @@ fn the_bottom_floor_with_stairs_and_the_seal_is_refused() {
 }
 
 #[test]
+fn the_bottom_floor_with_a_second_seal_is_refused_and_the_message_counts_them() {
+    let game = game_on_floor(42, BOTTOM);
+    // A wall cell turned into a seal: two seals, where the floor has one.
+    let message = refusal(&saved_with_tile(&game, Some(('.', '*'))));
+    assert_eq!(message, "floor 10, the bottom floor, has 2 seals");
+}
+
+#[test]
 fn a_seal_on_a_floor_above_the_bottom_is_refused() {
     let game = game_on_floor(42, 3);
     let message = refusal(&saved_with_tile(&game, Some(('>', '*'))));
@@ -188,10 +195,9 @@ fn a_victory_on_the_bottom_floor_still_reads_back() {
     assert_eq!(loaded.status(), &Status::Won);
 }
 
-// --- F8: the table of the depth, after the rebalance ----------------------------------------
+// --- The spawn table of each depth ---
 
-/// Floors, as `(first, last)`, each monster may appear on after T36 (journal
-/// of T36 and decision D24 of the plan).
+/// Floors, as `(first, last)`, each monster may appear on (decision D24).
 const WINDOWS: [(&str, u32, u32); 8] = [
     ("ossuary_rat", 1, 9),
     ("wax_beetle", 1, 7),
@@ -307,7 +313,7 @@ fn each_elite_stays_stronger_than_the_base_creature_of_its_family() {
             );
         }
     }
-    // The values T36 wrote in the plan (D24).
+    // The values of decision D24.
     let lead = content.monster("lead_homunculus").expect("shipped");
     assert_eq!((lead.hp(), lead.attack(), lead.defense()), (16, 5, 2));
     let hierophant = content.monster("hierophant").expect("shipped");

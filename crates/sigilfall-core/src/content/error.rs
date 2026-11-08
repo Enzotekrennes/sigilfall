@@ -2,9 +2,9 @@
 //!
 //! Exposes [`ContentError`], returned by `Content::load` and the
 //! `Content::parse*` functions, and [`FieldProblem`], what is wrong with one
-//! field of one entry. Every message names the file and, when the fault lies in an
-//! entry, that entry and the field, so whoever edits the data knows where to
-//! look.
+//! field of one entry. Every message names the file and, when the fault lies
+//! in an entry, that entry and the field, so whoever edits the data knows
+//! where to look.
 
 use thiserror::Error;
 

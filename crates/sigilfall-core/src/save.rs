@@ -8,14 +8,13 @@
 //! items and sigils are named by their identifiers (`MonsterDef::id`,
 //! `ItemDef::id`, `SigilDef::id`), and loading takes the [`Content`] to find
 //! them in. Everything else is kept as it is: the seed, the date of a daily
-//! run, the depth, the
-//! map with the cells seen and remembered, every actor with its energy and
-//! its memory of the player, the turn order, the items on the floor and in
-//! the inventory, the engraved glyphs, the grimoire, the counters of time,
-//! the status, the run's statistics (`Game::stats`) and the exact position
-//! of the gameplay random stream. A game
-//! read back therefore plays out exactly as the one saved: the same actions
-//! give the same events, with the same actor and item keys.
+//! run, the depth, the map with the cells seen and remembered, every actor
+//! with its energy and its memory of the player, the turn order, the items on
+//! the floor and in the inventory, the engraved glyphs, the grimoire, the
+//! counters of time, the status, the run's statistics (`Game::stats`) and the
+//! exact position of the gameplay random stream. A game read back therefore
+//! plays out exactly as the one saved: the same actions give the same events,
+//! with the same actor and item keys.
 //!
 //! Loading never panics on a faulty text: a save of another format version,
 //! text that is not RON or not of the expected shape, a reference to a
@@ -50,10 +49,10 @@ use crate::game::Game;
 /// kept differently. [`from_str`] refuses any other version rather than
 /// guessing.
 ///
-/// Version 2 (T25) moved the player's turn count into the run's statistics
-/// (`stats`), written last. Version 3 (T28) added the date of a daily run
-/// (`daily`), after the seed. Version 4 (T33) added the seal of the bottom
-/// floor to the map's tiles (`*`) and the won game to the status (`Won`).
+/// Version 2 moved the player's turn count into the run's statistics
+/// (`stats`), written last. Version 3 added the date of a daily run
+/// (`daily`), after the seed. Version 4 added the seal of the bottom floor to
+/// the map's tiles (`*`) and the won game to the status (`Won`).
 pub const FORMAT_VERSION: u32 = 4;
 
 /// Depth of nesting from which the pretty printer writes a value on one
@@ -99,7 +98,7 @@ pub fn to_string(game: &Game) -> Result<String, SaveError> {
 /// `content` is normally `Content::load()`, the content the game was saved
 /// with. A game started with content keeps a copy of it to generate the
 /// floors below; a game started without ([`Game::on_floor`],
-/// [`Game::in_fixed_room`]) stays without. It is the player's turn in the
+/// `Game::in_fixed_room`) stays without. It is the player's turn in the
 /// game returned, unless it is over.
 ///
 /// # Errors

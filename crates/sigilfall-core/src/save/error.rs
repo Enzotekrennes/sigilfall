@@ -45,7 +45,10 @@ pub enum SaveError {
     /// The save is well formed but its values could not be played: an actor
     /// outside the map, no player, two actors on one cell, a key naming
     /// nothing, a value out of its bounds…
-    #[error("the save is inconsistent: {0}")]
+    ///
+    /// The message names the cause first, in a short sentence, so the cause
+    /// is still read when a screen has little room for it.
+    #[error("{0} (inconsistent save)")]
     Inconsistent(String),
     /// The RON writer failed to write the game.
     #[error("the game could not be written as a save: {0}")]

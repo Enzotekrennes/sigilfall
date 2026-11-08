@@ -8,8 +8,8 @@
 //!
 //! # Rules
 //!
-//! - Walls and cells outside the map block sight; floor and stairs let it
-//!   through ([`Map::blocks_sight`]).
+//! - Walls and cells outside the map block sight; floor, stairs and the seal
+//!   let it through ([`Map::blocks_sight`]).
 //! - Between two cells that let sight through, sight is symmetric: if `a`
 //!   sees `b`, then `b` sees `a`. A floor cell is seen when the line to its
 //!   centre stays clear.

@@ -195,7 +195,8 @@ mod tests {
             Position::new(79, 39),
             Position::new(40, 20),
         ] {
-            // 5 spare columns: 2 before the map, 3 after; 7 spare rows: 3 and 4.
+            // 5 spare columns: 2 before the map, 3 after; 7 spare rows: 3 and
+            // 4.
             assert_eq!(view_origin(view, FLOOR, focus), Position::new(-2, -3));
         }
     }

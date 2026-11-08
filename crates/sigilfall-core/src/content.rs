@@ -13,16 +13,14 @@
 //! embedded in the binary at compile time (`include_str!`), so an installed
 //! game needs no asset folder.
 //!
-//! This module only reads and checks data, references between files
-//! included: an item teaching a sigil must name a sigil of the sigil file,
-//! and a spawn rule a monster or an item of theirs. The spawn tables give,
-//! floor by floor, the weight of each creature and item
-//! ([`Content::monster_weights`], [`Content::item_weights`]), and the floor
-//! kinds how each floor is laid out ([`Content::floor_kind_weights`]);
-//! drawing monsters, placing items or laying a floor out, recognising a
-//! trace
-//! (`sigil` module of the crate), casting a sigil and using an item are not
-//! done here.
+//! This module only reads and checks data, references between files included:
+//! an item teaching a sigil must name a sigil of the sigil file, and a spawn
+//! rule a monster or an item of theirs. The spawn tables give, floor by
+//! floor, the weight of each creature and item ([`Content::monster_weights`],
+//! [`Content::item_weights`]), and the floor kinds how each floor is laid out
+//! ([`Content::floor_kind_weights`]); drawing monsters, placing items or
+//! laying a floor out, recognising a trace (`sigil` module of the crate),
+//! casting a sigil and using an item are not done here.
 
 mod check;
 mod entry_file;

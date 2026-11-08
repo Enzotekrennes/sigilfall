@@ -1,10 +1,10 @@
-//! Acceptance tests of F6 (sigils) on the core crate.
+//! Sigils, on the core crate.
 //!
-//! Written against the public API only. They check the acceptance scenarios
-//! at the level of events and game state: a glyph read joins the grimoire, an
-//! exact trace casts and every stroke is paid in time, a trace one node off is
-//! unstable and suffers a backlash, an unknown trace fizzles and loses the
-//! essence. The screens are checked by the binary's tests.
+//! Written against the public API only. They check at the level of events and
+//! game state: a glyph read joins the grimoire, an exact trace casts and
+//! every stroke is paid in time, a trace one node off is unstable and suffers
+//! a backlash, an unknown trace fizzles and loses the essence. The screens
+//! are checked by the binary's tests.
 //!
 //! The rules are written out again here from decisions D7, D18 and D19 (25
 //! energy per stroke plus 50 per cast, 2 essence per cast, 6 essence at most,
@@ -51,7 +51,8 @@ const TEST_MONSTERS: &str = r#"[
 const SIGILS: &str = include_str!("../content/sigils.ron");
 const ITEMS: &str = include_str!("../content/items.ron");
 
-/// Seeds named by the acceptance brief.
+/// The reference seeds of the tests, among them the seed shown to players
+/// as an example.
 fn named_seeds() -> Vec<Seed> {
     vec![
         Seed::from(0),
@@ -163,7 +164,7 @@ fn hp_of(game: &Game, id: ActorId) -> i32 {
     game.actor(id).expect("actor is in the game").hp()
 }
 
-// --- Scenario 1: reading a glyph --------------------------------------------
+// --- Reading a glyph --------------------------------------------
 
 #[test]
 fn stepping_on_a_glyph_adds_its_pattern_to_the_grimoire_once() {
@@ -337,7 +338,7 @@ fn first_step(map: &Map, from: Position, to: Position) -> Option<Direction> {
     None
 }
 
-// --- Scenario 2: an exact trace succeeds and every stroke costs time -------
+// --- An exact trace succeeds and every stroke costs time -------
 
 #[test]
 fn every_shipped_sigil_traced_exactly_succeeds_at_the_price_of_its_strokes() {
@@ -490,7 +491,7 @@ fn a_long_cast_lets_an_adjacent_monster_strike_more_often() {
     assert!(long > short, "long {long} blows, short {short}");
 }
 
-// --- Scenario 3: a trace one node off is unstable ---------------------------
+// --- A trace one node off is unstable ---------------------------
 
 /// Every kind of trace one edit away from the pattern of ember (7-5-3): a
 /// node replaced at the end, in the middle and at the start, one removed,
@@ -651,7 +652,7 @@ fn a_scorching_backlash_leaves_at_least_one_hit_point() {
     assert!(found > 0, "no scorch was exercised");
 }
 
-// --- Scenario 4: an unknown trace fizzles and the essence is lost -----------
+// --- An unknown trace fizzles and the essence is lost -----------
 
 #[test]
 fn a_trace_that_matches_nothing_fizzles_alone_and_loses_essence_and_time() {

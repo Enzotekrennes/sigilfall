@@ -1,9 +1,9 @@
 //! Combat on screen, driven by keys like a player and read back from the
 //! rendered screen: the side panel, the message log and the end screen; then
-//! combat, life and the journal from the player's side, where only the
+//! combat, life and the message log from the player's side, where only the
 //! rendered 80 × 24 screen is read back and the expected log lines are worked
-//! out by a twin of the game that is fed the same actions, with the wording of
-//! the design written out again here rather than taken from `messages`.
+//! out by a twin of the game that is fed the same actions, with the wording
+//! written out again here rather than taken from `messages`.
 
 use super::*;
 use crate::message_log::Tone;
@@ -47,7 +47,7 @@ const LOG_ROWS: std::ops::RangeInclusive<u16> = 18..=22;
 /// Picks the health token a level is drawn with out of a theme.
 type HealthToken = fn(&Theme) -> Style;
 
-/// The four rendering modes of `docs/design.md`.
+/// The four rendering modes ([`ColorMode`]).
 const MODES: [ColorMode; 4] = [
     ColorMode::TrueColorDark,
     ColorMode::TrueColorLight,
@@ -489,14 +489,13 @@ const MONSTERS: &str = r#"[
                 speed: 100, hp: 40, attack: 0, defense: 2, min_depth: 1),
         ]"#;
 
-/// Messages the log keeps (T16: "100 entries"), written out here so
-/// that a change of the limit is noticed.
+/// Messages the log keeps, written out here so that a change of the limit is
+/// noticed.
 const HISTORY: usize = 100;
 
-/// The rows [`LOG_ROWS`] of the log of `app` as the game screen
-/// draws it at 80 × 24 (separator on row 17), for the fatal blow:
-/// the death summary that replaces the game screen (T25) does not
-/// show the log.
+/// The rows [`LOG_ROWS`] of the log of `app` as the game screen draws it at
+/// 80 × 24 (separator on row 17), for the fatal blow: the death summary that
+/// replaces the game screen does not show the log.
 fn drawn_log(app: &App) -> Vec<String> {
     let mut buffer = Buffer::empty(Rect::new(0, 0, 80, 24));
     let area = Rect::new(0, *LOG_ROWS.start() - 1, 80, 6);
@@ -506,7 +505,7 @@ fn drawn_log(app: &App) -> Vec<String> {
 /// Cells of the health bar.
 const BAR_CELLS: usize = 18;
 
-/// The seeds named by the brief.
+/// The reference seeds of the tests.
 fn seeds() -> [Seed; 3] {
     [
         Seed::new(0),
@@ -659,7 +658,8 @@ impl Fight {
     }
 }
 
-/// The log prefix of a tone, as `docs/design.md` writes it.
+/// The log prefix of a tone, written out here rather than read from
+/// `ui::log`, so a changed prefix is noticed.
 const fn prefix_of(tone: Tone) -> char {
     match tone {
         Tone::Info => ' ',
@@ -721,10 +721,10 @@ fn turn_shown(app: &App) -> u64 {
         .unwrap_or_else(|| panic!("no turn counter on {first:?}"))
 }
 
-// --- Scenario 1 -------------------------------------------------
+// --- Moving into a monster attacks it -------------------------
 
 #[test]
-fn s1_moving_into_a_monster_attacks_it_and_the_damage_is_in_the_log() {
+fn moving_into_a_monster_attacks_it_and_the_damage_is_in_the_log() {
     for seed in seeds() {
         let mut fight = Fight::new(seed, dark(), &[("brute", east())]);
         let start = player_position(&fight.app);
@@ -757,7 +757,7 @@ fn s1_moving_into_a_monster_attacks_it_and_the_damage_is_in_the_log() {
 }
 
 #[test]
-fn s1_the_player_bar_and_value_follow_the_core_after_every_blow() {
+fn the_player_bar_and_value_follow_the_core_after_every_blow() {
     for seed in seeds() {
         let mut fight = Fight::new(seed, dark(), &[("gnat", east())]);
         let mut last_cells = BAR_CELLS;
@@ -800,7 +800,7 @@ fn s1_the_player_bar_and_value_follow_the_core_after_every_blow() {
 }
 
 #[test]
-fn s1_the_panel_gives_each_monster_its_current_and_maximum_health() {
+fn the_panel_gives_each_monster_its_current_and_maximum_health() {
     // D25 (2026-11-08): the "in view" line of a monster ends with
     // its hit points, current out of maximum, as figures only.
     let mut fight = Fight::new(Seed::new(42), dark(), &[("brute", east())]);
@@ -824,10 +824,10 @@ fn s1_the_panel_gives_each_monster_its_current_and_maximum_health() {
     assert!(!panel.iter().any(|l| l.contains('█')), "{panel:#?}");
 }
 
-// --- Scenario 2 -------------------------------------------------
+// --- A dead monster disappears --------------------------------
 
 #[test]
-fn s2_a_dead_monster_disappears_from_the_map_and_the_log_announces_it() {
+fn a_dead_monster_disappears_from_the_map_and_the_log_announces_it() {
     for seed in seeds() {
         let mut fight = Fight::new(seed, dark(), &[("moth", east())]);
         assert_eq!(glyph_at(&fight.app, east()), "v", "seed {seed}");
@@ -865,7 +865,7 @@ fn s2_a_dead_monster_disappears_from_the_map_and_the_log_announces_it() {
 }
 
 #[test]
-fn s2_one_of_two_monsters_dies_and_only_that_one_goes() {
+fn one_of_two_monsters_dies_and_only_that_one_goes() {
     let west = PLAYER_START.step(Direction::West);
     let mut fight = Fight::new(Seed::new(42), dark(), &[("moth", east()), ("gnat", west)]);
     fight.hit_east();
@@ -906,7 +906,7 @@ fn a_killing_blow_is_named_whatever_the_overkill() {
     }
 }
 
-// --- Scenario 3 -------------------------------------------------
+// --- The death of the player ends the game ---------------------
 
 /// A fight with the hammer, played until the player dies (bounded).
 /// Returns it with the turn shown on the status line when the
@@ -926,7 +926,7 @@ fn fight_to_death(seed: Seed) -> (Fight, u64) {
 }
 
 #[test]
-fn s3_the_death_of_the_player_stops_the_game_and_opens_the_end_screen() {
+fn the_death_of_the_player_stops_the_game_and_opens_the_end_screen() {
     for seed in seeds() {
         let (fight, turn) = fight_to_death(seed);
 
@@ -954,7 +954,7 @@ fn s3_the_death_of_the_player_stops_the_game_and_opens_the_end_screen() {
 }
 
 #[test]
-fn s3_the_seed_on_the_end_screen_is_reusable_as_it_is_written() {
+fn the_seed_on_the_end_screen_is_reusable_as_it_is_written() {
     for seed in seeds() {
         let (fight, _) = fight_to_death(seed);
         let text = rows(&fight.screen(), 0..=23).join("\n");
@@ -994,8 +994,8 @@ fn s3_the_seed_on_the_end_screen_is_reusable_as_it_is_written() {
     );
 }
 
-/// Every key but the quit ones and Enter, which goes back to the
-/// title screen since T26, with modifiers that matter.
+/// Every key but the quit ones and Enter, which goes back to the title
+/// screen, with modifiers that matter.
 fn all_non_quit_keys() -> Vec<KeyEvent> {
     let mut keys = Vec::new();
     for c in (' '..='~').filter(|&c| c != 'q') {
@@ -1039,7 +1039,7 @@ fn all_non_quit_keys() -> Vec<KeyEvent> {
 }
 
 #[test]
-fn s3_after_death_no_key_but_quit_has_any_effect() {
+fn after_death_no_key_but_quit_has_any_effect() {
     for seed in seeds() {
         let (mut fight, _) = fight_to_death(seed);
         let before = fight.screen();
@@ -1071,7 +1071,7 @@ fn s3_after_death_no_key_but_quit_has_any_effect() {
 }
 
 #[test]
-fn s3_every_quit_key_still_works_after_death() {
+fn every_quit_key_still_works_after_death() {
     let quits = [
         press(KeyCode::Char('q')),
         KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
@@ -1087,7 +1087,7 @@ fn s3_every_quit_key_still_works_after_death() {
 }
 
 #[test]
-fn s3_right_after_death_only_ctrl_c_quits() {
+fn right_after_death_only_ctrl_c_quits() {
     let (fight, _) = fight_to_death(Seed::new(42));
     let mut app = fight.app;
     app.handle_key(press(KeyCode::Char('q')));
@@ -1098,7 +1098,7 @@ fn s3_right_after_death_only_ctrl_c_quits() {
 }
 
 #[test]
-fn s3_the_end_screen_survives_a_resize_and_fits_larger_terminals() {
+fn the_end_screen_survives_a_resize_and_fits_larger_terminals() {
     let (mut fight, _) = fight_to_death(Seed::new(42));
     let big = rows(&fight.screen(), 0..=23);
 
@@ -1119,7 +1119,7 @@ fn s3_the_end_screen_survives_a_resize_and_fits_larger_terminals() {
     }
 }
 
-// --- Journal ----------------------------------------------------
+// --- The message log --------------------------------------------
 
 #[test]
 fn a_long_exchange_scrolls_and_the_log_matches_the_core_blow_for_blow() {

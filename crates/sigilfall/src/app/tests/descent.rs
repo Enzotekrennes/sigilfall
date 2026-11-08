@@ -3,7 +3,7 @@
 //!
 //! The first tests walk the bare floors of [`SEED`] (see
 //! [`generated_floor_app`]), where no monster stands in the way. The others
-//! check the scenarios from the player's side: `>` or `D` on the stairs shows a
+//! check the descent from the player's side: `>` or `D` on the stairs shows a
 //! new floor one level deeper, the same one for the same seed; the floor's
 //! creatures come from the table of its depth; off the stairs the keys do
 //! nothing and the log says so. Beyond them they check what the player keeps
@@ -283,7 +283,7 @@ const TIER_RULES: &str = r#"
 /// Most keys spent walking to the stairs of one floor.
 const WALK_BUDGET: usize = 1500;
 
-/// The seeds named by the brief.
+/// The reference seeds of the tests.
 fn seeds() -> [Seed; 3] {
     [
         Seed::new(0),
@@ -525,10 +525,10 @@ fn pressed(digits: &[u8]) -> Trace {
     trace
 }
 
-// --- Scenario 1: on the stairs, > or D shows the next floor -----------------
+// --- On the stairs, > or D shows the next floor -----------------
 
 #[test]
-fn scenario_1_greater_than_on_the_stairs_shows_depth_two_and_logs_it() {
+fn greater_than_on_the_stairs_shows_depth_two_and_logs_it() {
     for seed in seeds() {
         let mut app = app(seed);
         assert!(
@@ -579,7 +579,7 @@ fn scenario_1_greater_than_on_the_stairs_shows_depth_two_and_logs_it() {
 }
 
 #[test]
-fn scenario_1_capital_d_descends_like_greater_than_with_or_without_shift() {
+fn capital_d_descends_like_greater_than_with_or_without_shift() {
     for modifiers in [KeyModifiers::SHIFT, KeyModifiers::NONE] {
         let mut app = app(Seed::new(42));
         walk_to_stairs(&mut app);
@@ -604,7 +604,7 @@ fn scenario_1_capital_d_descends_like_greater_than_with_or_without_shift() {
 }
 
 #[test]
-fn scenario_1_the_new_floor_is_the_same_for_the_same_seed_screen_included() {
+fn the_new_floor_is_the_same_for_the_same_seed_screen_included() {
     for seed in seeds() {
         let (mut one, mut two) = (app(seed), app(seed));
         for app in [&mut one, &mut two] {
@@ -638,7 +638,7 @@ fn scenario_1_the_new_floor_is_the_same_for_the_same_seed_screen_included() {
 }
 
 #[test]
-fn scenario_1_only_what_the_player_sees_of_the_new_floor_is_drawn() {
+fn only_what_the_player_sees_of_the_new_floor_is_drawn() {
     let mut app = app(Seed::new(42));
     walk_to_stairs(&mut app);
     keys(&mut app, ">");
@@ -658,7 +658,7 @@ fn scenario_1_only_what_the_player_sees_of_the_new_floor_is_drawn() {
 }
 
 #[test]
-fn scenario_1_a_descent_takes_one_turn_and_the_turn_counter_runs_on() {
+fn a_descent_takes_one_turn_and_the_turn_counter_runs_on() {
     let mut app = app(Seed::new(42));
     walk_to_stairs(&mut app);
     let line = status_line(&app);
@@ -681,10 +681,10 @@ fn scenario_1_a_descent_takes_one_turn_and_the_turn_counter_runs_on() {
     assert_eq!(turn_after, turn_before + 1, "{line:?}");
 }
 
-// --- Scenario 2: the floor's creatures come from the table of its depth ------
+// --- The floor's creatures come from the table of its depth ------
 
 #[test]
-fn scenario_2_the_creatures_shown_after_each_descent_come_from_the_table_of_the_depth() {
+fn the_creatures_shown_after_each_descent_come_from_the_table_of_the_depth() {
     let mut app = app(Seed::new(42));
     // Down to the tenth floor, the bottom: it has a seal instead of stairs
     // (decision D23), so no floor lies below it.
@@ -701,10 +701,10 @@ fn scenario_2_the_creatures_shown_after_each_descent_come_from_the_table_of_the_
     }
 }
 
-// --- Scenario 3: off the stairs, nothing happens and the log says so ----------
+// --- Off the stairs, nothing happens and the log says so ----------
 
 #[test]
-fn scenario_3_off_the_stairs_both_keys_change_nothing_and_the_log_says_so() {
+fn off_the_stairs_both_keys_change_nothing_and_the_log_says_so() {
     for seed in seeds() {
         for key in ['>', 'D'] {
             let mut app = app(seed);
@@ -739,7 +739,7 @@ fn scenario_3_off_the_stairs_both_keys_change_nothing_and_the_log_says_so() {
 }
 
 #[test]
-fn scenario_3_a_step_short_of_the_stairs_is_still_refused_and_a_repeat_costs_nothing() {
+fn a_step_short_of_the_stairs_is_still_refused_and_a_repeat_costs_nothing() {
     let mut app = app(Seed::new(42));
     walk_toward_stairs(&mut app, true);
     assert_ne!(app.game().player_actor().position(), stairs_of(&app));
@@ -759,7 +759,7 @@ fn scenario_3_a_step_short_of_the_stairs_is_still_refused_and_a_repeat_costs_not
 }
 
 #[test]
-fn scenario_3_after_a_refusal_one_more_step_and_the_stairs_work() {
+fn after_a_refusal_one_more_step_and_the_stairs_work() {
     let mut app = app(Seed::new(42));
     walk_toward_stairs(&mut app, true);
     keys(&mut app, ">");
@@ -776,7 +776,7 @@ fn scenario_3_after_a_refusal_one_more_step_and_the_stairs_work() {
 }
 
 #[test]
-fn scenario_3_the_refusal_does_not_end_the_game_or_open_anything() {
+fn the_refusal_does_not_end_the_game_or_open_anything() {
     let mut app = app(Seed::new(0));
     keys(&mut app, "D");
     assert_eq!(app.state(), State::Playing);

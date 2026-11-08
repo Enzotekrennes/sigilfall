@@ -4,12 +4,11 @@
 //! generates `--help` and `--version`. The help is wrapped to the width of
 //! the terminal (clap's `wrap_help` feature; when the output is not a
 //! terminal, to `COLUMNS`, else 100 columns), so it reads whole in an
-//! 80-column terminal. An invalid
-//! value, such as
-//! `--seed abc` or `--seed -1`, is reported by clap with the accepted forms of the value
-//! and ends the process with a non-zero exit code, before the terminal is
-//! touched. So is `--daily` given with `--seed`: the daily dungeon has its
-//! own seed, so the two cannot both choose the run.
+//! 80-column terminal. An invalid value, such as `--seed abc` or `--seed -1`,
+//! is reported by clap with the accepted forms of the value and ends the
+//! process with a non-zero exit code, before the terminal is touched. So is
+//! `--daily` given with `--seed`: the daily dungeon has its own seed, so the
+//! two cannot both choose the run.
 
 use clap::Parser;
 use sigilfall_core::rng::Seed;

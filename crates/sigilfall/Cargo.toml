@@ -27,3 +27,5 @@ sigilfall-core = { version = "0.1.0", path = "../sigilfall-core" }
 
 [dev-dependencies]
 insta = "1.49.0"
+# The game rules with their test helpers (hand-made rooms, placed monsters).
+sigilfall-core = { path = "../sigilfall-core", features = ["test-support"] }

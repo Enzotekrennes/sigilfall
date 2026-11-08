@@ -1,18 +1,18 @@
-//! Acceptance tests of F3 (field of view and fog), binary half.
+//! Field of view and fog, binary half.
 //!
 //! They drive the application as the event loop does (key presses through
 //! `App::handle_key`) and read what the player reads: the cells of the
-//! rendered screen, their glyph, colour and emphasis, and the "IN VIEW"
-//! block of the side panel. The core half of F3 (rules of sight) lives in
-//! `sigilfall-core/tests/field_of_view.rs`; here the questions are what reaches the
-//! screen:
+//! rendered screen, their glyph, colour and emphasis, and the "IN VIEW" block
+//! of the side panel. The core half (rules of sight) lives in
+//! `sigilfall-core/tests/field_of_view.rs`; here the questions are what
+//! reaches the screen:
 //!
 //! - visible cells are drawn in full, explored cells out of view keep only
 //!   their landmarks in a dimmer token, unknown cells stay blank, in the four
 //!   colour modes, in Unicode and in ASCII, at 80 × 24 and 120 × 40;
 //! - a monster out of the field of view is never drawn;
 //! - the health shown for each monster in "IN VIEW" is the real one and
-//!   follows the blows (regression of task T35);
+//!   follows the blows, every blow;
 //! - the lit area looks round on screen.
 //!
 //! The expected look of every cell is worked out here from the game's own
@@ -138,7 +138,7 @@ fn screen_cell<'a>(
 /// What a cell of the map must look like, from the game's own answers.
 enum Look {
     /// A tile kind this file makes no claim about (the seal of the bottom
-    /// floor has a look of its own in a later task).
+    /// floor is checked by `victory_screen.rs`).
     Skip,
     /// Blank background.
     Blank,
@@ -254,7 +254,8 @@ fn check_terrain(
                 }
             }
         }
-        // Without a player on it, an in-range cell never shows a creature letter.
+        // Without a player on it, an in-range cell never shows a creature
+        // letter.
         assert!(
             !CREATURE_LETTERS.contains(cell.symbol()) || cell.symbol().is_empty(),
             "{label}: a creature letter on a terrain cell {position:?}"
@@ -268,7 +269,7 @@ fn look_pair(style: Style) -> (Option<Color>, Modifier) {
 }
 
 // ---------------------------------------------------------------------------
-// Scenario 1: only what is in view is drawn clearly, what was seen stays dim
+// Only what is in view is drawn clearly, what was seen stays dim
 // ---------------------------------------------------------------------------
 
 /// In every mode and both glyph sets, a visible wall and an explored wall out
@@ -429,7 +430,7 @@ fn leaving_a_room_leaves_its_walls_dim_and_its_floor_gone() {
 }
 
 // ---------------------------------------------------------------------------
-// Scenario 3: a monster out of view does not appear
+// A monster out of view does not appear
 // ---------------------------------------------------------------------------
 
 /// On a real floor with its real monsters, every creature letter on the map
@@ -455,7 +456,8 @@ fn only_monsters_in_view_are_drawn_in_every_mode_and_glyph_set() {
                 let screen = buffer(&app, size.0, size.1);
                 let game = app.game();
                 let area = map_area(Rect::new(0, 0, size.0, size.1));
-                // Every creature letter on the map belongs to a monster in view.
+                // Every creature letter on the map belongs to a monster in
+                // view.
                 let camera = Camera::new(area, game.map(), game.player_actor().position());
                 let in_view: Vec<(Position, char)> = game
                     .visible_monsters()
@@ -543,13 +545,13 @@ fn no_monster_letter_is_on_the_first_screen_of_a_floor() {
 }
 
 // ---------------------------------------------------------------------------
-// Regression of T35: monster health in IN VIEW
+// Monster health in IN VIEW follows every blow
 // ---------------------------------------------------------------------------
 
 /// The text of the "IN VIEW" block of an `width` × `height` screen, one entry
-/// per line, panel margin removed. The second row of an entry that takes
-/// two (a long name, then its count and health right-aligned, task T36)
-/// starts with a blank: it is joined to the first, one blank between them.
+/// per line, panel margin removed. The second row of an entry that takes two
+/// (a long name, then its count and health right-aligned) starts with a
+/// blank: it is joined to the first, one blank between them.
 fn in_view_lines(app: &App, width: u16, height: u16) -> Vec<String> {
     let rows = rows(app, width, height);
     let start = rows

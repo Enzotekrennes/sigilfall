@@ -1,21 +1,20 @@
-//! Acceptance tests of F13, "Grottes selon l'étage", first scenario: a floor
-//! of the cave kind is entirely joined, and the properties checked for F2
-//! hold on 1 000 seeds.
+//! Caves: a floor of the cave kind is entirely joined, and the properties
+//! checked for floors of rooms (`dungeon.rs`) hold on 1 000 seeds.
 //!
 //! Written against the public API of the core crate only, in the manner of
-//! `dungeon.rs`: connectivity and distances are recomputed here with a
-//! plain breadth-first search, never with the generator's own helpers, so a
-//! bug shared by the generator and its checks cannot hide. The properties of
-//! F2 that make sense for a cave are checked: the floor is 80 x 40 and
-//! walled on every edge, every walkable cell is joined to every other (no
-//! sealed pocket, no stray piece), the player starts on walkable ground,
+//! `dungeon.rs`: connectivity and distances are recomputed here with a plain
+//! breadth-first search, never with the generator's own helpers, so a bug
+//! shared by the generator and its checks cannot hide. The properties of a
+//! floor of rooms that make sense for a cave are checked: the floor is 80 x
+//! 40 and walled on every edge, every walkable cell is joined to every other
+//! (no sealed pocket, no stray piece), the player starts on walkable ground,
 //! there is exactly one staircase, it is reachable and it lies in the
 //! farthest third of the floor from the start, both by distance and by rank.
-//! A room-based check ("the start is inside a room") has no meaning in a
-//! cave and is replaced by "the start is on open floor". On top of them:
-//! the size promised by the design (900 open cells or more), the same seed
-//! giving the same cave, and the cave being a different layout from the
-//! rooms of the same seed.
+//! A room-based check ("the start is inside a room") has no meaning in a cave
+//! and is replaced by "the start is on open floor". On top of them: the size
+//! promised by the design (900 open cells or more), the same seed giving the
+//! same cave, and the cave being a different layout from the rooms of the
+//! same seed.
 
 use std::collections::VecDeque;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -26,8 +25,8 @@ use sigilfall_core::geometry::Position;
 use sigilfall_core::map::{Map, Tile};
 use sigilfall_core::rng::Seed;
 
-/// Seeds named by the brief: both ends of the range, the seed of the
-/// scenario of F2 and the seed shown as an example to players.
+/// The reference seeds of the tests: both ends of the range, 42 and the
+/// seed shown to players as an example.
 const NAMED_SEEDS: [u64; 4] = [0, 42, 0x7F3A_91C2_0B5E_D4A8, u64::MAX];
 
 /// Number of seeds of each of the two random batches.
@@ -151,8 +150,8 @@ struct Measure {
     crossing: u32,
 }
 
-/// Every property of scenario 1 on the cave of `seed` at `depth`, as an
-/// error message on failure.
+/// Every property of a joined cave, checked on the cave of `seed` at `depth`,
+/// as an error message on failure.
 fn check_cave(seed: u64, depth: u32) -> Result<Measure, String> {
     let shown = Seed::new(seed);
     let fail = |what: &str| Err(format!("seed {seed} ({shown}) depth {depth}: {what}"));
@@ -288,9 +287,9 @@ fn median(values: &mut [u32]) -> u32 {
     values[values.len() / 2]
 }
 
-/// Scenario 1 on the named seeds, at several depths.
+/// The example seeds, at several depths.
 #[test]
-fn scenario_1_named_seeds() {
+fn the_example_seeds_give_caves_entirely_joined_with_far_stairs() {
     for value in NAMED_SEEDS {
         for depth in [1, 3, 10, 11, 99] {
             check_cave(value, depth).unwrap();
@@ -298,11 +297,11 @@ fn scenario_1_named_seeds() {
     }
 }
 
-/// Scenario 1: 1 000 fixed seeds and 1 000 clock-drawn seeds, every
-/// property of F2 that has a meaning for a cave, with the depth varied
-/// from 3 to 10 so the depth in the stream is exercised too.
+/// 1 000 fixed seeds and 1 000 clock-drawn seeds, every property of a floor
+/// of rooms that has a meaning for a cave, with the depth varied from 3 to 10
+/// so the depth in the stream is exercised too.
 #[test]
-fn scenario_1_caves_are_entirely_joined_with_far_stairs_on_2000_seeds() {
+fn caves_are_entirely_joined_with_far_stairs_on_2000_seeds() {
     let mut open_cells = Vec::new();
     let mut crossings = Vec::new();
     let mut failures = Vec::new();
@@ -368,10 +367,10 @@ fn a_cave_is_not_the_rooms_of_its_seed_and_seeds_give_other_caves() {
     );
 }
 
-/// A cave is a natural layout: it has no room in the sense of F2 (a block
-/// of 4 x 4 open cells is rare in a field of pillars) in the same numbers
-/// as a floor of rooms, and it is much more open than a floor of rooms.
-/// This guards the finder used for the other tests: the cave kind must
+/// A cave is a natural layout: it has no room in the sense of `dungeon.rs` (a
+/// block of 4 x 4 open cells is rare in a field of pillars) in the same
+/// numbers as a floor of rooms, and it is much more open than a floor of
+/// rooms. This guards the finder used for the other tests: the cave kind must
 /// really differ in structure from the room kind.
 #[test]
 fn caves_are_structurally_different_from_rooms() {

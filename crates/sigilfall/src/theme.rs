@@ -1,14 +1,14 @@
 //! The visual theme: every colour, emphasis and glyph the screens draw with.
 //!
-//! Exposes [`Theme`], whose fields are the semantic tokens of
-//! `docs/design.md` (one [`Style`] each) plus the [`Glyphs`] to draw with,
-//! the four rendering modes ([`ColorMode`]), terminal colour detection
-//! ([`ColorSupport::detect`]) and the player's preferences that feed it
-//! ([`Appearance`], [`GlyphSet`], [`ColorChoice`], gathered in the
-//! [`Options`] the options screen edits), resolved into a theme by
-//! [`Settings`]. This module is the only place where a colour or a glyph is
-//! written down: screens ask for a token by name and never pick a colour
-//! themselves. Reading and writing the options is left to `persist`.
+//! Exposes [`Theme`], whose fields are the semantic colour tokens (one
+//! [`Style`] each) plus the [`Glyphs`] to draw with, the four rendering modes
+//! ([`ColorMode`]), terminal colour detection ([`ColorSupport::detect`]) and
+//! the player's preferences that feed it ([`Appearance`], [`GlyphSet`],
+//! [`ColorChoice`], gathered in the [`Options`] the options screen edits),
+//! resolved into a theme by [`Settings`]. This module is the only place where
+//! a colour or a glyph is written down: screens ask for a token by name and
+//! never pick a colour themselves. Reading and writing the options is left to
+//! `persist`.
 //!
 //! Token styles carry a foreground and emphasis only. The background is the
 //! [`Theme::bg`] token, painted once over the whole screen before anything
@@ -28,7 +28,7 @@ pub use self::glyphs::{GlyphSet, Glyphs};
 /// How much colour the terminal can show, as detected at start-up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColorSupport {
-    /// 24-bit colour: the RGB values of `docs/design.md` are shown as is.
+    /// 24-bit colour: the RGB values of the theme are shown as is.
     TrueColor,
     /// The 16 standard ANSI colours, whose exact shades depend on the
     /// terminal's colour scheme.
@@ -192,7 +192,8 @@ impl Settings {
     }
 }
 
-/// One of the four rendering modes of `docs/design.md`.
+/// One of the four rendering modes (see the visual identity in
+/// ARCHITECTURE.md).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColorMode {
     /// 24-bit colour on the dark ink background.
@@ -211,9 +212,9 @@ impl ColorMode {
     ///
     /// The light theme falls back to [`ColorMode::Monochrome`] with only 16
     /// colours, because the ANSI colours of light terminal schemes fail the
-    /// contrast minimum on their own background (`docs/design.md`, section
-    /// "Modes de rendu"). Without colour support the mode is always
-    /// monochrome.
+    /// contrast minimum on their own background (One Half Light, shipped
+    /// with Windows Terminal: yellow 3.09, cyan 3.30, red 3.51). Without
+    /// colour support the mode is always monochrome.
     pub const fn for_terminal(support: ColorSupport, appearance: Appearance) -> Self {
         match (support, appearance) {
             (ColorSupport::TrueColor, Appearance::Dark) => Self::TrueColorDark,
@@ -224,8 +225,8 @@ impl ColorMode {
     }
 }
 
-/// The semantic tokens of `docs/design.md`, resolved for one rendering
-/// mode, and the glyphs to draw with.
+/// The semantic colour tokens, resolved for one rendering mode, and the
+/// glyphs to draw with.
 ///
 /// Each token field is named after its token and holds the full style to
 /// apply: foreground colour and emphasis (bold, dim, reversed). The three
@@ -260,7 +261,7 @@ pub struct Theme {
         not(test),
         expect(
             dead_code,
-            reason = "part of the token set of docs/design.md; the generator makes no arches yet"
+            reason = "part of the token set; the generator makes no arches yet"
         )
     )]
     pub door: Style,
@@ -340,7 +341,7 @@ impl Theme {
     /// Returns the style a creature of `family` is drawn with on the map:
     /// [`Theme::monster_hostile`] for the creatures of flesh (vermin,
     /// acolytes, homunculi), [`Theme::monster_arcane`] for the creatures of
-    /// spirit (eyes, spectres), as `docs/design.md` assigns them.
+    /// spirit (eyes, spectres).
     ///
     /// Common and elite forms share their family's style: the case of the
     /// letter tells them apart. In 16 colours both tokens are the same red
@@ -353,7 +354,7 @@ impl Theme {
         }
     }
 
-    /// The dark 24-bit theme: "Sombre" column of `docs/design.md`.
+    /// The dark 24-bit theme: ink background, bone text.
     fn true_color_dark(glyphs: Glyphs) -> Self {
         Self {
             bg: on(0x0F0D15),
@@ -395,8 +396,7 @@ impl Theme {
         }
     }
 
-    /// The light 24-bit "parchment" theme: "Clair" column of
-    /// `docs/design.md`.
+    /// The light 24-bit "parchment" theme.
     fn true_color_light(glyphs: Glyphs) -> Self {
         Self {
             bg: on(0xF2EBDC),
@@ -438,7 +438,7 @@ impl Theme {
         }
     }
 
-    /// The 16-colour theme on black: "ANSI 16" column of `docs/design.md`.
+    /// The 16-colour theme on black, with the named ANSI colours.
     ///
     /// The selection has no colour of its own here: it is reversed instead,
     /// which reads well whatever the terminal's colour scheme.
@@ -487,15 +487,14 @@ impl Theme {
     /// The colourless theme: the terminal's own foreground and background,
     /// with hierarchy carried by emphasis only.
     ///
-    /// Bold marks what `docs/design.md` emphasises in every mode (player,
-    /// stairs and seal in view, titles, the sigil pen); dim fades the floor
-    /// and remembered walls, never text; the selection is reversed.
-    /// Remembered stairs and seal lose the bold they have in view but are
-    /// not dimmed: they still mark the way down and the end of the run; likewise a remembered unread glyph, a sigil left
-    /// to learn, is not dimmed, while a remembered read glyph is. Every
-    /// piece of
-    /// information is also carried by a glyph, a word or a prefix, so
-    /// nothing is lost.
+    /// Bold marks what every mode emphasises (player, stairs and seal in
+    /// view, titles, the sigil pen); dim fades the floor and remembered
+    /// walls, never text; the selection is reversed. Remembered stairs and
+    /// seal lose the bold they have in view but are not dimmed: they still
+    /// mark the way down and the end of the run; likewise a remembered
+    /// unread glyph, a sigil left to learn, is not dimmed, while a
+    /// remembered read glyph is. Every piece of information is also carried
+    /// by a glyph, a word or a prefix, so nothing is lost.
     fn monochrome(glyphs: Glyphs) -> Self {
         let plain = Style::new();
         let bold = Style::new().add_modifier(Modifier::BOLD);
@@ -541,14 +540,12 @@ impl Theme {
     }
 }
 
-/// A foreground style of the 24-bit colour `rgb`, written `0xRRGGBB` as in
-/// `docs/design.md`.
+/// A foreground style of the 24-bit colour `rgb`, written `0xRRGGBB`.
 const fn fg(rgb: u32) -> Style {
     Style::new().fg(Color::from_u32(rgb))
 }
 
-/// A surface style: the 24-bit background `rgb`, written `0xRRGGBB` as in
-/// `docs/design.md`.
+/// A surface style: the 24-bit background `rgb`, written `0xRRGGBB`.
 const fn on(rgb: u32) -> Style {
     Style::new().bg(Color::from_u32(rgb))
 }

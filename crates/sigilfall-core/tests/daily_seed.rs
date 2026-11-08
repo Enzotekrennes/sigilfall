@@ -1,16 +1,15 @@
-//! Acceptance tests of F11 (the daily seed), core half.
+//! The daily seed, core half.
 //!
-//! Written against the public API only. The first scenario of F11 says that
-//! two players who start the daily dungeon of the same UTC date get the same
-//! dungeon. The tests check it on the whole state of a new game (the text of
-//! its save, random stream included), on the floors below the first one
-//! whatever was played above them, and on the seed itself, which is
-//! recomputed here from the rule written in the documentation (the date
-//! packed into one number, combined with a fixed tag, then mixed by
-//! SplitMix64) instead of being read from the production code. They also
-//! check that two dates give two dungeons, that a daily run remembers its
-//! date through a save, and that a plain run of the same seed is the same
-//! dungeon without being a daily run.
+//! Written against the public API only. The rule: two players who start the
+//! daily dungeon of the same UTC date get the same dungeon. The tests check
+//! it on the whole state of a new game (the text of its save, random stream
+//! included), on the floors below the first one whatever was played above
+//! them, and on the seed itself, which is recomputed here from the rule
+//! written in the documentation (the date packed into one number, combined
+//! with a fixed tag, then mixed by SplitMix64) instead of being read from the
+//! production code. They also check that two dates give two dungeons, that a
+//! daily run remembers its date through a save, and that a plain run of the
+//! same seed is the same dungeon without being a daily run.
 //!
 //! The player cannot be placed from outside the crate, so the tests that
 //! need the second floor walk the player to the stairs along the shortest
@@ -205,7 +204,7 @@ fn dawdle(game: &mut Game, turns: usize) {
     }
 }
 
-// --- Scenario 1: the same UTC date gives the same dungeon ------------------
+// --- The same UTC date gives the same dungeon ------------------
 
 #[test]
 fn the_daily_seed_follows_the_documented_rule_for_dates_of_every_kind() {

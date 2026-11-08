@@ -1,11 +1,10 @@
 //! The characters the map and the interface are drawn with, in Unicode and
 //! in their ASCII fallback.
 //!
-//! Exposes [`GlyphSet`] and [`Glyphs`]. The values come from section
-//! "Glyphes" of `docs/design.md`; every Unicode glyph there is present in
-//! Cascadia Mono, the default font of Windows Terminal. Only the glyphs of
-//! elements the game already has are listed: the others (arches, weapons,
-//! talismans) join this table with the tasks that bring them to the screen.
+//! Exposes [`GlyphSet`] and [`Glyphs`]. Every Unicode glyph here is present
+//! in Cascadia Mono, the default font of Windows Terminal. Only the glyphs of
+//! elements the game has are listed: others (arches, weapons, talismans) join
+//! this table when they appear on the screen.
 //!
 //! Items are drawn with the glyph of their family ([`Glyphs::item`]), so a
 //! vial, a page and a catalyst tell apart without colour.
@@ -219,7 +218,7 @@ impl Glyphs {
 
     /// Returns the letter a creature of `family` is drawn with: the
     /// family's lower-case letter for the common form, the same letter in
-    /// upper case when `elite` is true (`docs/design.md`, "Créatures").
+    /// upper case when `elite` is true.
     pub const fn creature(&self, family: Family, elite: bool) -> char {
         let common = match family {
             Family::Vermin => self.vermin,
@@ -236,7 +235,7 @@ impl Glyphs {
     }
 
     /// Returns the glyph an item of `family` is drawn with, on the map, in
-    /// the side panel and in the inventory (`docs/design.md`, "Objets").
+    /// the side panel and in the inventory.
     pub const fn item(&self, family: ItemFamily) -> char {
         match family {
             ItemFamily::Vial => self.vial,
@@ -365,7 +364,7 @@ mod tests {
         }
     }
 
-    /// The five creature families, in the order of `docs/design.md`.
+    /// The five creature families, flesh first, then spirit.
     const FAMILIES: [Family; 5] = [
         Family::Vermin,
         Family::Acolyte,
@@ -374,8 +373,7 @@ mod tests {
         Family::Spectre,
     ];
 
-    /// The item families the content has, in the order of
-    /// `docs/design.md`.
+    /// The item families the content has.
     const ITEM_FAMILIES: [ItemFamily; 3] =
         [ItemFamily::Vial, ItemFamily::Page, ItemFamily::Catalyst];
 

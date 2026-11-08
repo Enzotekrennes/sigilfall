@@ -1,15 +1,15 @@
 //! Saves read back into the very same game, and faulty saves refused
-//! without panicking (task T23 of the plan, feature F9).
+//! without panicking.
 //!
 //! A game played for a while is saved and read back; then the original and
 //! the loaded game receive the same 200 actions and must produce exactly the
 //! same events, keys of actors and items included, on several seeds, in the
-//! middle of a fight and on the second floor. The other tests refuse saves
-//! of another format version, truncated or corrupted text, references to
-//! definitions the content lacks and inconsistent values, and save a
-//! finished game. The run's statistics (`Game::stats`, T25) are part of
-//! every round trip and have their own, and so does the date of a daily run
-//! (T28). Written against the public API only.
+//! middle of a fight and on the second floor. The other tests refuse saves of
+//! another format version, truncated or corrupted text, references to
+//! definitions the content lacks and inconsistent values, and save a finished
+//! game. The run's statistics (`Game::stats`) are part of every round trip
+//! and have their own, and so does the date of a daily run. Written against
+//! the public API only.
 
 use rand::RngExt as _;
 use rand_chacha::ChaCha8Rng;
@@ -603,21 +603,19 @@ fn a_save_whose_seal_and_depth_disagree_is_refused() {
     let loaded = save::from_str(&sealed(&bottom), &content).expect("a sealed bottom floor");
     assert_eq!(loaded.depth(), 10);
     let cases = [
-        (
-            bottom.clone(),
-            "floor 10 is the bottom of the dungeon, but its map has no seal",
-        ),
-        (
-            sealed(&text),
-            "floor 1 is above the bottom of the dungeon, but its map holds a seal",
-        ),
+        (bottom.clone(), "floor 10, the bottom floor, has no seal"),
+        (sealed(&text), "floor 1 has a seal; only floor 10 has one"),
         (
             sealed(&bottom).replacen("#", ">", 1),
-            "floor 10 is the bottom of the dungeon, but its map has stairs down",
+            "floor 10, the bottom floor, has stairs down",
+        ),
+        (
+            sealed(&bottom).replacen("#", "*", 2),
+            "floor 10, the bottom floor, has 3 seals",
         ),
         (
             text.replacen("status: Playing", "status: Won", 1),
-            "the game is won on floor 1, but only breaking the seal of floor 10 wins",
+            "the game is won on floor 1; only floor 10 can be won",
         ),
     ];
 
@@ -625,10 +623,9 @@ fn a_save_whose_seal_and_depth_disagree_is_refused() {
         let error = save::from_str(&edited, &content).expect_err("an inconsistent seal");
 
         assert_eq!(error, SaveError::Inconsistent(expected.to_owned()));
-        assert_eq!(
-            error.to_string(),
-            format!("the save is inconsistent: {expected}")
-        );
+        // The cause comes first, so a screen that cuts a long line still
+        // shows it.
+        assert_eq!(error.to_string(), format!("{expected} (inconsistent save)"));
     }
 }
 

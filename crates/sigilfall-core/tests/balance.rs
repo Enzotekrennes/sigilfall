@@ -2,30 +2,30 @@
 //! one.
 //!
 //! The reckless bot charges the nearest monster it sees and, when it sees
-//! none, walks to the stairs and goes down. It never picks up an item,
-//! never casts and never retreats: the least careful way to play. The
-//! balance aims at such a player dying, as a rule, between floors 2 and 4
-//! (task T22 of the plan): the first floor teaches, the next ones punish
-//! recklessness.
+//! none, walks to the way down and takes it: the stairs, or on the bottom
+//! floor the seal, which it breaks. It never picks up an item, never casts
+//! and never retreats: the least careful way to play. The balance aims at
+//! such a player dying, as a rule, between floors 2 and 4: the first floor
+//! teaches, the next ones punish recklessness.
 //!
 //! The test plays [`RUNS`] seeds, prints the distribution of the floor of
 //! death and of the turn of death, and checks it with robust statistics
 //! (median and a share of the runs) rather than single runs, so that a small
 //! change of the generation does not break it while a change of the balance
-//! does. Written against the public API only.
+//! does. A run that breaks the seal is counted as a victory, never as a
+//! death. Written against the public API only.
 //!
 //! The careful bot plays the whole game: it explores every floor, reads the
 //! glyphs, picks up and uses the items, heals when low, casts Lance, Ember
 //! and Recall, then goes down; on the bottom floor it breaks the seal. It
 //! measures the depths a player who uses everything the game gives reaches
-//! (task T32: the healing draughts of the deeper floors, decision D24), and
+//! (with the healing draughts of the deeper floors, decision D24), and
 //! checks that such a player gets past the reckless one's floors, reaching
-//! floor 6 or 7 as a rule, and that a victory happens but stays rare (task
-//! T36: the elites of floors 5 to 7 made weaker).
+//! floor 6 or 7 as a rule, and that a victory happens but stays rare.
 
 use sigilfall_core::action::Action;
 use sigilfall_core::combat::Combatant;
-use sigilfall_core::content::Content;
+use sigilfall_core::content::{Content, MAX_DEPTH};
 use sigilfall_core::event::Event;
 use sigilfall_core::game::{Game, Status};
 use sigilfall_core::geometry::{Direction, Position};
@@ -43,9 +43,6 @@ const RUNS: u64 = 80;
 /// it bounds the test if the balance ever made the bot immortal.
 const MAX_TURNS: u64 = 4000;
 
-/// Deepest floor a run may reach; a run arriving there counts as a survival.
-const MAX_DEPTH_REACHED: u32 = 12;
-
 /// Floors the median floor of death must lie on.
 const TARGET_DEPTHS: std::ops::RangeInclusive<u32> = 2..=4;
 
@@ -60,15 +57,19 @@ struct Outcome {
     depth: u32,
     /// Player turns played.
     turns: u64,
-    /// Whether the player died; `false` when a bound of the test stopped it.
+    /// Whether the player died.
     died: bool,
+    /// Whether the player broke the seal of the bottom floor. A run that
+    /// neither died nor won was stopped by [`MAX_TURNS`].
+    won: bool,
 }
 
 /// The bot's next action on the current state of `game`.
 ///
 /// A visible monster is charged by the shortest walk (other monsters count
 /// as obstacles on the way), the nearest first; with none in sight, the bot
-/// goes down if it stands on the stairs, or walks towards them otherwise.
+/// takes the way down if it stands on it (going down the stairs, or
+/// breaking the seal of the bottom floor), or walks towards it otherwise.
 /// Every rule is deterministic, so a seed always gives the same run.
 fn reckless_action(game: &Game) -> Action {
     let map = game.map();
@@ -93,35 +94,25 @@ fn reckless_action(game: &Game) -> Action {
         return Action::Move(direction);
     }
 
-    if map.tile(me) == Some(Tile::StairsDown) {
+    let down = way_down(game);
+    if me == down {
         return Action::Descend;
     }
-    let stairs = stairs(game);
-    find_path(map, me, stairs, occupied)
-        .or_else(|| find_path(map, me, stairs, |_| false))
+    find_path(map, me, down, occupied)
+        .or_else(|| find_path(map, me, down, |_| false))
         .and_then(|path| path.first().copied())
         .map_or(Action::Wait, Action::Move)
 }
 
-/// Returns the cell of the stairs of the current floor of `game`.
-fn stairs(game: &Game) -> Position {
-    let map = game.map();
-    let width = i32::try_from(map.width()).expect("a floor fits in i32");
-    let height = i32::try_from(map.height()).expect("a floor fits in i32");
-    (0..height)
-        .flat_map(|y| (0..width).map(move |x| Position::new(x, y)))
-        .find(|&cell| map.tile(cell) == Some(Tile::StairsDown))
-        .expect("every generated floor has stairs")
-}
-
-/// Plays one run of the bot on `seed` until death or a bound of the test.
+/// Plays one run of the bot on `seed` until death, victory or a bound of
+/// the test.
 fn play(seed: Seed, content: &Content) -> Outcome {
     let mut game = Game::new(seed, content);
     // Every submitted action either takes a turn or is refused; a refused
     // one (a blocked step) is followed by a wait, so the count of submits is
     // bounded by twice the turns.
     for _ in 0..2 * MAX_TURNS {
-        if game.is_over() || game.player_turns() >= MAX_TURNS || game.depth() >= MAX_DEPTH_REACHED {
+        if game.is_over() || game.player_turns() >= MAX_TURNS {
             break;
         }
         let before = game.player_turns();
@@ -133,7 +124,8 @@ fn play(seed: Seed, content: &Content) -> Outcome {
     Outcome {
         depth: game.depth(),
         turns: game.player_turns(),
-        died: game.is_over(),
+        died: matches!(game.status(), Status::GameOver { .. }),
+        won: *game.status() == Status::Won,
     }
 }
 
@@ -156,15 +148,19 @@ fn a_reckless_player_dies_between_the_second_and_the_fourth_floor() {
     let depths: Vec<u32> = outcomes.iter().map(|outcome| outcome.depth).collect();
     let turns: Vec<u64> = deaths.iter().map(|outcome| outcome.turns).collect();
     let mut histogram = String::new();
-    for depth in 1..=MAX_DEPTH_REACHED {
+    for depth in 1..=MAX_DEPTH {
         let died = deaths.iter().filter(|o| o.depth == depth).count();
-        let alive = outcomes
+        let won = outcomes
             .iter()
-            .filter(|o| !o.died && o.depth == depth)
+            .filter(|o| o.won && o.depth == depth)
             .count();
-        if died + alive > 0 {
+        let stopped = outcomes
+            .iter()
+            .filter(|o| !o.died && !o.won && o.depth == depth)
+            .count();
+        if died + won + stopped > 0 {
             histogram.push_str(&format!(
-                "  floor {depth}: {died} deaths, {alive} survivals\n"
+                "  floor {depth}: {died} deaths, {won} wins, {stopped} stopped\n"
             ));
         }
     }
@@ -199,8 +195,12 @@ fn a_reckless_player_dies_between_the_second_and_the_fourth_floor() {
     assert!(
         outcomes
             .iter()
-            .all(|outcome| outcome.died || outcome.depth > *TARGET_DEPTHS.end()),
+            .all(|outcome| outcome.died || outcome.won || outcome.depth > *TARGET_DEPTHS.end()),
         "a run stopped by the turn bound on a shallow floor: the bot got stuck"
+    );
+    assert!(
+        outcomes.iter().all(|outcome| outcome.depth <= MAX_DEPTH),
+        "no run goes below the bottom floor"
     );
 }
 
@@ -231,18 +231,19 @@ const PHIAL_ESSENCE: i32 = 4;
 /// of radius `SPELL_RANGE`); the bot never wastes a cast on a farther foe.
 const NEAREST_REACH_SQUARED: i32 = 72;
 
-/// Floors the median floor reached by the careful bot must lie on (task
-/// T36): two to three floors past the reckless bot's median of 3, so that
-/// care pays, yet short of the last three floors, the hardest ones (12
-/// creatures each), which most careful runs must not reach. Measured at 7
-/// (mean 7.05) once the elites were made weaker, 5 before.
+/// Floors the median floor reached by the careful bot must lie on: two to
+/// three floors past the reckless bot's median of 3, so that care pays, yet
+/// short of the last three floors, the hardest ones (12 creatures each),
+/// which most careful runs must not reach. Measured at 7 (mean 7.05) with
+/// the shipped elites, 5 when they were stronger.
 const CAREFUL_TARGET_DEPTHS: std::ops::RangeInclusive<u32> = 6..=7;
 
-/// Smallest share of the careful bot's runs that must end in a victory
-/// (task T36): the seal must be within reach of a player who uses
-/// everything the game gives. 2 % of the 80 runs asks for 2 victories, so
-/// that a single lucky seed does not pass for a winnable game. Measured at
-/// 3 runs out of 80 (and 7 out of 200), none before.
+/// Smallest share of the careful bot's runs that must end in a victory: the
+/// seal must be within reach of a player who uses everything the game
+/// gives. 2 % of the 80 runs asks for 2 victories, so that a single lucky
+/// seed does not pass for a winnable game. Measured at 3 runs out of 80
+/// (and 7 out of 200) with the shipped elites, none when they were
+/// stronger.
 const MIN_CAREFUL_WIN_SHARE: f64 = 0.02;
 
 /// Largest share of the careful bot's runs that may end in a victory: the
@@ -355,11 +356,11 @@ fn way_down(game: &Game) -> Position {
 /// of a fight, go on with the errand or set out for the nearest unread glyph
 /// or item in view (the errand is kept until reached, so a glimpse through a
 /// gap is not forgotten one step later), explore, then take the way down.
-/// Closing in on a monster makes its cell the errand: a step that loses
-/// sight of it round a corner is followed by the next step towards it, not
-/// by an explore step back into view (which, against a slow monster that
-/// only acts out of sight, used to loop forever on seed 177).
-/// Every rule is deterministic.
+/// Closing in on a monster makes its cell the errand: a step that loses sight
+/// of it round a corner is followed by the next step towards it, not by an
+/// explore step back into view (which, against a slow monster that only acts
+/// out of sight, would loop forever on seed 177). Every rule is
+/// deterministic.
 fn careful_action(
     game: &Game,
     explored: bool,
@@ -554,7 +555,7 @@ fn a_careful_player_gets_past_the_reckless_floors_and_rarely_wins() {
             .collect()
     });
     let mut histogram = String::new();
-    for depth in 1..=10 {
+    for depth in 1..=MAX_DEPTH {
         let died = outcomes
             .iter()
             .filter(|o| o.died && o.depth == depth)

@@ -1,14 +1,14 @@
-//! Acceptance tests of F14, "victory at the bottom", seen from the player's
-//! side of the public API of the core (decision D23).
+//! Victory at the bottom, seen from the player's side of the public API of
+//! the core (decision D23).
 //!
-//! The three scenarios of the plan are checked on whole runs, not on
-//! hand-made states: every shipped bottom floor has a seal and no stairs,
-//! far from the start and reachable by a search written here; a player that
-//! walks down the real floors of a seed, saves on the way, reloads, and
-//! breaks the seal wins and cannot act any more; breaking it from anywhere
-//! else is refused and costs nothing, cell after cell of the walk. The
-//! floors above the bottom keep their stairs and never hold a seal. A save
-//! of the previous format is refused with both versions named.
+//! The rules are checked on whole runs, not on hand-made states: every
+//! shipped bottom floor has a seal and no stairs, far from the start and
+//! reachable by a search written here; a player that walks down the real
+//! floors of a seed, saves on the way, reloads, and breaks the seal wins and
+//! cannot act any more; breaking it from anywhere else is refused and costs
+//! nothing, cell after cell of the walk. The floors above the bottom keep
+//! their stairs and never hold a seal. A save of the previous format is
+//! refused with both versions named.
 //!
 //! The walker uses harmless monsters (speed 1, one hit point, no attack), so
 //! a run is never lost on the way. Distances come from a plain breadth-first
@@ -170,7 +170,7 @@ fn state_of(game: &Game) -> (u64, u64, Vec<i32>, String) {
     (game.ticks(), game.player_turns(), energies, text)
 }
 
-// --- Scenario 1: the generated bottom floor -------------------------------------------
+// --- The generated bottom floor ---
 
 #[test]
 fn the_tenth_floor_of_every_seed_has_a_far_reachable_seal_and_no_stairs() {
@@ -249,7 +249,7 @@ fn a_run_reaches_the_tenth_floor_by_the_stairs_and_finds_the_seal_there() {
     }
 }
 
-// --- Scenario 2: breaking the seal wins the run --------------------------------------------
+// --- Breaking the seal wins the run ---
 
 #[test]
 fn breaking_the_seal_ends_the_run_in_victory_and_nothing_more_can_be_done() {
@@ -358,7 +358,7 @@ fn a_won_game_that_is_saved_is_read_back_won_and_stays_inert() {
     assert_eq!(save::to_string(&loaded).unwrap(), text);
 }
 
-// --- Scenario 3: breaking it elsewhere does nothing ---------------------------------------------
+// --- Breaking it elsewhere does nothing ---
 
 #[test]
 fn trying_to_break_the_seal_from_any_cell_of_the_walk_but_the_seal_does_nothing() {
@@ -420,7 +420,7 @@ fn a_refusal_off_the_seal_and_off_the_stairs_is_the_same_event_on_every_floor() 
     }
 }
 
-// --- Saves ------------------------------------------------------------------------------------------
+// --- Saves ---
 
 #[test]
 fn a_save_of_the_previous_format_is_refused_and_both_versions_are_named() {

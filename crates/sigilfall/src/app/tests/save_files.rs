@@ -669,7 +669,7 @@ fn save_game(folder: &ScratchFolder, game: &Game) {
     folder.save_file().write(game).expect("the save is written");
 }
 
-// --- Scenario 1: quit, relaunch, the same state, random stream included ---
+// --- Quit, relaunch, the same state, random stream included ---
 
 #[test]
 fn a_fight_resumed_after_quitting_ends_as_the_fight_never_interrupted() {
@@ -677,7 +677,7 @@ fn a_fight_resumed_after_quitting_ends_as_the_fight_never_interrupted() {
     for value in FIGHT_SEEDS {
         let (before, after) = WALK_KEYS.split_at(24);
         // The run that is quit and resumed...
-        let folder = ScratchFolder::new("f9-fight-quit");
+        let folder = ScratchFolder::new("fight-quit");
         save_game(&folder, &fighting_game(value));
         let mut quit = launch_into_game(&folder, &[]).unwrap();
         type_spaced_keys(&mut quit, before);
@@ -707,7 +707,7 @@ fn a_fight_resumed_after_quitting_ends_as_the_fight_never_interrupted() {
             vec![]
         );
         // ...and the one that never stopped.
-        let never = ScratchFolder::new("f9-fight-never");
+        let never = ScratchFolder::new("fight-never");
         save_game(&never, &fighting_game(value));
         let mut control = launch_into_game(&never, &[]).unwrap();
         type_spaced_keys(&mut control, before);
@@ -830,7 +830,7 @@ fn a_deep_run_with_a_pack_and_a_grimoire_resumes_with_the_same_screens() {
         .find_map(deep_game)
         .expect("a seed gives a deep, equipped run");
     assert!(game.depth() >= 3);
-    let folder = ScratchFolder::new("f9-deep");
+    let folder = ScratchFolder::new("deep");
     save_game(&folder, &game);
 
     let mut first = launch_into_game(&folder, &[]).unwrap();
@@ -884,7 +884,7 @@ fn a_deep_run_with_a_pack_and_a_grimoire_resumes_with_the_same_screens() {
 fn quitting_with_ctrl_c_from_any_overlay_saves_and_q_from_an_overlay_does_not_quit() {
     for opening in ["i", "t", "t7", "t75"] {
         // Ctrl+C saves.
-        let folder = ScratchFolder::new("f9-overlay-ctrl-c");
+        let folder = ScratchFolder::new("overlay-ctrl-c");
         let mut app = launch_into_game(&folder, &["--seed", "42"]).unwrap();
         type_spaced_keys(&mut app, &WALK_KEYS[..12]);
         type_spaced_keys(&mut app, opening);
@@ -901,9 +901,9 @@ fn quitting_with_ctrl_c_from_any_overlay_saves_and_q_from_an_overlay_does_not_qu
         assert_eq!(state_of(back.game()), state, "{opening}");
         assert_eq!(back.state(), State::Playing, "{opening}: no overlay");
 
-        // `q` does not quit from an overlay (docs/design.md), so it cannot
+        // `q` does not quit from an overlay (see `input`), so it cannot
         // lose the run; leaving the overlay with Esc, `q` then saves.
-        let folder = ScratchFolder::new("f9-overlay-q");
+        let folder = ScratchFolder::new("overlay-q");
         let mut app = launch_into_game(&folder, &["--seed", "42"]).unwrap();
         type_spaced_keys(&mut app, &WALK_KEYS[..12]);
         type_spaced_keys(&mut app, opening);
@@ -927,7 +927,7 @@ fn quitting_with_ctrl_c_from_any_overlay_saves_and_q_from_an_overlay_does_not_qu
     }
 }
 
-// --- Scenario 2: death, summary, the save is deleted ---
+// --- Death, summary, the save is deleted ---
 
 /// The value written after the leader dots of the row `label` of the
 /// summary, and the detail after it.
@@ -1006,7 +1006,7 @@ fn the_death_summary_shows_what_the_core_counted_and_the_save_is_gone() {
     let content = shipped();
     let mut summaries = 0;
     for value in [3_u64, 11, 21, 33, 58, 64, 99, 123] {
-        let folder = ScratchFolder::new("f9-death");
+        let folder = ScratchFolder::new("death");
         let mut app = doomed_run(&folder, value);
         // Wait for the end: the lead homunculus is not there, so the rat
         // and the beetle must do it; bounded, and skipped if they cannot.
@@ -1110,7 +1110,7 @@ fn the_death_summary_shows_what_the_core_counted_and_the_save_is_gone() {
         let new_run = Game::new(game.seed(), &content);
         assert_eq!(state_of(&again), state_of(&new_run));
 
-        // Once the end screen has settled (B1), keys do nothing on it; `q`
+        // Once the end screen has settled, keys do nothing on it; `q`
         // leaves and recreates nothing, neither a save nor a leftover.
         let clock = ManualClock::new();
         let mut app = app.with_clock(clock.clone());
@@ -1132,7 +1132,7 @@ fn the_death_summary_shows_what_the_core_counted_and_the_save_is_gone() {
 fn a_death_while_the_save_is_held_by_a_folder_is_reported_on_leaving() {
     // The save cannot be deleted (a folder has its name): the death says so
     // in the log, and leaving reports it, with an error naming the file.
-    let folder = ScratchFolder::new("f9-undeletable");
+    let folder = ScratchFolder::new("undeletable");
     let mut app = doomed_run(&folder, 3);
     for _ in 0..400 {
         if app.state() == State::GameOver {
@@ -1155,7 +1155,7 @@ fn a_death_while_the_save_is_held_by_a_folder_is_reported_on_leaving() {
     );
 }
 
-// --- Scenario 3: corrupt or foreign saves ---
+// --- Corrupt or foreign saves ---
 
 /// A real save, for the corruptions to start from.
 fn a_good_save() -> String {
@@ -1215,7 +1215,7 @@ fn every_unreadable_save_is_set_aside_with_a_message_and_a_new_game_starts() {
         ),
     ];
     for (name, content) in cases {
-        let folder = ScratchFolder::new("f9-corrupt");
+        let folder = ScratchFolder::new("corrupt");
         fs::write(folder.path().join("save.ron"), &content).unwrap();
 
         let title = open(&folder, &[]).unwrap_or_else(|error| panic!("{name}: {error:#}"));
@@ -1258,7 +1258,7 @@ fn every_unreadable_save_is_set_aside_with_a_message_and_a_new_game_starts() {
 
 #[test]
 fn a_newer_unreadable_save_replaces_the_older_one_kept_aside() {
-    let folder = ScratchFolder::new("f9-bad-replaced");
+    let folder = ScratchFolder::new("bad-replaced");
     fs::write(folder.path().join("save.ron.bad"), b"OLDER").unwrap();
     fs::write(folder.path().join("save.ron"), b"NEWER").unwrap();
 
@@ -1270,7 +1270,7 @@ fn a_newer_unreadable_save_replaces_the_older_one_kept_aside() {
 
 #[test]
 fn a_save_that_is_a_folder_stops_the_launch_with_an_error_and_loses_nothing() {
-    let folder = ScratchFolder::new("f9-save-is-a-folder");
+    let folder = ScratchFolder::new("save-is-a-folder");
     fs::create_dir(folder.path().join("save.ron")).unwrap();
     fs::write(folder.path().join("save.ron").join("inside"), b"x").unwrap();
 
@@ -1294,7 +1294,7 @@ fn a_leftover_temporary_file_is_never_read_whatever_it_holds() {
     ] {
         // Alone: no save, so a new game of the seed asked for, not an error
         // and not the leftover.
-        let folder = ScratchFolder::new("f9-tmp-alone");
+        let folder = ScratchFolder::new("tmp-alone");
         fs::write(folder.path().join("save.ron.tmp"), leftover).unwrap();
         let mut app =
             launch_into_game(&folder, &["--seed", "5"]).unwrap_or_else(|e| panic!("{name}: {e:#}"));
@@ -1309,7 +1309,7 @@ fn a_leftover_temporary_file_is_never_read_whatever_it_holds() {
         assert_eq!(files(&folder), ["save.ron"], "{name}");
 
         // Beside a save: the save is resumed.
-        let folder = ScratchFolder::new("f9-tmp-beside");
+        let folder = ScratchFolder::new("tmp-beside");
         let mut first = launch_into_game(&folder, &["--seed", "5"]).unwrap();
         type_spaced_keys(&mut first, &WALK_KEYS[..8]);
         quit_and_save(&mut first);
@@ -1326,7 +1326,7 @@ fn the_save_is_replaced_whole_while_another_thread_keeps_reading_it() {
     // or the new one, whole, never half of one and never nothing after the
     // first write.
     let content = shipped();
-    let folder = ScratchFolder::new("f9-atomic");
+    let folder = ScratchFolder::new("atomic");
     let games: Vec<Game> = (0..2_u64)
         .map(|seed| {
             let mut app = App::with_game(
@@ -1373,7 +1373,7 @@ fn the_save_is_replaced_whole_while_another_thread_keeps_reading_it() {
 
 #[test]
 fn a_seed_given_while_a_game_is_saved_is_refused_and_the_save_is_untouched() {
-    let folder = ScratchFolder::new("f9-seed-refused");
+    let folder = ScratchFolder::new("seed-refused");
     let mut first = launch_into_game(&folder, &["--seed", "42"]).unwrap();
     type_spaced_keys(&mut first, &WALK_KEYS[..14]);
     quit_and_save(&mut first);
@@ -1408,7 +1408,7 @@ fn a_seed_given_while_a_game_is_saved_is_refused_and_the_save_is_untouched() {
 
 #[test]
 fn a_write_that_fails_is_an_error_naming_the_file_and_the_previous_save_survives() {
-    let folder = ScratchFolder::new("f9-write-fails");
+    let folder = ScratchFolder::new("write-fails");
     let mut first = launch_into_game(&folder, &["--seed", "42"]).unwrap();
     type_spaced_keys(&mut first, &WALK_KEYS[..10]);
     quit_and_save(&mut first);
@@ -1430,7 +1430,7 @@ fn a_write_that_fails_is_an_error_naming_the_file_and_the_previous_save_survives
         "the previous save survives"
     );
     // A fresh game cannot be saved either when the folder cannot be made.
-    let blocked = ScratchFolder::new("f9-write-fails-folder");
+    let blocked = ScratchFolder::new("write-fails-folder");
     let file = blocked.path().join("not-a-folder");
     fs::write(&file, b"x").unwrap();
     let impossible = SaveFile::in_folder(Path::new(&file));
@@ -1444,7 +1444,7 @@ fn a_write_that_fails_is_an_error_naming_the_file_and_the_previous_save_survives
 
 #[test]
 fn the_title_offers_continue_only_with_a_save_and_says_when_a_save_was_set_aside() {
-    let folder = ScratchFolder::new("f9-title");
+    let folder = ScratchFolder::new("title");
     let fresh = open(&folder, &[]).unwrap();
     assert!(!fresh.has_saved_game());
     assert!(!screen_text(&fresh, 80, 24).contains("Continue"));
@@ -1501,7 +1501,7 @@ fn joined(screen: &[String]) -> String {
 
 #[test]
 fn a_20_kb_error_and_a_120_character_path_show_whole_on_the_title_and_in_the_log() {
-    let folder = ScratchFolder::new("f9-b2");
+    let folder = ScratchFolder::new("b2");
     let deep = folder_for_a_bad_save_path_of(&folder, 120);
     let save = SaveFile::in_folder(&deep);
     fs::write(save.path(), "x".repeat(20_000)).unwrap();
@@ -1584,7 +1584,7 @@ fn a_20_kb_error_and_a_120_character_path_show_whole_on_the_title_and_in_the_log
 
 #[test]
 fn a_very_long_error_text_still_tells_the_player_the_save_was_set_aside() {
-    let folder = ScratchFolder::new("f9-long-notice");
+    let folder = ScratchFolder::new("long-notice");
     fs::write(folder.path().join("save.ron"), "x".repeat(20_000)).unwrap();
 
     let title = open(&folder, &[]).unwrap();
@@ -1641,7 +1641,7 @@ fn an_extra_enter_right_after_a_deadly_cast_does_not_skip_the_end_screen() {
             sigilfall_core::game::PLAYER_START.step(Direction::East),
             content.monster("executioner").unwrap(),
         );
-        let folder = ScratchFolder::new("f9-deadly-cast");
+        let folder = ScratchFolder::new("deadly-cast");
         let mut app = App::with_game(dark(), game, content).saving_to(folder.save_file());
         app.handle_key(press(KeyCode::Char('t')));
         type_spaced_keys(&mut app, trace);
@@ -1673,7 +1673,7 @@ fn an_extra_enter_right_after_a_deadly_cast_does_not_skip_the_end_screen() {
 
 #[test]
 fn once_the_grace_is_over_enter_after_a_deadly_cast_goes_back_to_the_title() {
-    let folder = ScratchFolder::new("f9-cast-then-title");
+    let folder = ScratchFolder::new("cast-then-title");
     let clock = ManualClock::new();
     let mut app = executioner_app(&folder, 1, &clock);
     app.handle_key(press(KeyCode::Char('t')));
@@ -1704,7 +1704,7 @@ fn once_the_grace_is_over_enter_after_a_deadly_cast_goes_back_to_the_title() {
 
 #[test]
 fn the_grace_also_protects_a_death_in_melee() {
-    let folder = ScratchFolder::new("f9-melee-grace");
+    let folder = ScratchFolder::new("melee-grace");
     let clock = ManualClock::new();
     let mut app = executioner_app(&folder, 1, &clock);
     // Blows at the executioner, until it answers with a deadly one.
@@ -1720,7 +1720,7 @@ fn the_grace_also_protects_a_death_in_melee() {
 
 #[test]
 fn the_grace_also_protects_a_death_while_a_movement_key_is_held() {
-    let folder = ScratchFolder::new("f9-held-key-grace");
+    let folder = ScratchFolder::new("held-key-grace");
     let clock = ManualClock::new();
     let mut app = executioner_app(&folder, 3, &clock);
     // A held key: the terminal keeps sending presses, then repeats, well
@@ -1748,7 +1748,7 @@ fn the_grace_also_protects_a_death_while_a_movement_key_is_held() {
 
 #[test]
 fn ctrl_c_quits_at_once_during_the_grace() {
-    let folder = ScratchFolder::new("f9-grace-ctrl-c");
+    let folder = ScratchFolder::new("grace-ctrl-c");
     let clock = ManualClock::new();
     let mut app = executioner_app(&folder, 1, &clock);
     fight_the_executioner(&mut app);
@@ -1761,7 +1761,7 @@ fn ctrl_c_quits_at_once_during_the_grace() {
 
 #[test]
 fn keys_typed_during_the_grace_are_not_kept_for_later_and_q_quits_only_after_it() {
-    let folder = ScratchFolder::new("f9-grace-nothing-kept");
+    let folder = ScratchFolder::new("grace-nothing-kept");
     let clock = ManualClock::new();
     let mut app = executioner_app(&folder, 1, &clock);
     fight_the_executioner(&mut app);
@@ -1775,7 +1775,7 @@ fn keys_typed_during_the_grace_are_not_kept_for_later_and_q_quits_only_after_it(
     assert!(screen_text(&app, 80, 24).contains("T H E   D E S C E N T   E N D S"));
 
     // A fresh end screen, to try `q` on the two sides of the delay.
-    let folder = ScratchFolder::new("f9-grace-q");
+    let folder = ScratchFolder::new("grace-q");
     let clock = ManualClock::new();
     let mut app = executioner_app(&folder, 1, &clock);
     fight_the_executioner(&mut app);

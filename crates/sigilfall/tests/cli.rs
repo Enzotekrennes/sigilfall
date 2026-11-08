@@ -134,7 +134,8 @@ fn a_redirected_output_is_refused_at_once_with_a_clear_message() {
     );
 }
 
-/// Runs the built `sigilfall_without_input` executable with `arguments`, with no input.
+/// Runs the built `sigilfall_without_input` executable with `arguments`, with
+/// no input.
 fn sigilfall_without_input(arguments: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_sigilfall"))
         .args(arguments)
@@ -222,9 +223,8 @@ fn a_negative_seed_given_with_an_equals_sign_is_refused_with_the_format() {
     assert_clear_refusal("-1", &sigilfall_without_input(&["--seed=-1"]));
 }
 
-/// Non-regression test of bug B1 of the F2 test: with a space, `-1` was
-/// read as an unknown option and the message did not mention the seed
-/// formats.
+/// Non-regression test: with a space, `-1` was once read as an unknown option
+/// and the message did not mention the seed formats.
 #[test]
 fn a_negative_seed_given_after_a_space_is_refused_with_the_format() {
     assert_clear_refusal("-1", &sigilfall_without_input(&["--seed", "-1"]));

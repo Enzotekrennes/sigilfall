@@ -20,10 +20,10 @@ use crate::theme::Theme;
 
 /// Columns a message's text is wrapped to.
 ///
-/// `docs/design.md` caps a log line at 78 characters on an 80-column
-/// screen: a margin, the prefix and a space take three columns, which
-/// leaves 76 for the text and keeps the right margin free. The width stays
-/// the same on wider terminals, so lines remain easy to read.
+/// A log line takes 78 characters at most on an 80-column screen: a margin,
+/// the prefix and a space take three columns, which leaves 76 for the text
+/// and keeps the right margin free. The width stays the same on wider
+/// terminals, so lines remain easy to read.
 pub const TEXT_WIDTH: usize = 76;
 
 /// Columns before a message's text: the left margin, the prefix and a
@@ -67,8 +67,8 @@ pub fn render(
 /// Builds the separator above the log, `width` columns starting at column
 /// `left`: a line in the border style with the title "Log" near its left
 /// end and, when `junction` is given, a junction at that column, where the
-/// side panel's border comes down, as in the game screen mock-up of
-/// `docs/design.md`.
+/// side panel's border comes down, so the panel and the log read as one
+/// frame.
 fn separator(width: u16, left: u16, junction: Option<u16>, theme: &Theme) -> Line<'static> {
     let glyphs = &theme.glyphs;
     let title = format!(" {} ", messages::LOG_TITLE);
@@ -129,8 +129,9 @@ fn message_lines(message: &Message, theme: &Theme) -> Vec<Line<'static>> {
         .collect()
 }
 
-/// The prefix and style of a message of `tone` (`docs/design.md`,
-/// "Préfixes du journal"): the prefix carries the tone without colour.
+/// The prefix and style of a message of `tone`: `!` danger, `+` gain, `~`
+/// sigil, a space for neutral information; the prefix carries the tone
+/// without colour.
 const fn tone_look(tone: Tone, theme: &Theme) -> (char, Style) {
     match tone {
         Tone::Info => (' ', theme.log_info),
@@ -223,6 +224,51 @@ pub(super) mod tests {
             .collect()
     }
 
+    /// Reasons a refused save may be given ([`messages::save_refusal`]): the
+    /// longest sentences of the save reader, with values as large as their
+    /// fields allow and quotes of 20 kB, as one long word and as many short
+    /// ones.
+    pub(in crate::ui) fn refusals() -> Vec<String> {
+        use sigilfall_core::save::{Reference, SaveError};
+
+        let long_word = "x".repeat(20_000);
+        let words = "ab ".repeat(7_000);
+        let mut errors = vec![
+            SaveError::UnsupportedVersion {
+                found: u32::MAX,
+                expected: sigilfall_core::save::FORMAT_VERSION,
+            },
+            SaveError::Inconsistent(format!(
+                "the memory of the player of the actor in slot {} is at ({}, {}), not a \
+                 walkable cell of the 80x40 map",
+                u32::MAX,
+                i32::MIN,
+                i32::MIN
+            )),
+            SaveError::Inconsistent(format!(
+                "the tick of the last essence recovery is {}, expected 0 to {}",
+                u64::MAX,
+                u32::MAX
+            )),
+            SaveError::Inconsistent("floor 10, the bottom floor, has 3200 seals".to_owned()),
+        ];
+        for quote in [&long_word, &words] {
+            errors.push(SaveError::Malformed {
+                line: 4_194_304,
+                column: 4_194_304,
+                message: quote.clone(),
+            });
+            errors.push(SaveError::UnknownReference {
+                kind: Reference::Monster,
+                id: quote.clone(),
+            });
+        }
+        let mut refusals: Vec<String> = errors.iter().map(messages::save_refusal).collect();
+        refusals.push(messages::SAVE_NOT_TEXT.to_owned());
+        refusals.push(messages::save_too_large(crate::persist::MAX_FILE_BYTES));
+        refusals
+    }
+
     /// Paths of the file kept aside, from short to far wider than a line,
     /// with and without spaces, each ending with its file name.
     pub(in crate::ui) fn paths() -> Vec<String> {
@@ -249,7 +295,7 @@ pub(super) mod tests {
         // the separator.
         const ROWS: usize = 5;
         let theme = Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode);
-        for reason in reasons() {
+        for reason in refusals() {
             for path in paths() {
                 let set_aside = messages::save_set_aside(&reason, &path);
                 let mut log = MessageLog::default();

@@ -1,14 +1,13 @@
-//! Acceptance tests of F4, scenario 3: a monster file that is not valid is
-//! refused with an error that names the monster and the field in cause.
+//! The monster file: a file that is not valid is refused with an error that
+//! names the monster and the field in cause.
 //!
 //! Written against the public API only (`Content::parse`, `Content::load`).
 //! Each case starts from a valid file and breaks exactly one thing, so the
 //! error under test is the only possible one.
 //!
-//! The "unknown reference" case of the scenario cannot be tested yet: the
-//! monster format holds no field that refers to another entry (journal T13,
-//! postponed to T20 and T22). `the_format_has_no_reference_field_yet` records
-//! that fact, so the day a reference appears this file shows it.
+//! An "unknown reference" cannot be tested yet: the monster format holds no
+//! field that refers to another entry. `the_format_has_no_reference_field_yet`
+//! records that fact, so the day a reference appears this file shows it.
 
 use sigilfall_core::content::{Content, ContentError};
 
@@ -174,8 +173,8 @@ fn a_file_without_a_monster_for_the_first_floor_is_refused() {
 #[test]
 fn the_format_has_no_reference_field_yet() {
     // A monster that points at something else (a drop, a spawn table) is
-    // exactly what scenario 3 calls an "unknown reference". Such a field does
-    // not exist in the format, so it is rejected as an unknown field, and no
+    // exactly what an "unknown reference" would be. Such a field does not
+    // exist in the format, so it is rejected as an unknown field, and no
     // check of reference exists to test.
     for field in ["drops", "loot", "summons", "spawns"] {
         let text = file(&[entry("rat", "100", "5")]).replace(

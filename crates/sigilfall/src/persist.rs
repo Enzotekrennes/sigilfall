@@ -20,10 +20,11 @@
 //! The save is `save.ron` in that folder. It is written to `save.ron.tmp`
 //! first, then renamed over `save.ron`, so a run interrupted while writing
 //! leaves either the previous save or the new one, never half of one; a
-//! leftover `save.ron.tmp` is never read. A save that cannot be read back
-//! (not RON, another format version, content that changed…) is renamed
-//! `save.ron.bad` rather than deleted, so the run it held can still be
-//! looked at.
+//! leftover `save.ron.tmp` is never read, and is deleted rather than opened
+//! before the next write, so a link put in its place is never followed. A
+//! save that cannot be read back (not RON, another format version, content
+//! that changed, larger than [`MAX_FILE_BYTES`]…) is renamed `save.ron.bad`
+//! rather than deleted, so the run it held can still be looked at.
 //!
 //! The options are `options.ron` in the same folder, a short RON record
 //! with its own format version ([`OPTIONS_FORMAT_VERSION`]), written the
@@ -31,13 +32,13 @@
 //! the game: the default options are used, the reason is reported, and the
 //! file is replaced the next time an option changes.
 //!
-//! The text of a save and its checks belong to `sigilfall_core::save`; when
-//! to save, resume or delete, and when to write the options, is decided by
-//! the `app` module.
+//! The text of a save and its checks belong to `sigilfall_core::save`, and
+//! the words of a refusal to `messages`; when to save, resume or delete, and
+//! when to write the options, is decided by the `app` module.
 
 use std::ffi::OsString;
-use std::fs::{self, File};
-use std::io::{self, Write as _};
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
@@ -47,21 +48,30 @@ use sigilfall_core::content::Content;
 use sigilfall_core::game::Game;
 use sigilfall_core::save;
 
+use crate::messages;
 use crate::theme::{Appearance, ColorChoice, GlyphSet, Options};
 
 /// Environment variable that replaces the operating system's data folder,
 /// as a path to a folder, created if missing; an empty value is ignored.
 ///
 /// An environment variable rather than a command-line option: the command
-/// line stays the one the plan documents (`--seed`, `--ascii`), a test or a
-/// tester can move the folder of a game started from a script without
-/// changing its arguments, and the options live in the same folder, so one
-/// variable moves every file of the game.
+/// line keeps the options a player needs (`--seed`, `--daily`, `--ascii`),
+/// a script or a test can move the folder of a game without changing its
+/// arguments, and the options live in the same folder, so one variable
+/// moves every file of the game.
 pub const DATA_DIR_VAR: &str = "SIGILFALL_DATA_DIR";
 
 /// Application name given to `directories::ProjectDirs`, which makes the
 /// last part of the data folder's path (lowercased on Linux).
-const APPLICATION: &str = "Sigilfall";
+pub(crate) const APPLICATION: &str = "Sigilfall";
+
+/// Largest save or options file read, in bytes: 4 MiB.
+///
+/// A save of the bottom floor, the largest state the game reaches, takes
+/// tens of kilobytes, and an options file less than one; a file a hundred
+/// times larger than any save is not one the game wrote, and reading it
+/// whole would only spend memory before refusing it.
+pub const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
 
 /// Name of the save file in the data folder.
 const SAVE_NAME: &str = "save.ron";
@@ -157,10 +167,12 @@ impl SaveFile {
     /// Reads the save back into a game whose monsters, items and sigils are
     /// found in `content`.
     ///
-    /// Only `save.ron` is read, never a leftover `save.ron.tmp`. A save that
-    /// is not UTF-8 text or that `save::from_str` refuses is renamed
-    /// `save.ron.bad`, replacing an older one of that name, and reported as
-    /// [`Loaded::SetAside`]; the save itself is otherwise left as it is.
+    /// Only `save.ron` is read, never a leftover `save.ron.tmp`. A save
+    /// larger than [`MAX_FILE_BYTES`], not UTF-8 text, or refused by
+    /// `save::from_str` is renamed `save.ron.bad`, replacing an older one of
+    /// that name, and reported as [`Loaded::SetAside`] with the reason of
+    /// `messages::save_refusal`; the save itself is otherwise left as it
+    /// is.
     ///
     /// # Errors
     ///
@@ -169,9 +181,18 @@ impl SaveFile {
     /// cannot be renamed: starting a new game then would overwrite it at the
     /// next save.
     pub fn load(&self, content: &Content) -> anyhow::Result<Loaded> {
-        let bytes = match fs::read(&self.path) {
-            Ok(bytes) => bytes,
+        let reason = match read_bounded(&self.path) {
+            Ok(bytes) => match String::from_utf8(bytes) {
+                Err(_) => messages::SAVE_NOT_TEXT.to_owned(),
+                Ok(text) => match save::from_str(&text, content) {
+                    Ok(game) => return Ok(Loaded::Game(Box::new(game))),
+                    Err(error) => messages::save_refusal(&error),
+                },
+            },
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Loaded::Missing),
+            Err(error) if error.kind() == io::ErrorKind::FileTooLarge => {
+                messages::save_too_large(MAX_FILE_BYTES)
+            }
             Err(error) => {
                 return Err(error).with_context(|| {
                     format!(
@@ -180,13 +201,6 @@ impl SaveFile {
                     )
                 });
             }
-        };
-        let reason = match String::from_utf8(bytes) {
-            Err(_) => "the save is not text".to_owned(),
-            Ok(text) => match save::from_str(&text, content) {
-                Ok(game) => return Ok(Loaded::Game(Box::new(game))),
-                Err(error) => error.to_string(),
-            },
         };
         let moved_to = self.set_aside_path();
         fs::rename(&self.path, &moved_to).with_context(|| {
@@ -230,8 +244,9 @@ impl SaveFile {
         write_atomically(&self.path, &text)
     }
 
-    /// Deletes the save, so a dead character can never be resumed. Deleting
-    /// a save that does not exist succeeds, so this can be repeated.
+    /// Deletes the save, so a finished game, lost or won, can never be
+    /// resumed. Deleting a save that does not exist succeeds, so this can be
+    /// repeated.
     ///
     /// # Errors
     ///
@@ -242,7 +257,7 @@ impl SaveFile {
             Err(error) if error.kind() != io::ErrorKind::NotFound => {
                 Err(error).with_context(|| {
                     format!(
-                        "cannot delete the save {} of the dead character: delete \
+                        "cannot delete the save {} of the finished game: delete \
                          it by hand so it is not resumed",
                         self.path.display()
                     )
@@ -333,18 +348,24 @@ impl OptionsFile {
     /// Reads the player's options back.
     ///
     /// Never fails: a missing file gives [`LoadedOptions::Missing`], and a
-    /// file that cannot be read (permissions, not text, not RON, another
-    /// format version, an unknown value) gives
-    /// [`LoadedOptions::Unreadable`] with the reason. The file itself is
-    /// left as it is.
+    /// file that cannot be read (permissions, larger than
+    /// [`MAX_FILE_BYTES`], not text, not RON, another format version, an
+    /// unknown value) gives [`LoadedOptions::Unreadable`] with the reason.
+    /// The file itself is left as it is.
     pub fn load(&self) -> LoadedOptions {
-        let text = match fs::read_to_string(&self.path) {
-            Ok(text) => text,
+        let bytes = match read_bounded(&self.path) {
+            Ok(bytes) => bytes,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return LoadedOptions::Missing,
-            Err(error) if error.kind() == io::ErrorKind::InvalidData => {
-                return unreadable("it is not text");
+            Err(error) if error.kind() == io::ErrorKind::FileTooLarge => {
+                return unreadable(&format!(
+                    "it is larger than {}",
+                    messages::file_size(MAX_FILE_BYTES)
+                ));
             }
             Err(error) => return unreadable(&error.to_string()),
+        };
+        let Ok(text) = String::from_utf8(bytes) else {
+            return unreadable("it is not text");
         };
         match parse_options(&text) {
             Ok(options) => LoadedOptions::Found(options),
@@ -563,23 +584,60 @@ fn byte_offset(text: &str, at: ron::error::Position) -> Option<usize> {
     ((line, column) == (at.line, at.col)).then_some(text.len())
 }
 
-/// Writes `text` to `path` so that a crash leaves the old file or the new
-/// one whole, never half of one: the text goes to `path` with
-/// [`TEMPORARY_SUFFIX`], is flushed to the disk, and that file is renamed
-/// over `path`. The folder of `path` is created if missing, and a temporary
-/// file left by an interrupted write is overwritten.
+/// Reads the whole file at `path`, at most [`MAX_FILE_BYTES`] of it.
+///
+/// Only `MAX_FILE_BYTES + 1` bytes are ever read, so a huge file costs no
+/// more memory than the largest one accepted.
 ///
 /// # Errors
 ///
-/// Returns an error naming the folder or the file when the folder cannot
-/// be created, or the temporary file cannot be created, written or renamed.
+/// Returns the system's error when the file cannot be opened or read (its
+/// kind is `NotFound` when there is no file), and an error of kind
+/// [`io::ErrorKind::FileTooLarge`] when it holds more than
+/// [`MAX_FILE_BYTES`] bytes.
+fn read_bounded(path: &Path) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    File::open(path)?
+        .take(MAX_FILE_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_FILE_BYTES {
+        return Err(io::Error::from(io::ErrorKind::FileTooLarge));
+    }
+    Ok(bytes)
+}
+
+/// Writes `text` to `path` so that a crash leaves the old file or the new
+/// one whole, never half of one: the text goes to `path` with
+/// [`TEMPORARY_SUFFIX`], is flushed to the disk, and that file is renamed
+/// over `path`. The folder of `path` is created if missing.
+///
+/// A temporary file left by an interrupted write is deleted first, and the
+/// new one is created only if nothing has that name (`create_new`): when the
+/// name is a symbolic link, the link itself is deleted and the file it
+/// points to is never opened nor written.
+///
+/// # Errors
+///
+/// Returns an error naming the folder or the file when the folder cannot be
+/// created, or the temporary file cannot be created (a leftover of that
+/// name that cannot be deleted, such as a folder, counts as such), written
+/// or renamed.
 fn write_atomically(path: &Path, text: &str) -> anyhow::Result<()> {
     if let Some(folder) = path.parent() {
         fs::create_dir_all(folder)
             .with_context(|| format!("cannot create the folder {}", folder.display()))?;
     }
     let temporary = with_suffix(path, TEMPORARY_SUFFIX);
-    let mut file = File::create(&temporary)
+    match fs::remove_file(&temporary) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => {
+            return Err(error).with_context(|| format!("cannot create {}", temporary.display()));
+        }
+        _ => {}
+    }
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
         .with_context(|| format!("cannot create {}", temporary.display()))?;
     file.write_all(text.as_bytes())
         .and_then(|()| file.sync_all())
@@ -594,8 +652,15 @@ fn write_atomically(path: &Path, text: &str) -> anyhow::Result<()> {
 fn data_folder(override_folder: Option<OsString>) -> Option<PathBuf> {
     match override_folder {
         Some(folder) if !folder.is_empty() => Some(PathBuf::from(folder)),
-        _ => ProjectDirs::from("", "", APPLICATION).map(|dirs| dirs.data_dir().to_path_buf()),
+        _ => system_data_folder(),
     }
+}
+
+/// The operating system's data folder for [`APPLICATION`] (see the module
+/// documentation), or `None` if the system has none for this user. Nothing
+/// is read or created on disk.
+pub(crate) fn system_data_folder() -> Option<PathBuf> {
+    ProjectDirs::from("", "", APPLICATION).map(|dirs| dirs.data_dir().to_path_buf())
 }
 
 /// Returns `path` with `suffix` added after its whole file name, as
@@ -618,25 +683,35 @@ pub struct ScratchFolder {
 
 #[cfg(test)]
 impl ScratchFolder {
-    /// Creates a new folder whose name holds `label`, the process id and a
-    /// counter, so parallel tests and test runs never share one.
+    /// Most names tried before giving up: a run of clashes on 32-bit random
+    /// names means something else creates folders of that form on purpose.
+    const ATTEMPTS: usize = 16;
+
+    /// Creates a new folder whose name holds `label` and 32 random bits, so
+    /// parallel tests and test runs never share one, and another user of the
+    /// temporary folder cannot guess it and prepare files or links there
+    /// beforehand. 32 bits keep the paths short enough for the screens that
+    /// show them whole (a line of 75 characters); a name guessed and taken
+    /// first only makes the next attempt draw another.
+    ///
+    /// The folder is created with `create_dir`, which fails on any existing
+    /// name, link included: a name already taken is never reused, another
+    /// one is drawn.
     ///
     /// # Panics
     ///
-    /// Panics if the folder cannot be created.
+    /// Panics if no folder can be created after [`Self::ATTEMPTS`] names.
     pub fn new(label: &str) -> Self {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-
-        /// Number of folders created so far by this process.
-        static CREATED: AtomicUsize = AtomicUsize::new(0);
-        let number = CREATED.fetch_add(1, Ordering::Relaxed);
-        let path =
-            std::env::temp_dir().join(format!("sigilfall-{label}-{}-{number}", std::process::id()));
-        // A folder left by an earlier run with the same process id would
-        // hold its files; start empty.
-        drop(fs::remove_dir_all(&path));
-        fs::create_dir_all(&path).expect("create a scratch folder");
-        Self { path }
+        let temporary = std::env::temp_dir();
+        for _ in 0..Self::ATTEMPTS {
+            let path = temporary.join(format!("sigilfall-{label}-{:08x}", random_bits()));
+            match fs::create_dir(&path) {
+                Ok(()) => return Self { path },
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(error) => panic!("cannot create a scratch folder {}: {error}", path.display()),
+            }
+        }
+        panic!("no free scratch folder name in {}", temporary.display());
     }
 
     /// Returns the path of the folder.
@@ -653,6 +728,19 @@ impl ScratchFolder {
     pub fn options_file(&self) -> OptionsFile {
         OptionsFile::in_folder(&self.path)
     }
+}
+
+/// 32 bits another process cannot predict: the standard library draws the
+/// keys of `RandomState` from the operating system's random source once per
+/// thread, and changes them for each new one, so hashing the same value
+/// with a new one gives a fresh value without a dependency.
+#[cfg(test)]
+fn random_bits() -> u32 {
+    use std::hash::BuildHasher as _;
+
+    let bits = std::collections::hash_map::RandomState::new().hash_one(());
+    // The high half of the hash, folded onto the low one: every bit counts.
+    (bits ^ (bits >> 32)) as u32
 }
 
 #[cfg(test)]
@@ -854,6 +942,58 @@ mod tests {
     }
 
     #[test]
+    fn a_save_larger_than_the_limit_is_set_aside_without_being_read_whole() {
+        let folder = ScratchFolder::new("too-large");
+        let save = folder.save_file();
+        let size = MAX_FILE_BYTES + 1;
+        File::create(save.path()).unwrap().set_len(size).unwrap();
+
+        let Loaded::SetAside { reason, moved_to } = save.load(&content()).unwrap() else {
+            panic!("the save is set aside");
+        };
+
+        assert_eq!(reason, "the save is larger than 4 MiB");
+        assert_eq!(fs::metadata(moved_to).unwrap().len(), size, "kept whole");
+    }
+
+    #[test]
+    fn a_save_at_the_limit_is_read_and_refused_for_its_text_only() {
+        let folder = ScratchFolder::new("at-limit");
+        let save = folder.save_file();
+        File::create(save.path())
+            .unwrap()
+            .set_len(MAX_FILE_BYTES)
+            .unwrap();
+
+        let Loaded::SetAside { reason, .. } = save.load(&content()).unwrap() else {
+            panic!("the save is set aside");
+        };
+
+        assert!(!reason.contains("larger"), "{reason}");
+    }
+
+    #[test]
+    fn an_escape_sequence_in_a_save_never_reaches_the_reason() {
+        let folder = ScratchFolder::new("escape");
+        let save = folder.save_file();
+        let text = save::to_string(&played_game(23)).unwrap();
+        // A terminal title change, a bell and a screen clear, written into
+        // the identifier of the first definition the save names.
+        let field = "definition: \"";
+        assert!(text.contains(field), "{text}");
+        let hostile = "\u{1b}]0;owned\u{7}\u{1b}[2J";
+        let edited = text.replacen(field, &format!("{field}{hostile}"), 1);
+        fs::write(save.path(), &edited).unwrap();
+
+        let Loaded::SetAside { reason, .. } = save.load(&content()).unwrap() else {
+            panic!("the save is set aside");
+        };
+
+        assert!(!reason.chars().any(char::is_control), "{reason:?}");
+        assert!(reason.contains("?]0;owned??[2J"), "{reason:?}");
+    }
+
+    #[test]
     fn a_save_set_aside_replaces_an_older_one() {
         let folder = ScratchFolder::new("aside-twice");
         let save = folder.save_file();
@@ -915,6 +1055,54 @@ mod tests {
             format!("{error:#}").contains("could not be saved"),
             "{error:#}"
         );
+    }
+
+    #[test]
+    fn a_leftover_temporary_file_is_replaced_never_written_through() {
+        let folder = ScratchFolder::new("leftover");
+        let save = folder.save_file();
+        let target = folder.path().join("elsewhere.txt");
+        fs::write(&target, "not the game's").unwrap();
+        // A link in place of the temporary file must not lead the write to
+        // the file it points to. Creating one may need a privilege on
+        // Windows; the rule is then checked on the other systems.
+        #[cfg(unix)]
+        let linked = std::os::unix::fs::symlink(&target, save.temporary_path()).is_ok();
+        #[cfg(windows)]
+        let linked = std::os::windows::fs::symlink_file(&target, save.temporary_path()).is_ok();
+        if !linked {
+            fs::write(save.temporary_path(), "leftover").unwrap();
+        }
+        let game = played_game(24);
+
+        save.write(&game).unwrap();
+
+        assert_eq!(fs::read_to_string(&target).unwrap(), "not the game's");
+        assert!(!save.temporary_path().exists());
+        let Loaded::Game(loaded) = save.load(&content()).unwrap() else {
+            panic!("the save is read back");
+        };
+        assert_same_game(&loaded, &game);
+        if !linked {
+            eprintln!("no symbolic link could be created here: checked with a plain file");
+        }
+    }
+
+    #[test]
+    fn scratch_folders_have_unpredictable_names() {
+        let (first, second) = (ScratchFolder::new("names"), ScratchFolder::new("names"));
+
+        assert_ne!(first.path(), second.path());
+        for folder in [&first, &second] {
+            let name = folder.path().file_name().unwrap().to_string_lossy();
+            let suffix = name.strip_prefix("sigilfall-names-").expect("the label");
+            assert_eq!(suffix.len(), 8, "{name}");
+            assert!(suffix.chars().all(|c| c.is_ascii_hexdigit()), "{name}");
+            assert!(
+                !name.contains(&std::process::id().to_string()),
+                "no process id: {name}"
+            );
+        }
     }
 
     #[test]
@@ -1235,6 +1423,23 @@ mod tests {
                 "{text}: {reason}"
             );
         }
+    }
+
+    #[test]
+    fn an_options_file_larger_than_the_limit_is_unreadable() {
+        let folder = ScratchFolder::new("options-too-large");
+        let file = folder.options_file();
+        File::create(file.path())
+            .unwrap()
+            .set_len(MAX_FILE_BYTES + 1)
+            .unwrap();
+
+        assert_eq!(
+            file.load(),
+            LoadedOptions::Unreadable {
+                reason: "it is larger than 4 MiB".to_owned()
+            }
+        );
     }
 
     #[test]

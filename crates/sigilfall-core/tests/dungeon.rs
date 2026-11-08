@@ -1,5 +1,5 @@
-//! Acceptance tests of F2, "Donjon généré par graine", written against the
-//! public API of the core crate only.
+//! The dungeon a seed generates, checked against the public API of the core
+//! crate only.
 //!
 //! They deliberately do not reuse the generator's own helpers (the BSP room
 //! list, `flood_fill`, `DijkstraMap`): the rooms are rediscovered from the
@@ -21,11 +21,11 @@ use sigilfall_core::geometry::Position;
 use sigilfall_core::map::{Map, Tile};
 use sigilfall_core::rng::Seed;
 
-/// Seeds named by the acceptance brief: both ends of the range, the seed of
-/// scenario 1 and the seed shown as an example to players.
+/// The reference seeds of the tests: both ends of the range, 42 and the
+/// seed shown to players as an example.
 const NAMED_SEEDS: [u64; 4] = [0, 42, 0x7F3A_91C2_0B5E_D4A8, u64::MAX];
 
-/// Number of random seeds scenario 2 is checked on.
+/// Number of random seeds the joined rooms and far stairs are checked on.
 const RANDOM_SEEDS: usize = 1000;
 
 /// Side of the block of floor cells that marks a room.
@@ -186,7 +186,8 @@ fn rooms(map: &Map) -> Vec<Vec<Position>> {
     rooms
 }
 
-/// Every check of scenario 2 on one floor, as an error message on failure.
+/// Every check of joined rooms and far stairs on one floor, as an error
+/// message on failure.
 fn check_floor(seed: u64) -> Result<(), String> {
     let floor = generate(Seed::new(seed), FIRST_DEPTH);
     let map = floor.map();
@@ -270,11 +271,10 @@ fn check_floor(seed: u64) -> Result<(), String> {
     Ok(())
 }
 
-/// Scenario 1: the same seed gives the same dungeon, in the map, the start
-/// and the game built on it, for the named seeds and for the brief's seed 42
-/// started twice.
+/// The same seed gives the same dungeon, in the map, the start and the game
+/// built on it, for the reference seeds, 42 among them started twice.
 #[test]
-fn scenario_1_the_same_seed_gives_identical_dungeons() {
+fn the_same_seed_gives_identical_dungeons() {
     for value in NAMED_SEEDS {
         let seed = Seed::new(value);
         let (first, second) = (generate(seed, FIRST_DEPTH), generate(seed, FIRST_DEPTH));
@@ -299,11 +299,10 @@ fn scenario_1_the_same_seed_gives_identical_dungeons() {
     }
 }
 
-/// Scenario 1, other side: different seeds and depths do not all collapse
-/// to one dungeon, and a floor does not depend on the floors generated
-/// before it.
+/// The other side: different seeds and depths do not all collapse to one
+/// dungeon, and a floor does not depend on the floors generated before it.
 #[test]
-fn scenario_1_other_seeds_give_other_dungeons_and_order_does_not_matter() {
+fn other_seeds_give_other_dungeons_and_order_does_not_matter() {
     let floors: Vec<_> = NAMED_SEEDS
         .iter()
         .map(|&v| generate(Seed::new(v), FIRST_DEPTH))
@@ -323,18 +322,17 @@ fn scenario_1_other_seeds_give_other_dungeons_and_order_does_not_matter() {
     );
 }
 
-/// Scenario 2 on the named seeds.
+/// The example seeds.
 #[test]
-fn scenario_2_named_seeds() {
+fn the_example_seeds_give_joined_rooms_and_far_stairs() {
     for value in NAMED_SEEDS {
         check_floor(value).unwrap();
     }
 }
 
-/// Scenario 2: 1 000 fixed seeds and 1 000 clock-drawn seeds, checked in
-/// terms of rooms.
+/// 1 000 fixed seeds and 1 000 clock-drawn seeds, checked in terms of rooms.
 #[test]
-fn scenario_2_rooms_are_joined_and_stairs_are_far_on_random_seeds() {
+fn rooms_are_joined_and_stairs_are_far_on_random_seeds() {
     let failures: Vec<String> = random_seeds()
         .into_iter()
         .filter_map(|seed| check_floor(seed).err())
@@ -382,10 +380,10 @@ fn the_displayed_seed_can_be_typed_back_and_gives_the_same_dungeon() {
     assert_eq!(Seed::new(u64::MAX).to_string(), "FFFF-FFFF-FFFF-FFFF");
 }
 
-/// Scenario 3, at the parser level: text that is not a seed is refused
-/// with a message that names both accepted forms.
+/// At the parser level: text that is not a seed is refused with a message
+/// that names both accepted forms.
 #[test]
-fn scenario_3_bad_seed_texts_are_refused_with_the_expected_format() {
+fn bad_seed_texts_are_refused_with_the_expected_format() {
     for text in [
         "abc",
         "",

@@ -86,8 +86,8 @@ pub enum Overlay<'state> {
 
 /// Smallest terminal width, in columns, the game screen is laid out for.
 ///
-/// The layout of `docs/design.md` targets an 80 × 24 terminal, the classic
-/// default size; below it the screen would be cut off.
+/// The layout targets an 80 × 24 terminal, the classic default size; below
+/// it the screen would be cut off.
 pub const MIN_WIDTH: u16 = 80;
 
 /// Smallest terminal height, in rows, the game screen is laid out for (see
@@ -165,9 +165,8 @@ pub fn render_menu(frame: &mut Frame, screen: MenuScreen<'_>, theme: &Theme) {
 }
 
 /// Builds a line of key help from `bindings`, pairs of a key and what it
-/// does: each key in `text`, its label in `text_muted`, three blank
-/// columns between two pairs, one before the first, as `docs/design.md`
-/// asks on every screen.
+/// does: each key in `text`, its label in `text_muted`, three blank columns
+/// between two pairs, one before the first, the same on every screen.
 pub(crate) fn key_help(bindings: Vec<(String, &str)>, theme: &Theme) -> Line<'static> {
     let mut spans = vec![Span::raw(" ")];
     for (index, (key, label)) in bindings.into_iter().enumerate() {

@@ -88,7 +88,7 @@ library, and the terminal application in a binary that depends on it.
 | `messages` | Every English sentence and label the player reads, including the description of each `Event`. |
 | `message_log` | The message log: lines with a tone, oldest first, with a bounded history. |
 | `persist` | The data folder (`SIGILFALL_DATA_DIR` or the system's), `save.ron` and `options.ron`, written atomically. |
-| `theme` | The colour tokens of `docs/design.md`, the four colour modes and the light theme, colour detection, and the player's options. |
+| `theme` | The colour tokens (see [Visual identity](#visual-identity)), the four colour modes and the light theme, colour detection, and the player's options. |
 | `theme::glyphs` | Every character the screens draw with, in Unicode and in ASCII. |
 | `ui` | Drawing with ratatui from read-only state: picks the screen for the terminal's size (a resize message under 80 × 24). |
 | `ui::camera` | Which part of the 80 × 40 floor the map area shows, centred on the player. |
@@ -117,8 +117,10 @@ library, and the terminal application in a binary that depends on it.
    (a wall, no stairs here, not enough essence) costs nothing. Otherwise
    its cost is taken from the player's energy and the scheduler runs: on
    every tick each actor gains its speed in energy, and an actor with 100
-   or more acts, ties going to the oldest actor. Monsters choose with `ai`
-   until it is the player's turn again; the field of view is recomputed.
+   or more acts, ties going to the oldest actor. The field of view is
+   recomputed from the player's new cell first, so the monsters act on
+   what the player now sees (they see through it, D16); they choose with
+   `ai` until it is the player's turn again.
 5. Everything that happened comes back as `Vec<Event>`, which also feeds
    `Stats`.
 6. The application turns the events into sentences (`messages`), appends
@@ -165,14 +167,17 @@ into RON records headed by a format version, `persist` writes them to
 offers "Continue" on the title screen; `save::from_str` rebuilds the game,
 including the gameplay stream and the order in which freed slot-map keys
 are reused, so the resumed game plays exactly as it would have. An
-unreadable save is renamed `save.ron.bad`. The save is deleted the moment
+unreadable save is renamed `save.ron.bad`, and the player reads why, cause
+first, with whatever it quotes from the file bounded and stripped of
+control characters. A save or options file larger than 4 MiB is never read
+whole, and a leftover `save.ron.tmp` is deleted, never written through, so
+a link in its place cannot redirect a write. The save is deleted the moment
 the player dies. A game whose seal was broken is over too (`Status::Won`):
 `Game::submit` takes no action any more, as after a death.
 
 ## Decisions
 
-The full reasoning is in `docs/03-plan.md`; each line gives the choice, then
-the alternative set aside.
+Each line gives the choice, then the alternative set aside.
 
 | # | Choice | Set aside |
 |---|---|---|
@@ -196,6 +201,62 @@ the alternative set aside.
 | D18 | Recognition by Levenshtein distance on nodes; patterns at least 3 edits apart, so a near miss matches one sigil only. | A 2-edit gap with "first in the file wins". |
 | D19 | One `Action::Cast` per trace: 50 energy plus 25 per node, 2 essence per cast (6 at most, 1 back every 12 ticks), glyphs read by stepping on them; every spell that seeks a creature reaches 8 cells, as when sight was a disc of radius 8: an aimed spell along its line, a spell on the nearest foe within the disc of radius 8 among the foes in sight. | Node-by-node tracing in the core, essence cost per sigil, a dedicated "read" action; spells on the nearest foe reaching as far as sight (16 cells along a row). |
 | D20 | `Action::Descend` on the stairs only; a gameplay stream per floor; weighted spawn tables in `spawns.ron`; more monsters deeper (6 + depth − 1, at most 12). | Spawn weights inside each definition, difficulty by stats only. |
-| D21 | Readable RON saves with a format version (v4 since T33: the seal tile and the won status; v3 added the date of a daily run), state only (definitions by id), the exact gameplay stream and slot-map reuse order. | `slotmap`'s own serde form, or a binary format. |
+| D21 | Readable RON saves with a format version (version 4: the seal tile and the won status; version 3 added the date of a daily run), state only (definitions by id), the exact gameplay stream and slot-map reuse order. | `slotmap`'s own serde form, or a binary format. |
 | D22 | Floor kinds in data (`floors.ron`, weights by band of floors), drawn on a stream of their own (`FloorKind`); caves grown by a cellular automaton (45 % rock, 5 passes, rule 4-5), the largest area kept, regrown below 900 cells; floors 1-2 always rooms, 10 and deeper always caves. | Floor weights added to `spawns.ron`, and the kind drawn on the generation stream, which would have changed every existing floor and the demo. |
 | D23 | The bottom floor (10) has a seal instead of stairs, on the cell farthest from the start; `Action::Descend` on it breaks it and wins the run (`Event::SealBroken`, `Status::Won`), refused elsewhere at no cost like a descent off the stairs. | A descent without end, scored by depth. |
+| D24 | Healing at depth: the healing draughts weigh 6 instead of 3 from floor 5, in `spawns.ron` only (1.8 draughts per floor instead of 1.3). Draughts alone left the careful bot's median at floor 5, so the elites of floors 5 to 7 were weakened in data too (lead homunculus 28/6/4 → 16/5/2 in hit points, attack and defense, hierophant 20/5/2 → 14/4/1), deep elite weights capped at 2, and the beetle and the rat left out of the deepest floors: median floor 7 and 3 victories in 80 runs, a target of floor 6-7 and 2-10 % victories that `balance.rs` holds. A tuning of data, not a new rule. | More items on every floor; passive healing. |
+| D25 | The "IN VIEW" block gives each monster's current and maximum hit points (for a kind seen several times, the most wounded one), so the player chooses a target and the moment to flee on information they can read. | Hit points in the message log only. |
+| D26 | Unlimited rest: waiting regenerates essence at no cost, so Recall heals without limit out of a fight. Monsters never come back and the challenge lies in the fights, where time is short; a common choice of the genre, with no new rule to balance. | Hunger, wandering monsters, or essence regained only by exploring. |
+
+## Visual identity
+
+The look of the game lives in the `theme` module: `theme::Theme` holds one
+style per colour token, built for each rendering mode, and `theme::glyphs`
+every character the screens draw. No screen writes a colour or a glyph of
+its own. The rules below are the ones those values follow.
+
+- **Mood: an alchemist's notebook read by candlelight.** Ink background,
+  bone-coloured text, gold for the player and what matters, verdigris for
+  everything about sigils, vermilion for danger. The map stays calm: the
+  floor fades, walls have a stone texture (`▒`), and the brightest thing on
+  the screen is the trace of a sigil.
+- **Everything reads without colour.** Each piece of information also has a
+  glyph, a word or a prefix: the log prefixes `!` danger, `+` gain, `~`
+  sigil (a space for neutral news), `!` before a value in danger, a `›`
+  before the chosen line of a menu, upper case for an elite creature.
+- **Four rendering modes** (`theme::ColorMode`): 24-bit dark (the default
+  when `COLORTERM` says `truecolor` or `24bit`, or in Windows Terminal),
+  24-bit light, a "parchment" theme chosen in the options, the 16 ANSI
+  colours on black, and monochrome (the light theme on a 16-colour terminal,
+  whose light schemes fail the contrast minimum, or `NO_COLOR`), where
+  hierarchy is carried by bold, reversed and dim, and dim never touches
+  text.
+- **Contrast.** Every token reaches a WCAG 2.x ratio of 4.5 on the surfaces
+  it is drawn on when it carries meaning (text, creatures, items, stairs,
+  unread glyphs, health), and 3 for ambient graphics (floor, borders,
+  remembered walls, read glyphs, free nodes of the grid); tokens drawn on
+  overlays are held to it on `bg_panel` too. The 16-colour mode is measured
+  on Campbell, the default scheme of Windows Terminal. `theme::tests`
+  recomputes every ratio from the values.
+- **Glyphs.** Every Unicode glyph is present in Cascadia Mono, the default
+  font of Windows Terminal, and has an ASCII fallback (`--ascii` or the
+  Glyphs option). Creatures are letters, lower case for the common form and
+  upper case for the elite one: vermin `v`, acolytes `a`, homunculi `h`
+  (flesh, `monster_hostile`), eyes `e` and spectres `s` (spirit,
+  `monster_arcane`). An item is drawn with the glyph of its family: vial
+  `¡`, page `¶`, catalyst `♦`.
+- **Memory.** A cell in view is drawn in full; an explored cell out of view
+  shows only its landmarks (walls, stairs, the seal, carved glyphs), dimmer;
+  a cell never seen stays empty. Creatures and items are drawn only in view,
+  the player over everything.
+- **Layout at 80 × 24.** The status line on the first row; the map, 58 × 16,
+  with the side panel (21 columns and a border) on its right; the log, five
+  lines under a separator into which the panel's border comes down; the key
+  help on the last row, each key in `text` and its label in `text_muted`,
+  three spaces apart. On a larger terminal only the map grows; on a smaller
+  one a message asks for 80 × 24. Log lines are wrapped at 76 columns and
+  the log keeps the last 100 messages.
+- **Health.** A bar of 18 cells with "HP n/max": `hp_high` above half,
+  `hp_mid` from a quarter to half, `hp_low` under a quarter, with `!` before
+  the value. The figures of a monster in "IN VIEW" follow the same colours,
+  without the `!`, which warns of a danger to the player only.

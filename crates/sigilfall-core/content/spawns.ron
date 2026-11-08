@@ -27,22 +27,19 @@
 // (`generation::monsters_per_floor`): together, the rule of difficulty.
 //
 // On floors 7 to 10, which already hold 12 creatures each, the elites weigh
-// 2 at most (they rose to 3 and 4): on the bottom floor, one creature in
-// eight is a hierophant and one in eight a lead homunculus, instead of one
-// in five and a half each. With their weaker statistics
-// (content/monsters.ron, task T36), a careful player then reaches floor 6
-// or 7 as a rule and breaks the seal in a few runs out of a hundred
-// (tests/balance.rs); with the weaker elites alone, at the old weights, none
-// of the 80 measured runs broke it. So that each floor from 7 down still
-// threatens more than the one above (a test of `generation` checks it),
-// the weakest creatures leave the deepest floors instead: no wax beetle
-// below floor 7, no ossuary rat on floor 10.
+// 2 at most: on the bottom floor, one creature in eight is a hierophant and
+// one in eight a lead homunculus. With the statistics of content/monsters.ron,
+// a careful player then reaches floor 6 or 7 as a rule and breaks the seal in
+// a few runs out of a hundred (tests/balance.rs); heavier elites would leave
+// the seal out of reach. So that each floor from 7 down still threatens more
+// than the one above (a test of `generation` checks it), the weakest
+// creatures leave the deepest floors instead: no wax beetle below floor 7, no
+// ossuary rat on floor 10.
 //
-// From floor 5, where the elite creatures arrive and a run used to wear
-// down for want of healing, healing draughts weigh 6 instead of 3: 6 chances
-// in 10 for each item of the floor instead of 3 in 7, about 1.8 draughts a
-// floor instead of 1.3 (decision D24). A floor still holds 3 items, so
-// the other items stay and healing is never at will.
+// From floor 5, where the elite creatures arrive and a run wears down for
+// want of healing, healing draughts weigh 6: 6 chances in 10 for each item
+// of the floor, about 1.8 draughts a floor (decision D24). A floor still
+// holds 3 items, so the other items stay and healing is never at will.
 [
     // --- Monsters --------------------------------------------------------
     Spawn(of: Monster("ossuary_rat"), from_depth: 1, to_depth: 1, weight: 1),

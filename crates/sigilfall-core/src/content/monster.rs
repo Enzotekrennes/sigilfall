@@ -42,7 +42,8 @@ pub const MAX_ATTACK: i32 = 99;
 pub const MAX_DEFENSE: i32 = 99;
 
 /// Family of a creature, which gives the letter drawn on the map: lower case
-/// for the common form, upper case for the elite one (see `docs/design.md`).
+/// for the common form, upper case for the elite one (`theme::glyphs` in
+/// the binary).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
 pub enum Family {
     /// Creatures of flesh that swarm the lower halls (`v`, `V`).

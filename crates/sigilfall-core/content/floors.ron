@@ -18,9 +18,9 @@
 // Two rules of the same kind must not share a floor, and every floor from
 // 1 to 10 needs at least one kind.
 //
-// The first two floors are always rooms: the first floor of a seed stays the
-// one it has always been, and a new player learns the game in rooms before
-// meeting a cave. Caves then grow more common with depth, and the last floor
+// The first two floors are always rooms: a new player learns the game in
+// rooms before meeting a cave, and the first floor of a seed, the one a
+// shared seed shows first, does not change when the deeper rules are tuned. Caves then grow more common with depth, and the last floor
 // written for is always a cave.
 [
     Floor(kind: Rooms, from_depth: 1, to_depth: 2, weight: 1),

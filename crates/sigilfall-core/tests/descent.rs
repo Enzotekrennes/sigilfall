@@ -1,16 +1,14 @@
-//! Acceptance tests of F8 (floors and difficulty), descent half, on the core
-//! crate.
+//! Going down the floors, on the core crate.
 //!
-//! Written against the public API only. They check the first and third
-//! acceptance scenarios at the level of events and game state: the player on
-//! the stairs who descends reaches a new floor of the seed one level deeper,
-//! and the player off the stairs who tries to descend sees nothing happen.
-//! Beyond them they check what the player keeps (hit points, essence, pack,
-//! grimoire, steadied casts), that floor N does not depend on how the floors
-//! above were played, the deepest floors (10, the bottom, whose seal ends
-//! the run since task T33, and the floors generated beyond it) and the
-//! deterministic replay across several floors. The spawn tables and the
-//! difficulty are in `spawns.rs`; the screens are checked by the binary's
+//! Written against the public API only. They check at the level of events and
+//! game state: the player on the stairs who descends reaches a new floor of
+//! the seed one level deeper, and the player off the stairs who tries to
+//! descend sees nothing happen. Beyond them they check what the player keeps
+//! (hit points, essence, pack, grimoire, steadied casts), that floor N does
+//! not depend on how the floors above were played, the deepest floors (10,
+//! the bottom, whose seal ends the run, and the floors generated beyond it)
+//! and the deterministic replay across several floors. The spawn tables and
+//! the difficulty are in `spawns.rs`; the screens are checked by the binary's
 //! tests.
 //!
 //! The player cannot be placed from outside the crate, so the tests walk it
@@ -79,7 +77,8 @@ const WALK_BUDGET: usize = 1500;
 /// (decision D23).
 const TOUR_DEPTH: u32 = 10;
 
-/// Seeds named by the acceptance brief.
+/// The reference seeds of the tests, among them the seed shown to players
+/// as an example.
 fn named_seeds() -> Vec<Seed> {
     vec![
         Seed::from(0),
@@ -273,10 +272,10 @@ fn clock(game: &Game) -> (u64, u64, Vec<i32>) {
     (game.ticks(), game.player_turns(), energies)
 }
 
-// --- Scenario 1: on the stairs, descending gives the next floor of the seed ---
+// --- On the stairs, descending gives the next floor of the seed ---
 
 #[test]
-fn scenario_1_descending_generates_the_next_floor_of_the_seed_one_level_deeper() {
+fn descending_generates_the_next_floor_of_the_seed_one_level_deeper() {
     let content = tiers();
     for seed in named_seeds() {
         let mut game = Game::new(seed, &content);
@@ -302,7 +301,7 @@ fn scenario_1_descending_generates_the_next_floor_of_the_seed_one_level_deeper()
 }
 
 #[test]
-fn scenario_1_each_descent_adds_one_to_the_depth_and_every_floor_is_the_floor_of_its_depth() {
+fn each_descent_adds_one_to_the_depth_and_every_floor_is_the_floor_of_its_depth() {
     let content = tiers();
     for seed in named_seeds() {
         let mut game = Game::new(seed, &content);
@@ -321,7 +320,7 @@ fn scenario_1_each_descent_adds_one_to_the_depth_and_every_floor_is_the_floor_of
 }
 
 #[test]
-fn scenario_1_the_same_seed_gives_the_same_second_floor_and_another_seed_another_one() {
+fn the_same_seed_gives_the_same_second_floor_and_another_seed_another_one() {
     let content = tiers();
     let (first, second) = (Seed::from(42), Seed::from(43));
     let (mut a, mut b, mut other) = (
@@ -346,7 +345,7 @@ fn scenario_1_the_same_seed_gives_the_same_second_floor_and_another_seed_another
 }
 
 #[test]
-fn scenario_1_on_the_shipped_content_the_descent_reaches_the_shipped_second_floor() {
+fn on_the_shipped_content_the_descent_reaches_the_shipped_second_floor() {
     let content = shipped();
     let mut arrived = 0;
     for value in 0..24 {
@@ -377,10 +376,10 @@ fn scenario_1_on_the_shipped_content_the_descent_reaches_the_shipped_second_floo
     );
 }
 
-// --- Scenario 3: off the stairs, nothing happens ------------------------------
+// --- Off the stairs, nothing happens ------------------------------
 
 #[test]
-fn scenario_3_descending_off_the_stairs_changes_nothing_and_names_the_cell() {
+fn descending_off_the_stairs_changes_nothing_and_names_the_cell() {
     let content = tiers();
     for seed in named_seeds() {
         let mut game = Game::new(seed, &content);
@@ -408,7 +407,7 @@ fn scenario_3_descending_off_the_stairs_changes_nothing_and_names_the_cell() {
 }
 
 #[test]
-fn scenario_3_a_cell_next_to_the_stairs_is_not_the_stairs() {
+fn a_cell_next_to_the_stairs_is_not_the_stairs() {
     let content = tiers();
     let mut game = Game::new(Seed::from(42), &content);
     let stairs = stairs_of(&game);
@@ -436,7 +435,7 @@ fn scenario_3_a_cell_next_to_the_stairs_is_not_the_stairs() {
 }
 
 #[test]
-fn scenario_3_the_refusal_also_holds_on_a_deeper_floor_and_on_the_fixed_room() {
+fn the_refusal_also_holds_on_a_deeper_floor_and_on_the_fixed_room() {
     let content = tiers();
     let mut game = Game::new(Seed::from(7), &content);
     descend(&mut game).expect("the stairs are reached");
@@ -459,7 +458,7 @@ fn scenario_3_the_refusal_also_holds_on_a_deeper_floor_and_on_the_fixed_room() {
 }
 
 #[test]
-fn scenario_3_after_a_refusal_the_game_goes_on_normally_and_the_stairs_still_work() {
+fn after_a_refusal_the_game_goes_on_normally_and_the_stairs_still_work() {
     let content = tiers();
     let mut game = Game::new(Seed::from(42), &content);
     game.submit(Action::Descend);
@@ -472,7 +471,7 @@ fn scenario_3_after_a_refusal_the_game_goes_on_normally_and_the_stairs_still_wor
 }
 
 #[test]
-fn scenario_3_descending_costs_exactly_one_action_when_it_succeeds() {
+fn descending_costs_exactly_one_action_when_it_succeeds() {
     let content = tiers();
     let mut game = Game::new(Seed::from(42), &content);
     assert!(reach_stairs(&mut game));

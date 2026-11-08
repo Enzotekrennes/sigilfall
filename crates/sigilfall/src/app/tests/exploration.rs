@@ -490,12 +490,12 @@ fn far_cell(game: &Game, distance: i32) -> Position {
         .expect("a far cell")
 }
 
-// --- Scenario 1: toward the nearest unexplored place ------------------------
+// --- Toward the nearest unexplored place ------------------------
 
 /// One press walks, step after step, until something appears: on a bare
 /// floor with one monster far away, the walk stops when it comes into view.
 #[test]
-fn scenario_1_a_press_walks_until_a_monster_comes_into_view() {
+fn a_press_walks_until_a_monster_comes_into_view() {
     let content = content();
     let rat = content.monsters().first().unwrap();
     for n in 0..6 {
@@ -541,7 +541,7 @@ fn scenario_1_a_press_walks_until_a_monster_comes_into_view() {
 }
 
 #[test]
-fn scenario_1_the_walk_stops_on_an_item_that_comes_into_view_and_goes_on_after() {
+fn the_walk_stops_on_an_item_that_comes_into_view_and_goes_on_after() {
     let content = content();
     let item = content.items().first().unwrap();
     for n in 10..16 {
@@ -583,7 +583,7 @@ fn scenario_1_the_walk_stops_on_an_item_that_comes_into_view_and_goes_on_after()
 }
 
 #[test]
-fn scenario_1_the_walk_stops_on_a_glyph_that_has_not_been_read() {
+fn the_walk_stops_on_a_glyph_that_has_not_been_read() {
     let content = content();
     let sigil = content.sigils().first().unwrap();
     for n in 20..26 {
@@ -617,7 +617,7 @@ fn scenario_1_the_walk_stops_on_a_glyph_that_has_not_been_read() {
 /// The step limit of the README: a walk with nothing to meet stops after
 /// 200 steps exactly, says so, and the next press goes on.
 #[test]
-fn scenario_1_a_walk_stops_by_itself_after_200_steps_and_the_next_press_goes_on() {
+fn a_walk_stops_by_itself_after_200_steps_and_the_next_press_goes_on() {
     let mut app = app_on(cave_game(3));
 
     let (steps, line) = explore_press(&mut app);
@@ -635,7 +635,7 @@ fn scenario_1_a_walk_stops_by_itself_after_200_steps_and_the_next_press_goes_on(
 /// A walk on a populated floor, as a player meets it: every stop has a
 /// reason the log gives and the game confirms.
 #[test]
-fn scenario_1_every_stop_on_a_populated_floor_is_one_the_game_confirms() {
+fn every_stop_on_a_populated_floor_is_one_the_game_confirms() {
     let content = content();
     let mut reasons = std::collections::BTreeMap::new();
     for n in 40..64 {
@@ -691,10 +691,10 @@ fn scenario_1_every_stop_on_a_populated_floor_is_one_the_game_confirms() {
     assert!(reasons.contains_key("monster") || reasons.contains_key("item"));
 }
 
-// --- Scenario 2: nothing left to explore ------------------------------------
+// --- Nothing left to explore ------------------------------------
 
 #[test]
-fn scenario_2_an_explored_floor_says_so_in_the_log_and_no_time_passes() {
+fn an_explored_floor_says_so_in_the_log_and_no_time_passes() {
     let mut app = app_on(rooms_game(31));
     // Explore everything.
     let mut presses = 0;
@@ -730,7 +730,7 @@ fn scenario_2_an_explored_floor_says_so_in_the_log_and_no_time_passes() {
 }
 
 #[test]
-fn scenario_2_the_fixed_room_is_explored_then_the_key_is_refused_without_time() {
+fn the_fixed_room_is_explored_then_the_key_is_refused_without_time() {
     let mut app = app_on(Game::in_fixed_room(Seed::new(2)));
     for _ in 0..5 {
         let (_, line) = explore_press(&mut app);

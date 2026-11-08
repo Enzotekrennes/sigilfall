@@ -29,7 +29,7 @@ Set Height 680
 Set Padding 20
 Set Framerate 30
 Set TypingSpeed 90ms
-# The dark theme of docs/design.md: ink background, bone text.
+# The dark theme of the game (theme.rs): ink background, bone text.
 Set Theme { "name": "Sigilfall", "background": "#0F0D15", "foreground": "#E6DECB", "cursor": "#F5C451", "selection": "#2E2742", "black": "#0F0D15", "red": "#EC6A50", "green": "#76C891", "yellow": "#E3B24F", "blue": "#8DBDE6", "magenta": "#B794F0", "cyan": "#5ED6B8", "white": "#E6DECB", "brightBlack": "#6E6684", "brightRed": "#F07D63", "brightGreen": "#76C891", "brightYellow": "#F5C451", "brightBlue": "#8DBDE6", "brightMagenta": "#B794F0", "brightCyan": "#5ED6B8", "brightWhite": "#F2EADB" }
 
 # A fresh, empty data folder, so no save or options file of an earlier run

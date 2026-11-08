@@ -159,8 +159,8 @@ impl Game {
             || inventory.iter().any(|&id| !items.slots[id].is_carried())
         {
             return Err(inconsistent(format!(
-                "the inventory lists {} items, but {carried} items are carried; it must \
-                 list each carried item once, {INVENTORY_CAPACITY} at most",
+                "the inventory lists {} items, but {carried} items are carried \
+                 ({INVENTORY_CAPACITY} at most, each once)",
                 inventory.len()
             )));
         }
@@ -300,7 +300,7 @@ fn check_cell(map: &Map, position: Position, what: &str) -> Result<(), SaveError
         return Ok(());
     }
     Err(inconsistent(format!(
-        "{what} is at ({}, {}), which is not a walkable cell of the {}x{} map",
+        "{what} is at ({}, {}), not a walkable cell of the {}x{} map",
         position.x,
         position.y,
         map.width(),
@@ -354,39 +354,47 @@ fn check_counters(record: &GameRecord) -> Result<(), SaveError> {
 
 /// Checks that the way down of `map`, the floor `depth` of a game whose
 /// status is `status`, is the one the generator lays there (decision D23):
-/// the bottom floor (`generation::is_bottom_floor`) holds the seal and no
-/// stairs, a floor above holds no seal, and only a game on the bottom floor
-/// can be won, since breaking its seal is the only way to win.
+/// the bottom floor (`generation::is_bottom_floor`) holds exactly one seal
+/// and no stairs, a floor above holds no seal, and only a game on the
+/// bottom floor can be won, since breaking its seal is the only way to win.
 ///
-/// A floor above the bottom may lack stairs: the fixed room of the tests
-/// (`Game::in_fixed_room`) has none.
+/// A floor above the bottom may lack stairs: the hand-made room of the
+/// tests (`Game::in_fixed_room`) has none.
 ///
 /// # Errors
 ///
-/// Returns [`SaveError::Inconsistent`] naming the floor and what its map
-/// lacks or holds wrongly, or the floor a won game stands on.
+/// Returns [`SaveError::Inconsistent`] naming the floor and, in a few
+/// words, what its map lacks or holds wrongly, or the floor a won game
+/// stands on.
 fn check_way_down(map: &Map, depth: u32, status: &Status) -> Result<(), SaveError> {
-    let holds = |tile: Tile| map.positions().any(|cell| map.tile(cell) == Some(tile));
-    let bottom = is_bottom_floor(depth);
-    if bottom && !holds(Tile::Seal) {
+    let count = |tile: Tile| {
+        map.positions()
+            .filter(|&cell| map.tile(cell) == Some(tile))
+            .count()
+    };
+    let (seals, bottom) = (count(Tile::Seal), is_bottom_floor(depth));
+    if bottom && seals != 1 {
+        let seals = match seals {
+            0 => "no seal".to_owned(),
+            more => format!("{more} seals"),
+        };
         return Err(inconsistent(format!(
-            "floor {depth} is the bottom of the dungeon, but its map has no seal"
+            "floor {depth}, the bottom floor, has {seals}"
         )));
     }
-    if bottom && holds(Tile::StairsDown) {
+    if bottom && count(Tile::StairsDown) > 0 {
         return Err(inconsistent(format!(
-            "floor {depth} is the bottom of the dungeon, but its map has stairs down"
+            "floor {depth}, the bottom floor, has stairs down"
         )));
     }
-    if !bottom && holds(Tile::Seal) {
+    if !bottom && seals > 0 {
         return Err(inconsistent(format!(
-            "floor {depth} is above the bottom of the dungeon, but its map holds a seal"
+            "floor {depth} has a seal; only floor {MAX_DEPTH} has one"
         )));
     }
     if !bottom && *status == Status::Won {
         return Err(inconsistent(format!(
-            "the game is won on floor {depth}, but only breaking the seal of floor \
-             {MAX_DEPTH} wins"
+            "the game is won on floor {depth}; only floor {MAX_DEPTH} can be won"
         )));
     }
     Ok(())
@@ -578,8 +586,8 @@ fn check_player(
     let players = actors.values().filter(|actor| actor.is_player()).count();
     if !actors[player].is_player() || players != 1 {
         return Err(inconsistent(format!(
-            "the game must have exactly one player, the actor its player key names; \
-             it has {players}"
+            "the save has {players} players, not exactly one player named by its \
+             player key"
         )));
     }
     let alive = actors[player].is_alive();

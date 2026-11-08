@@ -1,5 +1,7 @@
 # Sigilfall
 
+[![CI](https://github.com/Enzotekrennes/sigilfall/actions/workflows/ci.yml/badge.svg)](https://github.com/Enzotekrennes/sigilfall/actions/workflows/ci.yml)
+
 A terminal roguelike where spells are cast by tracing sigils on a 3 × 3 grid
 with the number keys: the pattern decides the spell, new patterns are learnt
 from glyphs carved in the dungeon floor, and a sloppy trace fizzles or
@@ -16,7 +18,7 @@ more often, and the tenth floor is always one. There are no stairs on the
 tenth floor but a seal, `◎` on the map (`0` in ASCII): break it to win the
 run. Each run is generated from a seed you can share, so a friend can play
 the same dungeon, and every day brings a daily dungeon, the same for every
-player on that UTC date.
+player of the same version of the game on that UTC date.
 
 ## Install
 
@@ -24,27 +26,25 @@ Sigilfall runs in a terminal of at least 80 × 24 cells, on Windows, Linux
 and macOS. Windows Terminal, or any terminal with a font that has box
 drawing characters, shows it best; `--ascii` covers the others.
 
-**Prebuilt binaries.** Each [release](https://github.com/OWNER/sigilfall/releases)
+**Prebuilt binaries.** Each [release](https://github.com/Enzotekrennes/sigilfall/releases)
 has archives for Windows (x86_64), Linux (x86_64, glibc) and macOS (Intel and
 Apple Silicon), and two installers that download the right one:
 
 ```sh
 # Linux and macOS
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/OWNER/sigilfall/releases/latest/download/sigilfall-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Enzotekrennes/sigilfall/releases/latest/download/sigilfall-installer.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-powershell -ExecutionPolicy Bypass -c "irm https://github.com/OWNER/sigilfall/releases/latest/download/sigilfall-installer.ps1 | iex"
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/Enzotekrennes/sigilfall/releases/latest/download/sigilfall-installer.ps1 | iex"
 ```
 
 **From source**, with Rust 1.88 or later:
 
 ```sh
-cargo install --locked --git https://github.com/OWNER/sigilfall sigilfall
+cargo install --locked --git https://github.com/Enzotekrennes/sigilfall sigilfall
 ```
-
-After the crates.io release, `cargo install sigilfall` will work too.
 
 ## Play
 
@@ -63,7 +63,7 @@ saved and resumed, even on a later day.
 | Option | Effect |
 |---|---|
 | `--seed <SEED>` | Start a game of this seed at once, without the title screen. The seed is a number such as `42`, or the form the game shows, such as `7F3A-91C2-0B5E-D4A8`. Refused while a game is saved, so that game is never lost: continue it, or abandon it from the title screen, first. |
-| `--daily` | Start the daily dungeon at once, without the title screen: the same dungeon for every player on the same UTC date, a new one each day at midnight UTC. Cannot be combined with `--seed`. Refused while a game is saved, as `--seed` is. |
+| `--daily` | Start the daily dungeon at once, without the title screen: the same dungeon for every player of the same version of the game on the same UTC date, a new one each day at midnight UTC. Cannot be combined with `--seed`. Refused while a game is saved, as `--seed` is. |
 | `--ascii` | Draw with plain ASCII characters instead of Unicode glyphs, for this session only, whatever the Glyphs option says. |
 | `--help`, `--version` | Print the help or the version. |
 
@@ -171,6 +171,35 @@ Both are readable RON text.
 | `NO_COLOR` | When set to a non-empty value and **Colours** is Auto, draw without colour ([no-color.org](https://no-color.org)). Choosing 16 colours in the options wins over it. |
 | `COLORTERM` | `truecolor` or `24bit` turns on 24-bit colour; otherwise the 16 ANSI colours are used, except in Windows Terminal (detected by `WT_SESSION`), which gets 24-bit colour. |
 
+## Under the hood
+
+- **Energy-based turns.** Every actor gains its speed in energy on each
+  tick and acts once it holds 100; each action has its own cost. A monster
+  twice as fast as you acts twice per step you take, and each node of a
+  sigil costs time, so a long trace leaves the monsters room to act.
+- **One random stream per purpose.** A run is a 64-bit seed; each floor
+  draws its kind, layout and fights from separate ChaCha8 streams derived
+  from (seed, depth, purpose). A floor depends on nothing played above it,
+  and the same seed gives the same dungeon on every system.
+- **Exact field of view.** Sight is symmetric shadowcasting with every
+  slope kept as a fraction of two integers: no rounding, so if you see a
+  monster, it sees you.
+- **Rules apart from the screen.** The game logic is a library with no
+  terminal dependency, which the compiler enforces; it returns events, and
+  the terminal application turns them into sentences and draws.
+- **Tested beyond examples.** Property tests generate thousands of seeds to
+  check that every floor is connected and that sight is symmetric; rules
+  were broken on purpose to check that the tests catch it; two bots, a
+  reckless one and a careful one, play 80 runs each to hold the difficulty
+  within its target.
+- **Saves that replay exactly.** A save keeps the random streams and the
+  order in which freed entity keys are reused, so a resumed run plays out
+  exactly as it would have without quitting, and every value read back is
+  checked before it is trusted.
+
+[ARCHITECTURE.md](ARCHITECTURE.md) gives the modules, the flows and the
+design decisions in detail.
+
 ## Build and test
 
 ```sh
@@ -198,10 +227,8 @@ installers and publishes them as a GitHub release.
 ## Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): the two crates, their modules, how a
-  key press becomes a turn, and the design decisions with the alternatives
-  set aside.
-- [Documentation site](https://OWNER.github.io/sigilfall/), in English and
-  French.
+  key press becomes a turn, the visual identity, and the design decisions
+  with the alternatives set aside.
 
 ## License
 

@@ -1,5 +1,4 @@
-//! The run's statistics counted by the game for the death summary (task T25
-//! of the plan, feature F9).
+//! The run's statistics counted by the game for the death summary.
 //!
 //! A scripted game in the fixed room checks each count of `Game::stats`
 //! against what was done: creatures killed by kind, casts by quality, a

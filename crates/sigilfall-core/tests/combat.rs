@@ -1,11 +1,11 @@
-//! Acceptance tests of F5 (combat, life and deaths) on the core crate.
+//! Combat, life and deaths, on the core crate.
 //!
-//! Written against the public API only. They check the three acceptance
-//! scenarios at the level of events and game state (the screens are checked
-//! by the binary's tests): a move into a monster strikes it and the hit
-//! points follow the events exactly; a monster at 0 hit points leaves the
-//! world; the death of the player ends the game and nothing happens after
-//! it; the same seed and the same inputs replay the same blows.
+//! Written against the public API only. They check the rules at the level of
+//! events and game state (the screens are checked by the binary's tests): a
+//! move into a monster strikes it and the hit points follow the events
+//! exactly; a monster at 0 hit points leaves the world; the death of the
+//! player ends the game and nothing happens after it; the same seed and the
+//! same inputs replay the same blows.
 //!
 //! The expected damage is recomputed here from the rule of decision D17
 //! (`max(1, attack - defense + roll)`, roll from -1 to 1) rather than taken
@@ -42,7 +42,8 @@ const TEST_MONSTERS: &str = r#"[
         speed: 400, hp: 999, attack: 29, defense: 0, min_depth: 1),
 ]"#;
 
-/// Seeds named by the acceptance brief.
+/// The reference seeds of the tests, among them the seed shown to players
+/// as an example.
 fn named_seeds() -> Vec<Seed> {
     vec![
         Seed::from(0),
@@ -115,7 +116,7 @@ fn damages(events: &[Event]) -> Vec<i32> {
     blows(events).into_iter().map(|blow| blow.2).collect()
 }
 
-// --- Scenario 1: bump to attack, damage and hit points ----------------------
+// --- Bump to attack, damage and hit points ----------------------
 
 #[test]
 fn moving_into_an_adjacent_monster_strikes_it_and_nobody_moves() {
@@ -250,7 +251,7 @@ fn two_monsters_never_fight_each_other() {
     assert_eq!(hp_of(&game, b), 999);
 }
 
-// --- Scenario 2: a dead monster disappears ----------------------------------
+// --- A dead monster disappears ----------------------------------
 
 #[test]
 fn a_monster_at_zero_hit_points_dies_and_leaves_the_world() {
@@ -370,7 +371,7 @@ fn a_monster_is_removed_exactly_when_a_blow_leaves_it_at_zero() {
     }
 }
 
-// --- Scenario 3: the player's death ends the game ---------------------------
+// --- The player's death ends the game ---------------------------
 
 #[test]
 fn the_death_of_the_player_ends_the_game_and_names_the_killer() {
@@ -682,7 +683,7 @@ fn every_shipped_monster_fought_to_the_end_keeps_hit_points_coherent() {
     }
 }
 
-// --- A walking tester on generated floors ----------------------------------
+// --- A walker on generated floors ----------------------------------------
 
 /// Steps from `from` to every reachable cell, ignoring every actor.
 fn distances(map: &Map, from: Position) -> HashMap<Position, u32> {
@@ -739,7 +740,7 @@ fn first_step(
     None
 }
 
-/// The tester's next action: a step towards the nearest monster (it may
+/// The walker's next action: a step towards the nearest monster (it may
 /// look at every actor), or waiting when there is none to reach.
 fn next_action(game: &Game) -> Action {
     let player = game.player_actor().position();
@@ -757,7 +758,7 @@ fn next_action(game: &Game) -> Action {
         .map_or(Action::Wait, Action::Move)
 }
 
-/// Plays up to `turns` turns of the first floor of `seed` with the tester
+/// Plays up to `turns` turns of the first floor of `seed` with the walker
 /// above, checking every turn, and returns every event of the run.
 fn play(seed: Seed, turns: usize, check: bool) -> (Vec<Event>, Game) {
     let content = shipped();

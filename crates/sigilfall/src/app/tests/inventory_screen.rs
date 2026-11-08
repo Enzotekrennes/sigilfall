@@ -6,7 +6,7 @@
 //! empty state, the items on the map and in the side panel, and the styles of
 //! the inventory in the four rendering modes.
 //!
-//! Then the scenarios as a player meets them: an item picked up appears in the
+//! Then the rules as a player meets them: an item picked up appears in the
 //! inventory, a healing draught drunk restores hit points without passing the
 //! maximum, and a full pack leaves the item on the floor and says why; beyond
 //! them, dropping, the refusals that cost no time, the essence phial, the ink
@@ -44,7 +44,7 @@ const NIBBLER: &str = r#"[
         speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
 ]"#;
 
-/// The four rendering modes of `docs/design.md`.
+/// The four rendering modes ([`ColorMode`]).
 const MODES: [ColorMode; 4] = [
     ColorMode::TrueColorDark,
     ColorMode::TrueColorLight,
@@ -780,7 +780,7 @@ const PICK_UP: i32 = 100;
 const USE: i32 = 100;
 const DROP: i32 = 50;
 
-/// The seeds named by the brief.
+/// The reference seeds of the tests.
 fn seeds() -> [Seed; 3] {
     [
         Seed::new(0),
@@ -1005,10 +1005,10 @@ fn knowing_game(seed: Seed, id: &str) -> Game {
     game
 }
 
-// --- Scenario 1: an item on the floor, picked up, is in the inventory -------
+// --- An item on the floor, picked up, is in the inventory -------
 
 #[test]
-fn scenario_1_a_picked_up_item_appears_in_the_inventory_and_the_log_says_so() {
+fn a_picked_up_item_appears_in_the_inventory_and_the_log_says_so() {
     for seed in seeds() {
         for def in content_with_items().items() {
             for pick in ['g', ','].map(|k| k.to_string()).iter().map(String::as_str) {
@@ -1039,7 +1039,7 @@ fn scenario_1_a_picked_up_item_appears_in_the_inventory_and_the_log_says_so() {
 }
 
 #[test]
-fn scenario_1_the_item_is_drawn_on_the_map_until_picked_up() {
+fn the_item_is_drawn_on_the_map_until_picked_up() {
     let mut game = room(Seed::new(42));
     lay(
         &mut game,
@@ -1079,7 +1079,7 @@ fn scenario_1_the_item_is_drawn_on_the_map_until_picked_up() {
 }
 
 #[test]
-fn scenario_1_the_inventory_lists_items_in_the_order_picked_up_with_their_effect() {
+fn the_inventory_lists_items_in_the_order_picked_up_with_their_effect() {
     let mut app = app_carrying(
         Seed::new(42),
         &[
@@ -1112,10 +1112,10 @@ fn scenario_1_the_inventory_lists_items_in_the_order_picked_up_with_their_effect
     assert!(rows_text(&app).contains("4/10"));
 }
 
-// --- Scenario 2: a healing draught restores HP, never above the maximum -----
+// --- A healing draught restores HP, never above the maximum -----
 
 #[test]
-fn scenario_2_a_draught_restores_hit_points_and_the_panel_shows_them() {
+fn a_draught_restores_hit_points_and_the_panel_shows_them() {
     for seed in seeds() {
         let mut game = wounded_game(seed, 11, "biter");
         let before_hp = game.player_actor().hp();
@@ -1147,7 +1147,7 @@ fn scenario_2_a_draught_restores_hit_points_and_the_panel_shows_them() {
 }
 
 #[test]
-fn scenario_2_a_small_wound_is_healed_to_the_maximum_and_no_further() {
+fn a_small_wound_is_healed_to_the_maximum_and_no_further() {
     for seed in seeds() {
         for use_key in ['u', '\n'] {
             let mut game = wounded_game(seed, 1, "pest");
@@ -1176,7 +1176,7 @@ fn scenario_2_a_small_wound_is_healed_to_the_maximum_and_no_further() {
 }
 
 #[test]
-fn scenario_2_a_draught_drunk_unhurt_says_so_and_stays_at_the_maximum() {
+fn a_draught_drunk_unhurt_says_so_and_stays_at_the_maximum() {
     let mut game = room(Seed::new(42));
     lay(&mut game, PLAYER_START, "healing_draught");
     let mut app = dark_app_on(game);
@@ -1196,7 +1196,7 @@ fn scenario_2_a_draught_drunk_unhurt_says_so_and_stays_at_the_maximum() {
 }
 
 #[test]
-fn scenario_2_two_enters_in_a_row_drink_one_draught_only() {
+fn two_enters_in_a_row_drink_one_draught_only() {
     let mut game = wounded_game(Seed::new(42), 1, "pest");
     lay(&mut game, PLAYER_START, "healing_draught");
     lay(
@@ -1219,10 +1219,10 @@ fn scenario_2_two_enters_in_a_row_drink_one_draught_only() {
     assert_eq!(app.state(), State::Playing);
 }
 
-// --- Scenario 3: a full pack leaves the item on the floor -------------------
+// --- A full pack leaves the item on the floor -------------------
 
 #[test]
-fn scenario_3_a_full_pack_leaves_the_item_on_the_floor_and_the_log_says_why() {
+fn a_full_pack_leaves_the_item_on_the_floor_and_the_log_says_why() {
     for seed in seeds() {
         let mut app = carrying_with(seed, &["healing_draught"; CAPACITY], Some("essence_phial"));
         assert_eq!(carried(&app).len(), CAPACITY);
@@ -1253,7 +1253,7 @@ fn scenario_3_a_full_pack_leaves_the_item_on_the_floor_and_the_log_says_why() {
 }
 
 #[test]
-fn scenario_3_a_full_pack_is_readable_in_80_by_24() {
+fn a_full_pack_is_readable_in_80_by_24() {
     let mut app = app_carrying(Seed::new(42), &["healing_draught"; CAPACITY]);
     keys(&mut app, "i");
 
@@ -1286,7 +1286,7 @@ fn scenario_3_a_full_pack_is_readable_in_80_by_24() {
 }
 
 #[test]
-fn scenario_3_a_refusal_with_a_full_pack_fits_under_ten_lines() {
+fn a_refusal_with_a_full_pack_fits_under_ten_lines() {
     // A full pack, standing on an item: dropping is refused, which writes the
     // refusal under the ten lines of the list.
     let mut app = carrying_with(

@@ -3,18 +3,17 @@
 //! screen, the seed entry and the confirmation before a saved game is
 //! abandoned.
 //!
-//! Exposes the states of those three steps, each [`Copy`] so the
-//! application can hold them in its `State`: [`TitleMenu`] (which entry of
-//! the menu is chosen, out of [`TitleItem`]s), [`SeedEntry`] (the seed
-//! being typed and why it was refused, a [`SeedProblem`]) and
-//! [`Confirmation`] (the [`NewRun`] waiting for the player's answer); the
-//! [`TitleStep`] to draw; and [`render`]. The screen follows the "Écran
-//! titre" mock-up of `docs/design.md`: a traced sigil as emblem, the name
-//! in `text_title`, the tagline, then the menu, whose chosen line starts
-//! with the `›` marker and sits on `bg_selection` (reversed in 16 colours
-//! and in monochrome), so the choice reads without colour. "Continue" is
-//! listed only while a saved game can be resumed, with its depth and turn;
-//! "Daily" is always listed, with today's UTC date.
+//! Exposes the states of those three steps, each [`Copy`] so the application
+//! can hold them in its `State`: [`TitleMenu`] (which entry of the menu is
+//! chosen, out of [`TitleItem`]s), [`SeedEntry`] (the seed being typed and
+//! why it was refused, a [`SeedProblem`]) and [`Confirmation`] (the
+//! [`NewRun`] waiting for the player's answer); the [`TitleStep`] to draw;
+//! and [`render`]. The screen shows a traced sigil as emblem, the name in
+//! `text_title`, the tagline, then the menu, whose chosen line starts with
+//! the `›` marker and sits on `bg_selection` (reversed in 16 colours and in
+//! monochrome), so the choice reads without colour. "Continue" is listed only
+//! while a saved game can be resumed, with its depth and turn; "Daily" is
+//! always listed, with today's UTC date.
 //!
 //! Nothing here starts a game or touches a file: the application acts on
 //! the entry chosen. Every word comes from `messages`.
@@ -63,10 +62,9 @@ impl TitleItem {
 
 /// The menu while a saved game can be resumed.
 ///
-/// "Daily" comes after "Seed" rather than before it as in the mock-up of
-/// `docs/design.md`: the three ways to start a game stay together, and
-/// "Seed" keeps the place that the demo of the README (`demo.tape`) reaches
-/// with one Down.
+/// "Daily" comes after "Seed": the three ways to start a game stay together,
+/// and "Seed" keeps the place that the demo of the README (`demo.tape`)
+/// reaches with one Down.
 const ITEMS_WITH_SAVE: [TitleItem; 6] = [
     TitleItem::Continue,
     TitleItem::NewGame,
@@ -353,9 +351,9 @@ const EMBLEM: [&str; 7] = [
 /// longest label, "Continue" or "New game", and four blank columns.
 const LABEL_WIDTH: usize = 12;
 
-/// Narrowest a menu is drawn, so its left edge stays in one column (22 on
-/// 80 columns, as in the mock-up) whether "Continue" and its detail are
-/// listed or not, and on the confirmation's answers.
+/// Narrowest a menu is drawn, so its left edge stays in one column (22 on 80
+/// columns) whether "Continue" and its detail are listed or not, and on the
+/// confirmation's answers.
 const MENU_MIN_WIDTH: usize = 36;
 
 /// Rows of the emblem, the name, the tagline and the blank rows around
@@ -811,32 +809,37 @@ mod tests {
     #[test]
     fn every_notice_about_the_save_fits_the_notice_rows_with_its_file_name() {
         use crate::theme::{ColorMode, GlyphSet};
-        use crate::ui::log::tests::{paths, reasons};
+        use crate::ui::log::tests::{paths, reasons, refusals};
 
         assert_eq!(NOTICE_WIDTH, crate::ui::log::TEXT_WIDTH);
         let theme = Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode);
-        for reason in reasons() {
-            for path in paths() {
-                for notice in [
-                    messages::save_set_aside_notice(&reason, &path),
+        let set_aside = refusals().into_iter().flat_map(|reason| {
+            paths()
+                .into_iter()
+                .map(move |path| messages::save_set_aside_notice(&reason, &path))
+        });
+        let not_deleted = reasons().into_iter().flat_map(|reason| {
+            paths().into_iter().flat_map(move |path| {
+                [
                     messages::save_not_deleted_notice(&path, &reason),
                     messages::finished_save_not_deleted_notice(&path, &reason),
-                ] {
-                    let wrapped = wrap(&notice, NOTICE_WIDTH);
-                    assert!(wrapped.len() <= NOTICE_ROWS, "{wrapped:#?}");
-                    let rows = notice_rows(std::slice::from_ref(&notice), &theme);
-                    let shown: String = rows
-                        .iter()
-                        .map(|row| row.line.to_string())
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    assert!(shown.contains("save.ron.bad"), "{shown}");
-                    assert!(
-                        shown.trim_end().ends_with('.'),
-                        "the notice is whole: {shown}"
-                    );
-                }
-            }
+                ]
+            })
+        });
+        for notice in set_aside.chain(not_deleted) {
+            let wrapped = wrap(&notice, NOTICE_WIDTH);
+            assert!(wrapped.len() <= NOTICE_ROWS, "{wrapped:#?}");
+            let rows = notice_rows(std::slice::from_ref(&notice), &theme);
+            let shown: String = rows
+                .iter()
+                .map(|row| row.line.to_string())
+                .collect::<Vec<_>>()
+                .join(" ");
+            assert!(shown.contains("save.ron.bad"), "{shown}");
+            assert!(
+                shown.trim_end().ends_with('.'),
+                "the notice is whole: {shown}"
+            );
         }
     }
 }

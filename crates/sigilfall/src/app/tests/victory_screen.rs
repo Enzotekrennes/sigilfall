@@ -61,7 +61,7 @@ const BOTTOM: u32 = 10;
 /// 40 cells, so a few hundred steps are always enough.
 const MAX_KEYS_PER_FLOOR: usize = 1500;
 
-/// The four rendering modes of `docs/design.md`.
+/// The four rendering modes ([`ColorMode`]).
 const MODES: [ColorMode; 4] = [
     ColorMode::TrueColorDark,
     ColorMode::TrueColorLight,
@@ -499,10 +499,10 @@ const HARMLESS_DUST: &str = r#"[
         speed: 1, hp: 1, attack: 0, defense: 0, min_depth: 1),
 ]"#;
 
-/// The four colour modes, with the colours the seal must be drawn in when
-/// it is in view and when it is only remembered, from `docs/design.md`
-/// (dark and light truecolor are hexadecimal, the others are named, and the
-/// monochrome mode has none).
+/// The four colour modes, with the colours the seal must be drawn in when it
+/// is in view and when it is only remembered, written out here rather than
+/// read from `theme` (dark and light truecolor are hexadecimal, the others
+/// are named, and the monochrome mode has none).
 const LOOKS: [(ColorMode, Option<Color>, Option<Color>); 4] = [
     (
         ColorMode::TrueColorDark,
@@ -761,11 +761,11 @@ fn map_text(screen: &[String]) -> String {
         .join("\n")
 }
 
-// --- Scenarios 1 to 3 by keys, from a save made on the tenth floor ----------------------------
+// --- The seal by keys, from a save made on the tenth floor ---
 
 #[test]
 fn a_run_saved_on_the_tenth_floor_is_resumed_walked_to_the_seal_and_won() {
-    let folder = ScratchFolder::new("f14-keys");
+    let folder = ScratchFolder::new("keys");
     let clock = ManualClock::new();
     let before = saved_on_the_bottom_floor(&folder, 42);
     let seal = way_down_cell(&before);
@@ -924,7 +924,7 @@ fn a_run_saved_on_the_tenth_floor_is_resumed_walked_to_the_seal_and_won() {
 
 #[test]
 fn ctrl_c_works_at_once_on_the_victory_screen_and_leaves_nothing_saved() {
-    let folder = ScratchFolder::new("f14-ctrl-c");
+    let folder = ScratchFolder::new("ctrl-c");
     let clock = ManualClock::new();
     saved_on_the_bottom_floor(&folder, 7);
     let mut app = resume(&folder, &clock);
@@ -940,7 +940,7 @@ fn ctrl_c_works_at_once_on_the_victory_screen_and_leaves_nothing_saved() {
 
 #[test]
 fn a_daily_run_won_at_the_bottom_shares_a_line_that_says_victory_and_names_the_day() {
-    let folder = ScratchFolder::new("f14-daily");
+    let folder = ScratchFolder::new("daily");
     let clock = ManualClock::new();
     let date = DailyDate::new(2026, 11, 8).expect("a real date");
     let mut game = Game::daily(date, &harmless_dust());
@@ -978,7 +978,7 @@ fn a_daily_run_won_at_the_bottom_shares_a_line_that_says_victory_and_names_the_d
     );
 }
 
-// --- The summary against the statistics of a run that did something -------------------------------
+// --- The summary against the statistics of a run that did something ---
 
 /// The trace of the shipped sigil `ember`, pressed 7, 5, 3.
 fn ember_trace() -> Trace {
@@ -1098,7 +1098,7 @@ fn the_victory_screen_summary_equals_the_statistics_of_the_game() {
     }
 }
 
-// --- How the seal looks -------------------------------------------------------------------------------------
+// --- How the seal looks ---
 
 /// A game on the bottom floor with its player `short` steps from the seal,
 /// the application drawing it with `mode` and `glyphs`.
@@ -1254,7 +1254,7 @@ fn the_victory_screen_fits_80_by_24_and_centres_on_a_large_terminal() {
     }
 }
 
-// --- Floors above the bottom -------------------------------------------------------------------------------------
+// --- Floors above the bottom ---
 
 #[test]
 fn on_floors_one_to_nine_the_stairs_are_named_and_the_key_says_descend() {
@@ -1300,11 +1300,11 @@ fn off_the_stairs_above_the_bottom_floor_the_key_is_refused_in_the_old_words() {
     assert_eq!(last_log_line(&app), NO_STAIRS);
 }
 
-// --- Saves ---------------------------------------------------------------------------------------------------------
+// --- Saves ---
 
 #[test]
 fn a_save_of_the_previous_format_is_set_aside_with_a_clear_message_and_a_new_game_starts() {
-    let folder = ScratchFolder::new("f14-v3");
+    let folder = ScratchFolder::new("v3");
     let clock = ManualClock::new();
     let game = Game::new(Seed::new(42), &harmless_dust());
     let current = save::to_string(&game).expect("written");
@@ -1337,7 +1337,7 @@ fn a_save_of_the_previous_format_is_set_aside_with_a_clear_message_and_a_new_gam
 
 #[test]
 fn a_game_saved_by_the_game_on_the_tenth_floor_after_a_descent_reads_back_with_its_seal() {
-    let folder = ScratchFolder::new("f14-descent-save");
+    let folder = ScratchFolder::new("descent-save");
     let clock = ManualClock::new();
     let content = harmless_dust();
     let mut game = Game::new(Seed::new(42), &content);

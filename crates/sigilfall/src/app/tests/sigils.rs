@@ -5,7 +5,7 @@
 //! without a direction, verdicts, essence, glyphs on the map, and the styles of
 //! all of it in the four rendering modes.
 //!
-//! Then the scenarios as a player meets them: reading a glyph, an exact trace,
+//! Then the rules as a player meets them: reading a glyph, an exact trace,
 //! a trace one node off, an unknown trace and a cancelled one. Beyond them,
 //! the time shown while tracing is the time the game charges, the grimoire
 //! shown is the game's, a long cast gives the monsters more turns, nothing is
@@ -45,7 +45,7 @@ const GNAT: &str = r#"[
 /// cells east and two up from the start: in view, not adjacent.
 const GNAT_CELL: Position = Position::new(9, 3);
 
-/// The four rendering modes of `docs/design.md`.
+/// The four rendering modes ([`ColorMode`]).
 const MODES: [ColorMode; 4] = [
     ColorMode::TrueColorDark,
     ColorMode::TrueColorLight,
@@ -817,7 +817,7 @@ const STROKE: i32 = 25;
 const CAST: i32 = 50;
 const ESSENCE_PER_CAST: i32 = 2;
 
-/// The seeds named by the brief.
+/// The reference seeds of the tests.
 fn seeds() -> [Seed; 3] {
     [
         Seed::new(0),
@@ -998,7 +998,7 @@ fn energy_of(turns: &str) -> i32 {
     whole.parse::<i32>().unwrap() * 100 + hundredths.parse::<i32>().unwrap()
 }
 
-// --- Scenario 1: reading a glyph --------------------------------------------
+// --- Reading a glyph --------------------------------------------
 
 #[test]
 fn reading_a_glyph_announces_it_and_adds_the_sigil_to_the_grimoire() {
@@ -1085,7 +1085,7 @@ fn reading_works_in_ascii_and_in_every_colour_mode() {
     }
 }
 
-// --- Scenario 2: an exact trace succeeds and every stroke costs time -------
+// --- An exact trace succeeds and every stroke costs time -------
 
 #[test]
 fn an_exact_trace_casts_the_sigil_logs_it_and_charges_every_stroke() {
@@ -1217,7 +1217,7 @@ fn a_long_cast_leaves_the_monsters_more_blows_than_a_short_one() {
     assert!(long > short, "5 strokes: {long} blows, 3 strokes: {short}");
 }
 
-// --- Scenario 3: one node off is unstable -----------------------------------
+// --- One node off is unstable -----------------------------------
 
 /// The three backlash lines of the log, with what each does to the game.
 const BACKLASH_LINES: [&str; 3] = [
@@ -1309,7 +1309,7 @@ fn every_one_off_trace_of_every_sigil_is_unstable_never_failed() {
     }
 }
 
-// --- Scenario 4: an unknown trace fizzles -----------------------------------
+// --- An unknown trace fizzles -----------------------------------
 
 #[test]
 fn an_unknown_trace_fizzles_costs_the_essence_and_the_log_says_so() {
@@ -1398,7 +1398,7 @@ fn a_valid_sigil_not_learnt_yet_fizzles_instead_of_casting() {
     }
 }
 
-// --- Scenario 5: cancelling costs nothing -----------------------------------
+// --- Cancelling costs nothing -----------------------------------
 
 #[test]
 fn cancelling_a_trace_in_progress_passes_no_time_at_all() {
@@ -1934,9 +1934,9 @@ fn every_overlay_state_stays_readable_at_80_by_24() {
 
 #[test]
 fn the_panel_names_the_five_shipped_sigils_at_80_by_24() {
-    // B3: with a short "in view" list (the player, a monster and the
-    // glyphs), every shipped sigil is named in the side panel, in grimoire
-    // order, and none is replaced by "and N more".
+    // With a short "in view" list (the player, a monster and the glyphs),
+    // every shipped sigil is named in the side panel, in grimoire order, and
+    // none is replaced by "and N more".
     for seed in seeds() {
         let app = app_of_seed_knowing(seed, &ALL, Some("sloth"));
         let panel: Vec<String> = rows(&app)
@@ -1975,7 +1975,7 @@ fn the_panel_names_the_five_shipped_sigils_at_80_by_24() {
     }
 }
 
-// --- Escape never quits (B4) -------------------------------------------------
+// --- Escape never quits -------------------------------------------------------
 
 #[test]
 fn escape_on_the_game_screen_does_nothing_and_passes_no_time() {
