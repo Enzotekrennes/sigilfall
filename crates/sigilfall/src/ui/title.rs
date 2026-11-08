@@ -764,4 +764,36 @@ mod tests {
         assert_eq!(typed.asked_from(), TitleItem::Seed);
         assert_eq!(typed.switch().seed(), Some(Seed::new(42)));
     }
+
+    #[test]
+    fn every_notice_about_the_save_fits_the_notice_rows_with_its_file_name() {
+        use crate::theme::{ColorMode, GlyphSet};
+        use crate::ui::log::tests::{paths, reasons};
+
+        assert_eq!(NOTICE_WIDTH, crate::ui::log::TEXT_WIDTH);
+        let theme = Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode);
+        for reason in reasons() {
+            for path in paths() {
+                for notice in [
+                    messages::save_set_aside_notice(&reason, &path),
+                    messages::save_not_deleted_notice(&path, &reason),
+                    messages::dead_save_not_deleted_notice(&path, &reason),
+                ] {
+                    let wrapped = wrap(&notice, NOTICE_WIDTH);
+                    assert!(wrapped.len() <= NOTICE_ROWS, "{wrapped:#?}");
+                    let rows = notice_rows(std::slice::from_ref(&notice), &theme);
+                    let shown: String = rows
+                        .iter()
+                        .map(|row| row.line.to_string())
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    assert!(shown.contains("save.ron.bad"), "{shown}");
+                    assert!(
+                        shown.trim_end().ends_with('.'),
+                        "the notice is whole: {shown}"
+                    );
+                }
+            }
+        }
+    }
 }

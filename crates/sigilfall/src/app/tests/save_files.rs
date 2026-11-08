@@ -239,9 +239,11 @@ fn the_save_is_deleted_when_the_player_dies_before_the_end_screen() {
 #[test]
 fn quitting_from_the_end_screen_brings_no_save_back() {
     let folder = ScratchFolder::new("death-quit");
-    let mut app = doomed_app(folder.save_file());
+    let clock = ManualClock::new();
+    let mut app = doomed_app(folder.save_file()).with_clock(clock.clone());
     app.save_on_exit().unwrap();
     wait_for_death(&mut app);
+    clock.advance(END_SCREEN_GRACE);
 
     app.handle_key(press(KeyCode::Char('q')));
     assert_eq!(app.state(), State::Quit);

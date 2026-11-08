@@ -13,6 +13,7 @@
 mod app;
 mod casting;
 mod cli;
+mod clock;
 #[cfg(test)]
 mod f6_acceptance;
 #[cfg(test)]

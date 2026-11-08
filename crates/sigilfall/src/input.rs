@@ -114,10 +114,13 @@ pub enum VerdictCommand {
 /// What the player asked for with one key press on the end screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EndCommand {
-    /// Go back to the title screen.
+    /// Go back to the title screen (Enter).
     Title,
-    /// Leave the game.
+    /// Leave the game (`q`).
     Quit,
+    /// Leave the game at once (Ctrl+C): unlike the other keys, it is never
+    /// held back while the end screen settles.
+    Interrupt,
 }
 
 /// What the player asked for with one key press on a menu: the title menu
@@ -315,13 +318,16 @@ pub fn inventory_command_for(key: KeyEvent) -> Option<InventoryCommand> {
 /// Returns the command bound to `key` on the end screen, or `None` when
 /// the key does nothing there.
 ///
-/// Bindings: Enter goes back to the title screen; `q` and Ctrl+C quit.
-/// Escape does nothing, like every other key, so a press left over from
-/// the game never leaves the summary. Releases, repeats and keys with Alt
-/// or Ctrl, Ctrl+C aside, give `None`.
+/// Bindings: Enter goes back to the title screen; `q` quits
+/// ([`EndCommand::Quit`]) and so does Ctrl+C ([`EndCommand::Interrupt`]),
+/// told apart because only Ctrl+C works during the grace period of the end
+/// screen (`app::END_SCREEN_GRACE`). Escape does nothing, like every other
+/// key, so a press left over from the game never leaves the summary.
+/// Releases, repeats and keys with Alt or Ctrl, Ctrl+C aside, give `None`.
 pub fn end_command_for(key: KeyEvent) -> Option<EndCommand> {
     match plain_press(key)? {
-        Press::Quit | Press::Code(KeyCode::Char('q')) => Some(EndCommand::Quit),
+        Press::Quit => Some(EndCommand::Interrupt),
+        Press::Code(KeyCode::Char('q')) => Some(EndCommand::Quit),
         Press::Code(KeyCode::Enter) => Some(EndCommand::Title),
         Press::Code(_) => None,
     }
@@ -826,7 +832,7 @@ mod tests {
             end_command_for(press(KeyCode::Char('q'))),
             Some(EndCommand::Quit)
         );
-        assert_eq!(end_command_for(ctrl_c()), Some(EndCommand::Quit));
+        assert_eq!(end_command_for(ctrl_c()), Some(EndCommand::Interrupt));
         for code in [KeyCode::Esc, KeyCode::Char('.'), KeyCode::Right] {
             assert_eq!(end_command_for(press(code)), None, "{code:?}");
         }

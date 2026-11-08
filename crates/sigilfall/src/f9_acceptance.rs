@@ -28,8 +28,9 @@ use sigilfall_core::map::Tile;
 use sigilfall_core::rng::Seed;
 use sigilfall_core::save;
 
-use crate::app::{App, State};
+use crate::app::{App, END_SCREEN_GRACE, State};
 use crate::cli::Cli;
+use crate::clock::ManualClock;
 use crate::persist::{Loaded, SaveFile, ScratchFolder};
 use crate::theme::{ColorMode, ColorSupport, GlyphSet, Theme};
 
@@ -629,8 +630,11 @@ fn the_death_summary_shows_what_the_core_counted_and_the_save_is_gone() {
         let new_run = Game::new(game.seed(), &content);
         assert_eq!(state_of(&again), state_of(&new_run));
 
-        // Keys do nothing on the end screen; `q` leaves and recreates
-        // nothing, neither a save nor a leftover.
+        // Once the end screen has settled (B1), keys do nothing on it; `q`
+        // leaves and recreates nothing, neither a save nor a leftover.
+        let clock = ManualClock::new();
+        let mut app = app.with_clock(clock.clone());
+        clock.advance(END_SCREEN_GRACE);
         let frozen = screen_text(&app, 80, 24);
         type_keys(&mut app, WALK);
         assert_eq!(screen_text(&app, 80, 24), frozen, "seed {value}");
@@ -972,6 +976,120 @@ fn the_title_offers_continue_only_with_a_save_and_says_when_a_save_was_set_aside
     assert_eq!(bytes(&folder, "save.ron.bad"), b"broken");
 }
 
+/// A folder inside `folder` whose name is long enough for the path of the
+/// save kept aside, `…/save.ron.bad`, to have `length` characters.
+fn folder_for_a_bad_save_path_of(folder: &ScratchFolder, length: usize) -> std::path::PathBuf {
+    let base = folder
+        .path()
+        .join("save.ron.bad")
+        .to_string_lossy()
+        .chars()
+        .count();
+    let name = "long-folder-name-".repeat(10);
+    let name: String = name.chars().take(length - base - 1).collect();
+    let deep = folder.path().join(name);
+    fs::create_dir_all(&deep).unwrap();
+    assert_eq!(
+        deep.join("save.ron.bad").to_string_lossy().chars().count(),
+        length
+    );
+    deep
+}
+
+/// The rows of `screen` joined, without the margins and the indents of
+/// wrapped lines.
+fn joined(screen: &[String]) -> String {
+    screen
+        .iter()
+        .map(|row| row.trim())
+        .filter(|row| !row.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[test]
+fn a_20_kb_error_and_a_120_character_path_show_whole_on_the_title_and_in_the_log() {
+    let folder = ScratchFolder::new("f9-b2");
+    let deep = folder_for_a_bad_save_path_of(&folder, 120);
+    let save = SaveFile::in_folder(&deep);
+    fs::write(save.path(), "x".repeat(20_000)).unwrap();
+    let bad = deep.join("save.ron.bad").display().to_string();
+    // The path does not fit on a line of 76: its start gives way to `…`,
+    // and its end, with the file name, stays.
+    let tail: String = bad.chars().skip(120 - 74).collect();
+
+    let mut app = App::launch(
+        ColorSupport::TrueColor,
+        &command_line(&[]),
+        &shipped(),
+        save.clone(),
+    )
+    .unwrap();
+    let title = screen(&app, 80, 24);
+    let on_title = joined(&title);
+    assert!(
+        on_title.contains("! Your saved game could not be read: the save is unreadable"),
+        "{}",
+        title.join(
+            "
+"
+        )
+    );
+    assert!(
+        on_title.contains(&format!("It was kept as …{tail}.")),
+        "the file kept aside is named on the title:
+{}",
+        title.join(
+            "
+"
+        )
+    );
+    assert!(
+        on_title.contains("…. It was kept as"),
+        "the error is cut: {on_title}"
+    );
+    assert!(title.iter().all(|row| row.chars().count() <= 80));
+    // The menu and its help are still there.
+    assert!(on_title.contains("New game"), "{on_title}");
+    assert!(
+        title[23].contains("q quit"),
+        "{}",
+        title.join(
+            "
+"
+        )
+    );
+
+    app.handle_key(press(KeyCode::Enter));
+    assert_eq!(app.state(), State::Playing);
+    let game = screen(&app, 80, 24);
+    let log = joined(&game[ROWS_ABOVE_THE_LOG + 1..23]);
+    assert!(
+        log.starts_with("! Your saved game could not be read: the save is unreadable"),
+        "the message opens the log:
+{}",
+        game.join(
+            "
+"
+        )
+    );
+    assert!(
+        log.contains(&format!(
+            "the old save was kept as …{tail}. You enter the dungeon."
+        )),
+        "the whole message, then the welcome line:
+{}",
+        game.join(
+            "
+"
+        )
+    );
+    assert!(
+        fs::metadata(&bad).unwrap().len() == 20_000,
+        "kept as it was"
+    );
+}
+
 #[test]
 fn a_very_long_error_text_still_tells_the_player_the_save_was_set_aside() {
     let folder = ScratchFolder::new("f9-long-notice");
@@ -998,9 +1116,39 @@ const EXECUTIONER: &str = r#"[
         speed: 100, hp: 999, attack: 99, defense: 0, min_depth: 1),
 ]"#;
 
+/// An application on the fixed room of seed 5, with the executioner
+/// `distance` cells east of the player, saving to `folder`, reading the
+/// time from `clock`.
+fn executioner_app(folder: &ScratchFolder, distance: usize, clock: &ManualClock) -> App {
+    let content = Content::parse(EXECUTIONER).expect("valid test monster");
+    let mut game = Game::in_fixed_room(Seed::from(5));
+    let cell = (0..distance).fold(sigilfall_core::game::PLAYER_START, |cell, _| {
+        cell.step(Direction::East)
+    });
+    game.spawn_monster(cell, content.monster("executioner").unwrap());
+    App::with_game(dark(), game, content)
+        .saving_to(folder.save_file())
+        .with_clock(clock.clone())
+}
+
+/// Bumps into the executioner east of the player of `app` until it deals
+/// its deadly blow, as a player hitting the same key does.
+fn fight_the_executioner(app: &mut App) {
+    for _ in 0..10 {
+        if app.state() == State::GameOver {
+            return;
+        }
+        app.handle_key(press(KeyCode::Char('l')));
+    }
+    panic!("the executioner kills the player");
+}
+
+/// A millisecond, the smallest step the grace period is checked at.
+const MILLISECOND: std::time::Duration = std::time::Duration::from_millis(1);
+
 #[test]
-#[ignore = "B1: an Enter pressed right after a deadly cast closes the end screen unseen"]
 fn an_extra_enter_right_after_a_deadly_cast_does_not_skip_the_end_screen() {
+    let mut deadly = 0;
     for trace in ["159", "75", "753"] {
         let content = Content::parse(EXECUTIONER).expect("valid test monster");
         let mut game = Game::in_fixed_room(Seed::from(5));
@@ -1022,9 +1170,106 @@ fn an_extra_enter_right_after_a_deadly_cast_does_not_skip_the_end_screen() {
             matches!(after_cast, State::GameOver | State::Casting(_)),
             "{trace}: after the cast: {after_cast:?}"
         );
-        assert!(
-            matches!(after_extra, State::GameOver | State::Casting(_)),
-            "{trace}: the extra Enter left the end screen unseen: {after_cast:?} then {after_extra:?}"
-        );
+        if after_cast == State::GameOver {
+            deadly += 1;
+            assert_eq!(
+                after_extra,
+                State::GameOver,
+                "{trace}: the extra Enter left the end screen unseen"
+            );
+        } else {
+            // The player survived the cast: its verdict shows until the
+            // next key, as designed, and that Enter closes it.
+            assert_eq!(after_extra, State::Playing, "{trace}");
+        }
     }
+    assert!(deadly > 0, "at least one cast lets the deadly blow fall");
+}
+
+#[test]
+fn once_the_grace_is_over_enter_after_a_deadly_cast_goes_back_to_the_title() {
+    let folder = ScratchFolder::new("f9-cast-then-title");
+    let clock = ManualClock::new();
+    let mut app = executioner_app(&folder, 1, &clock);
+    app.handle_key(press(KeyCode::Char('t')));
+    type_keys(&mut app, "159");
+    app.handle_key(press(KeyCode::Enter));
+    assert_eq!(app.state(), State::GameOver, "the cast lets the blow fall");
+    assert!(!folder.save_file().path().exists(), "the save is gone");
+
+    // Every key typed during the grace is thrown away, Enter and `q` too.
+    for code in [KeyCode::Enter, KeyCode::Char('q'), KeyCode::Enter] {
+        app.handle_key(press(code));
+        assert_eq!(app.state(), State::GameOver, "{code:?} during the grace");
+    }
+    clock.advance(END_SCREEN_GRACE - MILLISECOND);
+    app.handle_key(press(KeyCode::Enter));
+    assert_eq!(app.state(), State::GameOver, "a millisecond before the end");
+    clock.advance(MILLISECOND);
+    // Nothing typed during the grace was kept for later.
+    assert_eq!(app.state(), State::GameOver, "no key was queued");
+    assert!(screen_text(&app, 80, 24).contains("T H E   D E S C E N T   E N D S"));
+
+    app.handle_key(press(KeyCode::Enter));
+    assert!(matches!(app.state(), State::Title(_)), "{:?}", app.state());
+    let title = screen_text(&app, 80, 24);
+    assert!(title.contains("New game"), "{title}");
+    assert!(!title.contains("Continue"), "{title}");
+}
+
+#[test]
+fn the_grace_also_protects_a_death_in_melee() {
+    let folder = ScratchFolder::new("f9-melee-grace");
+    let clock = ManualClock::new();
+    let mut app = executioner_app(&folder, 1, &clock);
+    // Blows at the executioner, until it answers with a deadly one.
+    fight_the_executioner(&mut app);
+
+    app.handle_key(press(KeyCode::Enter));
+    app.handle_key(press(KeyCode::Char('q')));
+    assert_eq!(app.state(), State::GameOver, "held back by the grace");
+    clock.advance(END_SCREEN_GRACE);
+    app.handle_key(press(KeyCode::Enter));
+    assert!(matches!(app.state(), State::Title(_)), "{:?}", app.state());
+}
+
+#[test]
+fn the_grace_also_protects_a_death_while_a_movement_key_is_held() {
+    let folder = ScratchFolder::new("f9-held-key-grace");
+    let clock = ManualClock::new();
+    let mut app = executioner_app(&folder, 3, &clock);
+    // A held key: the terminal keeps sending presses, then repeats, well
+    // after the walk ended in the executioner's blow.
+    for _ in 0..30 {
+        app.handle_key(press(KeyCode::Char('l')));
+    }
+    assert_eq!(app.state(), State::GameOver, "the walk ends in death");
+    for _ in 0..30 {
+        app.handle_key(KeyEvent::new_with_kind(
+            KeyCode::Char('l'),
+            KeyModifiers::NONE,
+            ratatui::crossterm::event::KeyEventKind::Repeat,
+        ));
+    }
+    // The finger moves from the arrow to Enter, half a second later.
+    clock.advance(END_SCREEN_GRACE / 2);
+    app.handle_key(press(KeyCode::Enter));
+    assert_eq!(app.state(), State::GameOver, "held back by the grace");
+
+    clock.advance(END_SCREEN_GRACE / 2);
+    app.handle_key(press(KeyCode::Enter));
+    assert!(matches!(app.state(), State::Title(_)), "{:?}", app.state());
+}
+
+#[test]
+fn ctrl_c_quits_at_once_during_the_grace() {
+    let folder = ScratchFolder::new("f9-grace-ctrl-c");
+    let clock = ManualClock::new();
+    let mut app = executioner_app(&folder, 1, &clock);
+    fight_the_executioner(&mut app);
+
+    app.handle_key(ctrl_c());
+    assert_eq!(app.state(), State::Quit);
+    app.save_on_exit().expect("nothing to save");
+    assert!(!folder.save_file().path().exists());
 }

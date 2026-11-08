@@ -23,6 +23,10 @@
 //! events of each action are turned into English lines by the `messages`
 //! module and appended to it. Once the player has died, the death summary
 //! (`ui::death`) replaces the game; Enter goes back to the title screen.
+//! For [`END_SCREEN_GRACE`] after the death, every key but Ctrl+C is
+//! thrown away, so a key the player was already pressing (the Enter of a
+//! deadly cast, a held movement key) never closes a summary nobody has
+//! seen. The time is read from a [`Clock`], which tests replace.
 //!
 //! The quit keys are `q`, on the game, end and title screens, and Ctrl+C
 //! everywhere; quitting a game saves it. Escape never quits: it closes the
@@ -59,6 +63,7 @@
 //! ends. The rules of the launch are given at [`App::launch`].
 
 use std::cell::Cell;
+use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use ratatui::crossterm::event::{self, Event, KeyEvent};
@@ -75,6 +80,9 @@ use sigilfall_core::sigil::{CastQuality, ESSENCE_COST, Recognition, Trace, recog
 
 use crate::casting::{Casting, Drawing, Verdict};
 use crate::cli::{self, Cli};
+#[cfg(test)]
+use crate::clock::ManualClock;
+use crate::clock::{Clock, SystemClock};
 use crate::input::{
     self, AimCommand, Command, EndCommand, InventoryCommand, MenuCommand, OptionsCommand,
     SeedCommand, TraceCommand, VerdictCommand,
@@ -89,6 +97,22 @@ use crate::ui::inventory::InventoryScreen;
 use crate::ui::options::{self as options_screen, OptionRow, OptionsMenu};
 use crate::ui::title::{Confirmation, SeedEntry, TitleItem, TitleMenu, TitleStep};
 use crate::ui::{self, MenuScreen, Overlay};
+
+/// How long the end screen ignores every key but Ctrl+C once the player
+/// has died (fix B1 of the F9 test).
+///
+/// The death comes from a key the player was in the middle of typing: the
+/// Enter that validates a deadly trace, a movement key held down to walk
+/// or to fight. Without this delay, a second Enter, or the next key typed
+/// ahead, closes the summary before it was drawn long enough to be seen,
+/// and the save is already gone. One second covers a reflex press (a
+/// quarter of a second or so) and the auto-repeat delay of a held key
+/// (about half a second by default on common systems) with margin, so a
+/// finger still down when the player dies is lifted before keys count
+/// again, while staying shorter than the time it takes to read the title
+/// of the summary, so a player who means to leave never waits on it. Keys
+/// pressed during the delay are thrown away, not kept for later.
+pub const END_SCREEN_GRACE: Duration = Duration::from_secs(1);
 
 /// The screen the application is on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,7 +135,8 @@ pub enum State {
     /// use or drop.
     Inventory(InventoryScreen),
     /// The player has died: the end screen is shown, the game takes no
-    /// more actions, Enter goes back to the title and the quit keys work.
+    /// more actions, Enter goes back to the title and the quit keys work,
+    /// once [`END_SCREEN_GRACE`] has passed (Ctrl+C works at once).
     GameOver,
     /// The player asked to leave; the event loop stops.
     Quit,
@@ -174,6 +199,12 @@ pub struct App {
     /// Why the options could not be written, shown on the options screen
     /// until they are written again.
     options_not_saved: Option<String>,
+    /// Where the time of the end screen's grace period is read: the
+    /// system's clock, or a test's.
+    clock: Box<dyn Clock>,
+    /// When the application reached [`State::GameOver`], read from
+    /// `clock`; `None` while no game is over.
+    ended_at: Option<Instant>,
 }
 
 impl App {
@@ -227,7 +258,12 @@ impl App {
             detected,
             forced_ascii: cli.ascii,
         };
-        let mut app = Self::empty(settings.theme(), settings, content.clone());
+        let mut app = Self::empty(
+            settings.theme(),
+            settings,
+            content.clone(),
+            Box::new(SystemClock),
+        );
         if let LoadedOptions::Unreadable { reason } = loaded_options {
             app.options_unreadable = Some(messages::options_unreadable(&reason));
         }
@@ -280,6 +316,10 @@ impl App {
     /// `Game::in_fixed_room`; `content` names its monsters. No save or
     /// options file is used, and the options screen, if reached, starts
     /// from the default options on a 24-bit terminal.
+    ///
+    /// The clock stands still (`ManualClock`): once the player dies, keys
+    /// other than Ctrl+C stay ignored until a test gives the application a
+    /// clock it advances ([`App::with_clock`]).
     #[cfg(test)]
     pub fn with_game(theme: Theme, game: Game, content: Content) -> Self {
         let settings = Settings {
@@ -287,9 +327,24 @@ impl App {
             detected: ColorSupport::TrueColor,
             forced_ascii: false,
         };
-        let mut app = Self::empty(theme, settings, content);
+        let mut app = Self::empty(theme, settings, content, Box::new(ManualClock::new()));
         app.begin(game, vec![messages::welcome()]);
         app
+    }
+
+    /// Makes the application read the time from `clock`, so tests decide
+    /// when the end screen's grace period ([`END_SCREEN_GRACE`]) is over.
+    ///
+    /// Give it before the player dies: the grace period starts at the
+    /// instant `clock` reads at the death. On an application already on
+    /// the end screen, the period restarts from `clock`'s current time.
+    #[cfg(test)]
+    pub fn with_clock(mut self, clock: ManualClock) -> Self {
+        if self.ended_at.is_some() {
+            self.ended_at = Some(clock.now());
+        }
+        self.clock = Box::new(clock);
+        self
     }
 
     /// Ties the application to `save`, as [`App::launch`] does, so tests
@@ -302,8 +357,9 @@ impl App {
     }
 
     /// An application on the title menu with no game, no file and nothing
-    /// to report, drawn with `theme` for `settings`.
-    fn empty(theme: Theme, settings: Settings, content: Content) -> Self {
+    /// to report, drawn with `theme` for `settings`, reading the time from
+    /// `clock`.
+    fn empty(theme: Theme, settings: Settings, content: Content, clock: Box<dyn Clock>) -> Self {
         Self {
             run: None,
             content,
@@ -318,6 +374,8 @@ impl App {
             options_unreadable: None,
             save_notice: None,
             options_not_saved: None,
+            clock,
+            ended_at: None,
         }
     }
 
@@ -328,13 +386,28 @@ impl App {
     fn begin(&mut self, game: Game, opening: Vec<Message>) {
         let mut log = MessageLog::default();
         log.extend(opening);
-        self.state = if game.is_over() {
-            State::GameOver
+        if game.is_over() {
+            self.show_end_screen();
         } else {
-            State::Playing
-        };
+            self.state = State::Playing;
+        }
         self.run = Some(Run { game, log });
         self.save_notice = None;
+    }
+
+    /// Moves to the end screen ([`State::GameOver`]) and starts its grace
+    /// period ([`END_SCREEN_GRACE`]) at the current time of the clock.
+    fn show_end_screen(&mut self) {
+        self.state = State::GameOver;
+        self.ended_at = Some(self.clock.now());
+    }
+
+    /// Returns whether the end screen still ignores every key but Ctrl+C:
+    /// less than [`END_SCREEN_GRACE`] has passed since the death. `false`
+    /// when no game is over.
+    fn end_screen_is_settling(&self) -> bool {
+        self.ended_at
+            .is_some_and(|ended_at| self.clock.now().duration_since(ended_at) < END_SCREEN_GRACE)
     }
 
     /// Starts a new game of `seed`, its log opening with the messages
@@ -407,7 +480,9 @@ impl App {
     ///   [`App::handle_inventory_key`]). If the player died, the
     ///   application moves to [`State::GameOver`].
     /// - End screen (`input::end_command_for`): Enter goes back to the
-    ///   title screen, `q` quits.
+    ///   title screen, `q` quits, once [`END_SCREEN_GRACE`] has passed
+    ///   since the death; Ctrl+C quits at once (see
+    ///   [`App::handle_end_key`]).
     ///
     /// Once the application has quit, keys are ignored. While the last
     /// frame drawn was smaller than 80 × 24 (see `ui::fits`), the screen
@@ -642,9 +717,15 @@ impl App {
     /// Reacts to `key` on the end screen (`input::end_command_for`): Enter
     /// goes back to the title screen (see [`App::back_to_title`]), `q` and
     /// Ctrl+C quit.
+    ///
+    /// Until [`END_SCREEN_GRACE`] has passed since the death, only Ctrl+C
+    /// works: Enter and `q` are thrown away, and do not wait for the end of
+    /// the period to act.
     fn handle_end_key(&mut self, key: KeyEvent) {
         match input::end_command_for(key) {
             None => {}
+            Some(EndCommand::Interrupt) => self.state = State::Quit,
+            Some(_) if self.end_screen_is_settling() => {}
             Some(EndCommand::Quit) => self.state = State::Quit,
             Some(_) if !self.screen_is_visible() => {}
             Some(EndCommand::Title) => self.back_to_title(),
@@ -667,6 +748,7 @@ impl App {
         }
         self.run = None;
         self.saved = None;
+        self.ended_at = None;
         self.state = State::Title(TitleMenu::open());
     }
 
@@ -882,7 +964,7 @@ impl App {
         run.log
             .extend(messages::describe(&events, &run.game, &self.content));
         if run.game.is_over() {
-            self.state = State::GameOver;
+            self.show_end_screen();
             self.delete_save();
         }
         events
@@ -2058,7 +2140,9 @@ mod tests {
 
         #[test]
         fn no_game_action_is_played_after_death_but_quitting_works() {
-            let mut app = killed_app(dark());
+            let clock = ManualClock::new();
+            let mut app = killed_app(dark()).with_clock(clock.clone());
+            clock.advance(END_SCREEN_GRACE);
             let ticks = app.game().ticks();
             let turns = app.game().player_turns();
             let messages = app.log().len();
@@ -3424,10 +3508,24 @@ mod tests {
                 KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
             ];
             for key in quits {
-                let (mut fight, _) = fight_to_death(Seed::new(42));
-                fight.app.handle_key(key);
-                assert_eq!(fight.app.state(), State::Quit, "{key:?}");
+                let (fight, _) = fight_to_death(Seed::new(42));
+                let clock = ManualClock::new();
+                let mut app = fight.app.with_clock(clock.clone());
+                clock.advance(END_SCREEN_GRACE);
+                app.handle_key(key);
+                assert_eq!(app.state(), State::Quit, "{key:?}");
             }
+        }
+
+        #[test]
+        fn s3_right_after_death_only_ctrl_c_quits() {
+            let (fight, _) = fight_to_death(Seed::new(42));
+            let mut app = fight.app;
+            app.handle_key(press(KeyCode::Char('q')));
+            app.handle_key(press(KeyCode::Enter));
+            assert_eq!(app.state(), State::GameOver, "held back by the grace");
+            app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+            assert_eq!(app.state(), State::Quit);
         }
 
         #[test]

@@ -410,9 +410,11 @@ fn a_typed_seed_with_a_save_asks_first() {
 #[test]
 fn after_death_enter_goes_back_to_the_title_without_continue() {
     let folder = ScratchFolder::new("title-after-death");
-    let mut app = doomed_app(folder.save_file());
+    let clock = ManualClock::new();
+    let mut app = doomed_app(folder.save_file()).with_clock(clock.clone());
     app.save_on_exit().unwrap();
     wait_for_death(&mut app);
+    clock.advance(END_SCREEN_GRACE);
     let rows = screen_rows(&app);
     assert!(
         rows[23].starts_with(" Enter title screen   q quit"),

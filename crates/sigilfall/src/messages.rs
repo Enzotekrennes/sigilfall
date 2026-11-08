@@ -16,7 +16,10 @@
 //! the words of the title and options screens ([`saved_run`],
 //! [`abandon_warning`], [`invalid_seed`], [`auto_colors`],
 //! [`options_unreadable`], [`options_not_saved`]…), and the fixed labels of
-//! every screen and of the key help. Keeping the words here, away from the
+//! every screen and of the key help. The messages about the save and options
+//! files quote paths and errors that come from outside the game: they are
+//! bounded ([`MAX_REASON_CHARS`], [`ELLIPSIS`]) so that they always fit the
+//! rows the screen gives them. Keeping the words here, away from the
 //! drawing code, is what decision D10 asks: a translation would only touch
 //! this file.
 //!
@@ -40,6 +43,33 @@ use sigilfall_core::stats::CastCounts;
 
 use crate::message_log::{Message, Tone};
 use crate::theme::ColorSupport;
+use crate::ui::log::TEXT_WIDTH;
+
+/// Mark that stands for the part of a text left out: the end of a reason
+/// cut at [`MAX_REASON_CHARS`], or the start of a path cut to fit a line.
+pub const ELLIPSIS: char = '…';
+
+/// Most characters of a reason that comes from outside the game (the save
+/// reader's error, the system's) in a message about a file; a longer one
+/// keeps its first characters and ends with [`ELLIPSIS`] (fix B2 of the F9
+/// test).
+///
+/// Such a reason can be as long as the file it is about: the save reader
+/// quotes what it found, so a corrupt save of 20 kB gives a reason of 20 kB,
+/// and a message that long either scrolled out of the log at once or hid,
+/// on the title screen, where the unreadable save was kept. 72 characters
+/// keep the usual reasons whole ("the save is unreadable at line 1, column
+/// 20002: Expected colon" has 62), and keep even a reason of a single word,
+/// with the brackets and the full stop around it, on one line of the log
+/// ([`TEXT_WIDTH`]): every message about a file then fits the rows it is
+/// given, path included.
+pub const MAX_REASON_CHARS: usize = 72;
+
+/// Most characters of a file path in a message: one line of the log or of
+/// a title notice ([`TEXT_WIDTH`]), less the punctuation that follows the
+/// path, so the path is never broken across lines. A longer path loses its
+/// start (see [`bounded_path`]).
+const MAX_PATH_CHARS: usize = TEXT_WIDTH - 1;
 
 /// Title of the side panel's health block.
 pub const HP_LABEL: &str = "HP";
@@ -477,7 +507,10 @@ pub const CHANGE_LABEL: &str = "change";
 /// The notice of the title screen when the options file could not be read
 /// back: `reason` (see `persist::LoadedOptions::Unreadable`), and what
 /// happens instead.
+///
+/// A long `reason` is cut (see [`MAX_REASON_CHARS`]).
 pub fn options_unreadable(reason: &str) -> String {
+    let reason = bounded_reason(reason);
     format!(
         "The options file could not be read ({reason}). The default options \
          are in use; changing one rewrites the file."
@@ -493,7 +526,12 @@ pub fn options_not_saved(error: &str) -> String {
 /// The notice of the title screen when the save could not be read back
 /// at launch: `reason` (a sentence of `persist::Loaded::SetAside`), and
 /// `moved_to`, where the unreadable save was kept.
+///
+/// A long `reason` is cut (see [`MAX_REASON_CHARS`]), and so is the start
+/// of a path longer than a line (see [`bounded_path`]): the notice takes 4
+/// of the 5 rows the title screen gives its notices, never more.
 pub fn save_set_aside_notice(reason: &str, moved_to: &str) -> String {
+    let (reason, moved_to) = (bounded_reason(reason), bounded_path(moved_to));
     format!("Your saved game could not be read: {reason}. It was kept as {moved_to}.")
 }
 
@@ -502,7 +540,12 @@ pub fn save_set_aside_notice(reason: &str, moved_to: &str) -> String {
 /// error). The new game is not started, so the save is never overwritten
 /// without the player knowing; the outcome comes first, so it is read
 /// even when a long path is cut.
+///
+/// A long `cause` and the start of a long `path` are cut (see
+/// [`MAX_REASON_CHARS`] and [`bounded_path`]), so the notice fits the 5 rows
+/// the title screen gives its notices.
 pub fn save_not_deleted_notice(path: &str, cause: &str) -> String {
+    let (path, cause) = (bounded_path(path), bounded_reason(cause));
     format!(
         "No new game was started: the save {path} could not be deleted ({cause}). \
          Check that it is a file you can delete."
@@ -512,7 +555,11 @@ pub fn save_not_deleted_notice(path: &str, cause: &str) -> String {
 /// The notice of the title screen when the save of the dead character, at
 /// `path`, could still not be deleted on the way back to the title, for
 /// the reason `cause`.
+///
+/// A long `cause` and the start of a long `path` are cut, as in
+/// [`save_not_deleted_notice`].
 pub fn dead_save_not_deleted_notice(path: &str, cause: &str) -> String {
+    let (path, cause) = (bounded_path(path), bounded_reason(cause));
     format!(
         "The save {path} of the dead character could not be deleted ({cause}). \
          Delete it by hand so it is not resumed."
@@ -546,12 +593,19 @@ pub fn welcome_back() -> Message {
 /// `reason` is why (a sentence of `persist::Loaded::SetAside`), and
 /// `moved_to` the path the save was renamed to, where it can still be
 /// looked at.
+///
+/// The path comes last and a long `reason` is cut (see
+/// [`MAX_REASON_CHARS`]), as is the start of a path longer than a line (see
+/// [`bounded_path`]): the message takes at most 4 lines, so it shows whole
+/// above the welcome line in the 5 rows of the log of an 80 × 24 screen,
+/// with the name of the file kept aside.
 pub fn save_set_aside(reason: &str, moved_to: &str) -> Message {
+    let (reason, moved_to) = (bounded_reason(reason), bounded_path(moved_to));
     Message::new(
         Tone::Danger,
         format!(
-            "Your saved game could not be read: {reason}. It was kept as \
-             {moved_to}, and a new game begins."
+            "Your saved game could not be read: {reason}. A new game begins; \
+             the old save was kept as {moved_to}."
         ),
     )
 }
@@ -564,6 +618,31 @@ pub fn save_not_deleted() -> Message {
         Tone::Danger,
         "The save of this character could not be deleted; it will be tried again on quitting.",
     )
+}
+
+/// `reason` as a message about a file shows it: whole when it has at most
+/// [`MAX_REASON_CHARS`] characters, otherwise its first characters, without
+/// the spaces they end with, followed by [`ELLIPSIS`], [`MAX_REASON_CHARS`]
+/// at most in all.
+fn bounded_reason(reason: &str) -> String {
+    if reason.chars().count() <= MAX_REASON_CHARS {
+        return reason.to_owned();
+    }
+    let kept: String = reason.chars().take(MAX_REASON_CHARS - 1).collect();
+    format!("{}{ELLIPSIS}", kept.trim_end())
+}
+
+/// `path` as a message about a file shows it: whole when it fits on a line
+/// with the punctuation after it ([`MAX_PATH_CHARS`]), otherwise
+/// [`ELLIPSIS`] followed by its last characters, [`MAX_PATH_CHARS`] in all,
+/// so the folder it is in and the name of the file stay readable.
+fn bounded_path(path: &str) -> String {
+    let length = path.chars().count();
+    if length <= MAX_PATH_CHARS {
+        return path.to_owned();
+    }
+    let kept: String = path.chars().skip(length - (MAX_PATH_CHARS - 1)).collect();
+    format!("{ELLIPSIS}{kept}")
 }
 
 /// Turns `events`, the result of one `Game::submit` on `game`, into the
@@ -2071,5 +2150,61 @@ mod tests {
         let page = content().item("veil_page").unwrap().clone();
         assert_eq!(item_summary(&page, true, '-'), "teach Veil - known");
         assert_eq!(capacity(3), "3/10");
+    }
+
+    #[test]
+    fn a_long_reason_is_cut_with_an_ellipsis_and_a_short_one_kept_whole() {
+        let short = "the save is unreadable at line 1, column 20002: Expected colon";
+        assert_eq!(bounded_reason(short), short);
+        let limit = "r".repeat(MAX_REASON_CHARS);
+        assert_eq!(bounded_reason(&limit), limit);
+
+        let long = format!("the save is unreadable: found `{}`", "x".repeat(20_000));
+        let cut = bounded_reason(&long);
+        assert_eq!(cut.chars().count(), MAX_REASON_CHARS);
+        assert!(cut.ends_with(ELLIPSIS), "{cut}");
+        assert!(cut.starts_with("the save is unreadable: found `x"), "{cut}");
+        // No space is left before the ellipsis.
+        let spaced = format!("{} {}", "w".repeat(MAX_REASON_CHARS - 2), "tail");
+        assert_eq!(
+            bounded_reason(&spaced),
+            format!("{}{ELLIPSIS}", "w".repeat(MAX_REASON_CHARS - 2))
+        );
+    }
+
+    #[test]
+    fn a_path_longer_than_a_line_loses_its_start_and_keeps_the_file_name() {
+        let short = r"C:\Users\player\AppData\Roaming\sigilfall\data\save.ron.bad";
+        assert_eq!(bounded_path(short), short);
+
+        let folder = "d".repeat(120);
+        let long = format!(r"C:\{folder}\save.ron.bad");
+        let cut = bounded_path(&long);
+        assert_eq!(cut.chars().count(), MAX_PATH_CHARS);
+        assert!(cut.starts_with(ELLIPSIS), "{cut}");
+        assert!(long.ends_with(cut.trim_start_matches(ELLIPSIS)), "{cut}");
+        assert!(cut.ends_with(r"\save.ron.bad"), "{cut}");
+        // Characters beyond ASCII count as one each, and are not split.
+        let accented = format!("{}\\é.bad", "é".repeat(100));
+        assert_eq!(bounded_path(&accented).chars().count(), MAX_PATH_CHARS);
+    }
+
+    #[test]
+    fn every_message_about_a_file_keeps_its_path_whole_or_its_end() {
+        let reason = "x".repeat(20_000);
+        let path = format!(r"C:\{}\save.ron.bad", "p".repeat(104));
+        assert_eq!(path.chars().count(), 120);
+        let shown = bounded_path(&path);
+        for text in [
+            save_set_aside(&reason, &path).text,
+            save_set_aside_notice(&reason, &path),
+            save_not_deleted_notice(&path, &reason),
+            dead_save_not_deleted_notice(&path, &reason),
+        ] {
+            assert!(text.contains(&shown), "{text}");
+            assert!(text.contains(r"\save.ron.bad"), "{text}");
+            assert!(text.chars().count() < 400, "{text}");
+        }
+        assert!(options_unreadable(&reason).chars().count() < 200);
     }
 }

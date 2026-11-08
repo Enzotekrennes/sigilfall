@@ -178,8 +178,9 @@ pub(super) fn wrap(text: &str, width: usize) -> Vec<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
+    use crate::theme::{ColorMode, GlyphSet};
 
     #[test]
     fn wrapping_breaks_between_words_within_the_width() {
@@ -207,5 +208,73 @@ mod tests {
             lines.join(" ").split_whitespace().collect::<Vec<_>>(),
             text.split_whitespace().collect::<Vec<_>>()
         );
+    }
+
+    /// Reasons a file message may quote: none, short, at the limit, past
+    /// it, and 20 kB, each as one long word and as many short ones.
+    pub(in crate::ui) fn reasons() -> Vec<String> {
+        [0, 1, 20, 62, 72, 73, 200, 20_000]
+            .into_iter()
+            .flat_map(|length| {
+                let word = "x".repeat(length);
+                let words: String = "ab ".repeat(length / 3);
+                [word, words.trim_end().to_owned()]
+            })
+            .collect()
+    }
+
+    /// Paths of the file kept aside, from short to far wider than a line,
+    /// with and without spaces, each ending with its file name.
+    pub(in crate::ui) fn paths() -> Vec<String> {
+        [13, 40, 75, 76, 77, 120, 300]
+            .into_iter()
+            .flat_map(|length| {
+                let folder = "d".repeat(length - 12);
+                let spaced: String = "my folder\\"
+                    .repeat(length / 11 + 1)
+                    .chars()
+                    .take(length - 12)
+                    .collect();
+                [
+                    format!("{folder}save.ron.bad"),
+                    format!("{spaced}save.ron.bad"),
+                ]
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_save_set_aside_always_shows_whole_above_the_welcome_line() {
+        // The rows of the log on an 80 x 24 screen: `game::LOG_HEIGHT` less
+        // the separator.
+        const ROWS: usize = 5;
+        let theme = Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode);
+        for reason in reasons() {
+            for path in paths() {
+                let set_aside = messages::save_set_aside(&reason, &path);
+                let mut log = MessageLog::default();
+                log.extend([set_aside.clone(), messages::welcome()]);
+
+                let lines: Vec<String> = visible_lines(&log, ROWS, &theme)
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect();
+
+                let wrapped = wrap(&set_aside.text, TEXT_WIDTH);
+                assert!(wrapped.len() < ROWS, "{} lines: {wrapped:?}", wrapped.len());
+                assert!(lines[0].starts_with(" ! Your saved game could not be read"));
+                assert_eq!(lines.len(), wrapped.len() + 1, "{lines:?}");
+                assert!(lines.last().unwrap().contains("You enter the dungeon."));
+                let text = lines.join(" ");
+                assert!(text.contains("save.ron.bad."), "{text}");
+                let normal = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+                if path.chars().count() < TEXT_WIDTH {
+                    let whole = format!("{}.", normal(&path));
+                    assert!(normal(&text).contains(&whole), "{path} in {text}");
+                } else {
+                    assert!(text.contains(messages::ELLIPSIS), "{text}");
+                }
+            }
+        }
     }
 }
