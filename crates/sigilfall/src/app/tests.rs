@@ -34,6 +34,7 @@ mod french;
 mod game_screen;
 mod inventory_screen;
 mod key_help;
+mod keyboard_layouts;
 mod options_screen;
 mod overlay_gutter;
 mod player_view;

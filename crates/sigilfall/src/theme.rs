@@ -1,13 +1,15 @@
 //! The visual theme: every colour, emphasis and glyph the screens draw with,
-//! and the language they write in.
+//! the language they write in and the keyboard layout their key help names.
 //!
 //! Exposes [`Theme`], whose fields are the semantic colour tokens (one
-//! [`Style`] each) plus the [`Glyphs`] to draw with and the [`Language`] of
-//! every text (`messages` holds the texts), the four rendering modes
-//! ([`ColorMode`]), terminal colour detection ([`ColorSupport::detect`]) and
-//! the player's preferences that feed it ([`Appearance`], [`GlyphSet`],
-//! [`ColorChoice`] and the language, gathered in the [`Options`] the options
-//! screen edits), resolved into a theme by [`Settings`]. This module is the only place where
+//! [`Style`] each) plus the [`Glyphs`] to draw with, the [`Language`] of
+//! every text (`messages` holds the texts) and the [`Keyboard`] the keys
+//! follow, the four rendering modes ([`ColorMode`]), terminal colour
+//! detection ([`ColorSupport::detect`]) and the player's preferences that
+//! feed it ([`Appearance`], [`GlyphSet`], [`ColorChoice`], the language and
+//! the keyboard, gathered in the [`Options`] the options screen edits, with
+//! the system's [`Defaults`] until the player chooses), resolved into a
+//! theme by [`Settings`]. This module is the only place where
 //! a colour or a glyph is written down: screens ask for a token by name and
 //! never pick a colour themselves. Reading and writing the options is left to
 //! `persist`.
@@ -26,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use sigilfall_core::content::Family;
 
 pub use self::glyphs::{GlyphSet, Glyphs};
+use crate::keyboard::Keyboard;
 use crate::language::Language;
 use crate::messages::{self, Labels};
 
@@ -146,7 +149,7 @@ pub fn let_the_theme_decide_colours() {
 
 /// The display options the player chooses on the options screen and keeps
 /// between runs (`persist::OptionsFile`). The default is Unicode glyphs,
-/// automatic colours and the dark theme.
+/// automatic colours, the dark theme, English and QWERTY.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Options {
     /// Characters to draw with.
@@ -159,6 +162,43 @@ pub struct Options {
     /// player who chose none follow the system's language
     /// (`persist::LoadedOptions::options`).
     pub language: Language,
+    /// Keyboard layout the keys follow. Its default is QWERTY, but the
+    /// options of a player who chose none follow the system's
+    /// ([`Defaults`]).
+    pub keyboard: Keyboard,
+}
+
+/// What the language and the keyboard options are until the player chooses
+/// them: the system's, guessed from its locale (`Language::from_locale`,
+/// `Keyboard::from_locale`). The default is English on QWERTY, what a
+/// system that gives no locale gets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Defaults {
+    /// The system's language.
+    pub language: Language,
+    /// The keyboard layout most likely used with the system's locale.
+    pub keyboard: Keyboard,
+}
+
+impl Defaults {
+    /// Reads the defaults of this system from its locale; never fails (see
+    /// `Language::detect` and `Keyboard::detect`).
+    pub fn detect() -> Self {
+        Self {
+            language: Language::detect(),
+            keyboard: Keyboard::detect(),
+        }
+    }
+
+    /// The defaults of a system speaking `language` on a QWERTY keyboard,
+    /// for tests about the language alone.
+    #[cfg(test)]
+    pub const fn with_language(language: Language) -> Self {
+        Self {
+            language,
+            keyboard: Keyboard::Qwerty,
+        }
+    }
 }
 
 /// Everything that decides the theme of a session: the player's
@@ -176,6 +216,9 @@ pub struct Settings {
     /// The language `--lang` gave, if any: it wins over the language option
     /// for the session.
     pub forced_language: Option<Language>,
+    /// The keyboard layout `--keyboard` gave, if any: it wins over the
+    /// keyboard option for the session.
+    pub forced_keyboard: Option<Keyboard>,
 }
 
 impl Settings {
@@ -203,9 +246,17 @@ impl Settings {
         self.forced_language.unwrap_or(self.options.language)
     }
 
+    /// Returns the keyboard layout the keys follow: the one of
+    /// `--keyboard` when given, the option's otherwise.
+    pub fn keyboard(&self) -> Keyboard {
+        self.forced_keyboard.unwrap_or(self.options.keyboard)
+    }
+
     /// Builds the theme these settings call for.
     pub fn theme(&self) -> Theme {
-        Theme::new(self.color_mode(), self.glyph_set()).in_language(self.language())
+        Theme::new(self.color_mode(), self.glyph_set())
+            .in_language(self.language())
+            .on_keyboard(self.keyboard())
     }
 }
 
@@ -342,6 +393,9 @@ pub struct Theme {
     pub glyphs: Glyphs,
     /// Language of every text the screens write.
     pub language: Language,
+    /// Keyboard layout the key help names keys for, and the keymaps
+    /// (`input`) follow.
+    pub keyboard: Keyboard,
 }
 
 impl Theme {
@@ -352,13 +406,21 @@ impl Theme {
         self
     }
 
+    /// Returns this theme naming the keys of `keyboard`.
+    #[must_use]
+    pub const fn on_keyboard(mut self, keyboard: Keyboard) -> Self {
+        self.keyboard = keyboard;
+        self
+    }
+
     /// Returns the fixed texts of the theme's language.
     pub const fn labels(&self) -> &'static Labels {
         messages::labels(self.language)
     }
 
     /// Builds the theme for the given rendering `mode`, drawn with the
-    /// given `glyph_set`, writing in English (see [`Theme::in_language`]).
+    /// given `glyph_set`, writing in English for a QWERTY keyboard (see
+    /// [`Theme::in_language`] and [`Theme::on_keyboard`]).
     pub fn new(mode: ColorMode, glyph_set: GlyphSet) -> Self {
         let glyphs = Glyphs::new(glyph_set);
         match mode {
@@ -425,6 +487,7 @@ impl Theme {
             log_sigil: fg(0x5ED6B8),
             glyphs,
             language: Language::English,
+            keyboard: Keyboard::Qwerty,
         }
     }
 
@@ -468,6 +531,7 @@ impl Theme {
             log_sigil: fg(0x0B6E58),
             glyphs,
             language: Language::English,
+            keyboard: Keyboard::Qwerty,
         }
     }
 
@@ -515,6 +579,7 @@ impl Theme {
             log_sigil: named(Color::LightCyan),
             glyphs,
             language: Language::English,
+            keyboard: Keyboard::Qwerty,
         }
     }
 
@@ -571,6 +636,7 @@ impl Theme {
             log_sigil: plain,
             glyphs,
             language: Language::English,
+            keyboard: Keyboard::Qwerty,
         }
     }
 }

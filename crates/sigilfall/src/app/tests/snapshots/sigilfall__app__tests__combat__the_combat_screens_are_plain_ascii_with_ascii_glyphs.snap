@@ -1,5 +1,6 @@
 ---
 source: crates/sigilfall/src/app/tests/combat.rs
+assertion_line: 465
 expression: playing
 ---
 " Depth 1 - Turn 27                                     Seed 7F3A-91C2-0B5E-D4A8 "
@@ -25,4 +26,4 @@ expression: playing
 " ! The cave gnat hits you (1).                                                  "
 " ! The cave gnat hits you (1).                                                  "
 " ! The cave gnat hits you (1).                                                  "
-" <^>v/1-9 move   . wait   t trace   g take   i pack   > descend   q save & quit "
+" wasd move   . wait   t trace   g take   i pack   > descend   q save & quit     "

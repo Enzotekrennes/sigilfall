@@ -14,7 +14,7 @@ use crate::app::{App, State};
 use crate::cli::Cli;
 use crate::clock::ManualClock;
 use crate::persist::ScratchFolder;
-use crate::theme::{Appearance, ColorChoice, ColorSupport, Options};
+use crate::theme::{Appearance, ColorChoice, ColorSupport, Defaults, Options};
 use crate::ui::title::{Confirmation, SeedEntry, SeedProblem, TitleItem, TitleMenu};
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyCode;
@@ -30,6 +30,7 @@ const fn command_line(seed: Option<Seed>, ascii: bool) -> Cli {
         daily: false,
         ascii,
         lang: None,
+        keyboard: None,
     }
 }
 
@@ -38,7 +39,7 @@ const fn command_line(seed: Option<Seed>, ascii: bool) -> Cli {
 fn launch_with(folder: &ScratchFolder, cli: &Cli) -> App {
     App::launch_with_clock(
         ColorSupport::TrueColor,
-        Language::English,
+        Defaults::default(),
         cli,
         &shipped_content(),
         folder.save_file(),
@@ -481,7 +482,7 @@ fn seed_on_the_command_line_skips_the_title() {
     assert_eq!(app.game().seed(), SEED);
     let rows = screen_rows(&app);
     assert!(rows[0].contains("Seed 7F3A-91C2-0B5E-D4A8"), "{rows:?}");
-    assert!(rows[23].ends_with("q save & quit "), "{rows:?}");
+    assert!(rows[23].trim_end().ends_with("q save & quit"), "{rows:?}");
 }
 
 #[test]
@@ -542,7 +543,7 @@ fn title_in(options: Options, detected: ColorSupport, label: &str) -> (App, Buff
     folder.options_file().write(&options).unwrap();
     let app = App::launch_with_clock(
         detected,
-        Language::English,
+        Defaults::default(),
         &command_line(None, false),
         &shipped_content(),
         folder.save_file(),
@@ -663,7 +664,7 @@ fn every_title_step_keeps_the_terminal_colours_in_monochrome() {
     let (folder, _) = folder_with_a_save("title-monochrome");
     let mut app = App::launch_with_clock(
         ColorSupport::None,
-        Language::English,
+        Defaults::default(),
         &command_line(None, false),
         &shipped_content(),
         folder.save_file(),

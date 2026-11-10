@@ -111,11 +111,12 @@ pub struct Labels {
     pub backspace_key: &'static str,
     /// The keys that use the chosen item in the inventory: Enter or `u`.
     pub use_keys: &'static str,
-    /// What `q` does on the title and end screens.
+    /// What the quit key does on the title and end screens.
     pub quit_label: &'static str,
-    /// What `q` does on the game screen: the game is saved, then the
-    /// program ends. Short enough for the game's key help to fit 80
-    /// columns.
+    /// What the quit key does on the game screen: the game is saved, then
+    /// the program ends. Both are said, so a player never fears losing the
+    /// run by quitting; short enough for the game's key help to fit 80
+    /// columns (in French, with two columns between pairs).
     pub save_and_quit_label: &'static str,
     /// What Enter does on the end screens.
     pub title_label: &'static str,
@@ -216,6 +217,9 @@ pub struct Labels {
     pub theme_option: &'static str,
     /// Label of the language option.
     pub language_option: &'static str,
+    /// Label of the keyboard option, whose values are the names of the
+    /// layouts, the same in every language (`Keyboard::name`).
+    pub keyboard_option: &'static str,
     /// Last entry of the options screen, back to the title screen.
     pub back_item: &'static str,
     /// Value of the glyph option for Unicode glyphs.
@@ -231,8 +235,8 @@ pub struct Labels {
     /// Value of the theme option for the light theme.
     pub light_value: &'static str,
     /// What each entry of the options screen does: glyphs, colours, theme,
-    /// language, back. Each fits 80 columns.
-    pub option_help: [&'static str; 5],
+    /// language, keyboard, back. Each fits 80 columns.
+    pub option_help: [&'static str; 6],
     /// Label of the sample line of the options screen.
     pub sample_label: &'static str,
     /// Note of the options screen while `--ascii` is given.
@@ -346,6 +350,7 @@ impl Labels {
             colors_option,
             theme_option,
             language_option,
+            keyboard_option,
             back_item,
             unicode_value,
             ascii_value,
@@ -451,6 +456,7 @@ impl Labels {
             *colors_option,
             *theme_option,
             *language_option,
+            *keyboard_option,
             *back_item,
             *unicode_value,
             *ascii_value,
@@ -596,6 +602,7 @@ pub const ENGLISH: Labels = Labels {
     colors_option: "Colours",
     theme_option: "Theme",
     language_option: "Language",
+    keyboard_option: "Keyboard",
     back_item: "Back",
     unicode_value: "Unicode",
     ascii_value: "ASCII",
@@ -608,6 +615,7 @@ pub const ENGLISH: Labels = Labels {
         "Auto follows the terminal; 16 colours or Monochrome suit plain ones.",
         "Dark ink or light parchment. Light needs true colour.",
         "Every text of the game, in English or in French.",
+        "QWERTY moves with WASD; AZERTY with ZQSD, and the top row needs no Shift.",
         "Options are saved as soon as they change.",
     ],
     sample_label: "Sample",
@@ -691,7 +699,7 @@ pub const FRENCH: Labels = Labels {
     backspace_key: "Retour arrière",
     use_keys: "Entrée/u",
     quit_label: "quitter",
-    save_and_quit_label: "quitter",
+    save_and_quit_label: "sauver et quitter",
     title_label: "écran titre",
     move_label: "aller",
     wait_label: "repos",
@@ -740,6 +748,7 @@ pub const FRENCH: Labels = Labels {
     colors_option: "Couleurs",
     theme_option: "Thème",
     language_option: "Langue",
+    keyboard_option: "Clavier",
     back_item: "Retour",
     unicode_value: "Unicode",
     ascii_value: "ASCII",
@@ -752,6 +761,7 @@ pub const FRENCH: Labels = Labels {
         "Auto suit le terminal\u{a0}; 16 couleurs ou Monochrome pour les plus simples.",
         "Encre sombre ou parchemin clair. Clair demande les vraies couleurs.",
         "Tous les textes du jeu, en anglais ou en français.",
+        "QWERTY\u{a0}: WASD pour bouger\u{a0}; AZERTY\u{a0}: ZQSD, et la rangée du haut sans Maj.",
         "Les options sont enregistrées dès qu'elles changent.",
     ],
     sample_label: "Aperçu",

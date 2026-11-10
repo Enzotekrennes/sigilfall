@@ -1,5 +1,6 @@
 ---
 source: crates/sigilfall/src/ui/game.rs
+assertion_line: 1133
 expression: screen_text(&screen)
 ---
 " Depth 1 · Turn 1                                      Seed 7F3A-91C2-0B5E-D4A8 "
@@ -25,4 +26,4 @@ expression: screen_text(&screen)
 "                                                                                "
 "                                                                                "
 "                                                                                "
-" ←↑→↓/1-9 move   . wait   t trace   g take   i pack   > descend   q save & quit "
+" wasd move   . wait   t trace   g take   i pack   > descend   q save & quit     "

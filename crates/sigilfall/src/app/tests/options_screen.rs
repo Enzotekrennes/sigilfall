@@ -15,8 +15,9 @@ use super::*;
 use crate::app::{App, State};
 use crate::cli::Cli;
 use crate::clock::ManualClock;
+use crate::keyboard::Keyboard;
 use crate::persist::{LoadedOptions, OptionsFile, SaveFile, ScratchFolder};
-use crate::theme::{Appearance, ColorChoice, ColorSupport, GlyphSet, Options, Settings};
+use crate::theme::{Appearance, ColorChoice, ColorSupport, Defaults, GlyphSet, Options, Settings};
 use crate::ui::options::{OptionRow, OptionsMenu};
 use crate::ui::title::{TitleItem, TitleMenu};
 use ratatui::crossterm::event::KeyCode;
@@ -31,12 +32,13 @@ use std::path::PathBuf;
 fn launch(folder: &ScratchFolder, detected: ColorSupport, ascii: bool) -> App {
     App::launch_with_clock(
         detected,
-        Language::English,
+        Defaults::with_language(Language::English),
         &Cli {
             seed: None,
             daily: false,
             ascii,
             lang: None,
+            keyboard: None,
         },
         &shipped_content(),
         folder.save_file(),
@@ -62,7 +64,7 @@ fn screen_text(app: &App) -> String {
 
 /// The options saved in `folder`, which must be readable.
 fn saved_options(folder: &ScratchFolder) -> Options {
-    match folder.options_file().load(Language::English) {
+    match folder.options_file().load(Defaults::default()) {
         LoadedOptions::Found(options) => options,
         other => panic!("the options are saved: {other:?}"),
     }
@@ -132,6 +134,7 @@ fn each_option_applies_at_once_and_is_kept_after_a_relaunch() {
         colors: ColorChoice::Ansi16,
         appearance: Appearance::Light,
         language: Language::English,
+        keyboard: Keyboard::Qwerty,
     };
     assert_eq!(saved_options(&folder), expected);
 
@@ -243,12 +246,13 @@ fn the_options_also_apply_to_a_game_started_with_seed() {
 
     let app = App::launch_with_clock(
         ColorSupport::TrueColor,
-        Language::English,
+        Defaults::with_language(Language::English),
         &Cli {
             seed: Some(SEED),
             daily: false,
             ascii: false,
             lang: None,
+            keyboard: None,
         },
         &shipped_content(),
         folder.save_file(),
@@ -355,12 +359,13 @@ fn in_a_long_data_folder_the_notice_still_says_the_options_apply_until_quitting(
     ] {
         let mut app = App::launch_with_clock(
             ColorSupport::TrueColor,
-            language,
+            Defaults::with_language(language),
             &Cli {
                 seed: None,
                 daily: false,
                 ascii: false,
                 lang: None,
+                keyboard: None,
             },
             &shipped_content(),
             SaveFile::in_folder(&deep),
@@ -730,6 +735,7 @@ fn every_screen(support: ColorSupport, options: Options) -> Vec<(&'static str, A
         detected: support,
         forced_ascii: false,
         forced_language: None,
+        forced_keyboard: None,
     };
     let folder = ScratchFolder::new("screens");
     save_game(&folder, 7, 3);
@@ -816,6 +822,7 @@ fn the_explicit_ascii_and_monochrome_choices_hold_on_every_screen() {
         colors: ColorChoice::Monochrome,
         appearance: Appearance::Dark,
         language: Language::English,
+        keyboard: Keyboard::Qwerty,
     };
     for (name, app) in every_screen(ColorSupport::TrueColor, options) {
         let painted = paint(&buffer(&app, 80, 24));
@@ -995,7 +1002,7 @@ fn an_options_file_that_cannot_be_read_gives_the_defaults_a_notice_and_is_replac
             "{name}: the notice is gone once the file is rewritten"
         );
         assert!(matches!(
-            OptionsFile::in_folder(folder.path()).load(Language::English),
+            OptionsFile::in_folder(folder.path()).load(Defaults::default()),
             LoadedOptions::Found(_)
         ));
         let next = launch_with_arguments(&folder, &[]).unwrap();

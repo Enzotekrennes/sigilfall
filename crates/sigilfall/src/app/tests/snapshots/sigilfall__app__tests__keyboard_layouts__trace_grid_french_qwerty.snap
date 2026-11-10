@@ -1,0 +1,29 @@
+---
+source: crates/sigilfall/src/app/tests/keyboard_layouts.rs
+assertion_line: 276
+expression: screen(&app)
+---
+ Profondeur 1 · Tour 1                               Graine 7F3A-91C2-0B5E-D4A8
+╭─ Tracer un sigille ───────────────────────────────────╮ │ PV            30/30
+│                                                       │ │ ██████████████████
+│  ●     ○     ○   GRIMOIRE                             │ │ Essence         6/6
+│    ╲             Braise  7·5·3  dégât 6 · proche      │ │
+│      ╲                                                │ │ SIGILLES        1/5
+│  ○     ◉     ○                                        │ │ Braise
+│                                                       │ │
+│                                                       │ │ EN VUE
+│  ○     ○     ○                                        │ │ @ vous
+│                                                       │ │ ¡ Fiole d'essence
+│  Tracé    7·5                                         │ │
+│  Durée    1,00 tour · +0,25 par nœud                  │ │
+│  Essence  6/6 · 2 par sort                            │ │
+│                                                       │ │
+╰───────────────────────────────────────────────────────╯ │
+                                                          │
+─ Journal ────────────────────────────────────────────────┴─────────────────────
+   Vous entrez dans le donjon.
+
+
+
+
+ 1-9 relier un nœud   Retour arrière effacer   Entrée lancer   Échap annuler

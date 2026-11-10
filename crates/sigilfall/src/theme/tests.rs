@@ -404,6 +404,7 @@ const fn settings(options: Options, detected: ColorSupport, forced_ascii: bool) 
         detected,
         forced_ascii,
         forced_language: None,
+        forced_keyboard: None,
     }
 }
 
@@ -550,6 +551,7 @@ fn the_default_options_are_unicode_auto_and_dark() {
             colors: ColorChoice::Auto,
             appearance: Appearance::Dark,
             language: Language::English,
+            keyboard: Keyboard::Qwerty,
         }
     );
 }

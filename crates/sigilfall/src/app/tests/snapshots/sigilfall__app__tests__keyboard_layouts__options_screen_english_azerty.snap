@@ -1,0 +1,29 @@
+---
+source: crates/sigilfall/src/app/tests/keyboard_layouts.rs
+assertion_line: 287
+expression: screen(&app)
+---
+
+
+
+                                 O P T I O N S
+
+                         Glyphs       Unicode
+                         Colours      Auto · true colour
+                         Theme        Dark
+                         Language     English
+                       › Keyboard     AZERTY
+                         Back
+
+                         Sample       @ v s ¡ § ▼ ▒▒▒···
+
+   QWERTY moves with WASD; AZERTY with ZQSD, and the top row needs no Shift.
+
+
+
+
+
+
+
+
+ ↑↓ choose   ←→ change   Esc back

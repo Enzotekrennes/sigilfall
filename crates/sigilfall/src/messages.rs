@@ -72,6 +72,7 @@ use sigilfall_core::stats::{CastCounts, Stats};
 use self::grammar::{Who, capitalized, of_indefinite};
 pub use self::labels::{ENGLISH, FRENCH, Labels};
 use crate::app::exploring::{Halt, MAX_EXPLORE_STEPS};
+use crate::keyboard::Keyboard;
 use crate::language::Language;
 use crate::message_log::{Message, Tone};
 use crate::persist::{OPTIONS_FORMAT_VERSION, OptionsProblem, SaveRefusal};
@@ -127,17 +128,11 @@ const NBSP: char = '\u{a0}';
 /// to cast, a node the trace refused. The same in every language.
 pub const WARNING_MARK: &str = "!";
 
-/// Key that leaves the game, as the key help shows it.
-pub const QUIT_KEY: &str = "q";
-
 /// Key that waits, in the key help of the game screen.
 pub const WAIT_KEY: &str = ".";
 
 /// Key that opens the sigil overlay, in the key help of the game screen.
 pub const TRACE_KEY: &str = "t";
-
-/// Keys that link a node, in the key help of the sigil overlay.
-pub const LINK_KEYS: &str = "1-9";
 
 /// Key that picks up the item underfoot, in the key help of the game
 /// screen; `,` does the same, as in other roguelikes.
@@ -146,14 +141,10 @@ pub const PICK_UP_KEY: &str = "g";
 /// Key that opens the inventory, in the key help of the game screen.
 pub const INVENTORY_KEY: &str = "i";
 
-/// Key that goes down the stairs, in the key help of the game screen; the
-/// alternative `input::DESCEND_ALTERNATIVE_KEY` does the same, but the
-/// 80-column help line has no room left to name it.
+/// Key that goes down the stairs, in the key help of the game screen on
+/// every layout; the letters of `input::descend_keys` do the same, but the
+/// 80-column help line has no room left to name them.
 pub const DESCEND_KEY: &str = ">";
-
-/// Keys that choose an item after the arrows, in the key help of the
-/// inventory: the digits of the slots, `0` being the tenth.
-pub const SLOT_KEYS: &str = "1-0";
 
 /// Key that drops the chosen item, in the key help of the inventory.
 pub const DROP_KEY: &str = "d";
@@ -254,6 +245,16 @@ pub fn language_forced(language: Language, forced: Language) -> String {
     match language {
         Language::English => format!("--lang is on: {name} for this session."),
         Language::French => format!("--lang est actif{NBSP}: {name} pour cette session."),
+    }
+}
+
+/// Note of the options screen while `--keyboard` is given: the keyboard
+/// option is kept but `forced` is used for this session.
+pub fn keyboard_forced(language: Language, forced: Keyboard) -> String {
+    let name = forced.name();
+    match language {
+        Language::English => format!("--keyboard is on: {name} for this session."),
+        Language::French => format!("--keyboard est actif{NBSP}: {name} pour cette session."),
     }
 }
 

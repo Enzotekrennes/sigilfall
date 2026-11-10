@@ -15,6 +15,7 @@ mod casting;
 mod cli;
 mod clock;
 mod input;
+mod keyboard;
 mod language;
 mod message_log;
 mod messages;
@@ -38,9 +39,8 @@ use sigilfall_core::content::Content;
 
 use crate::app::App;
 use crate::cli::Cli;
-use crate::language::Language;
 use crate::persist::SaveFile;
-use crate::theme::ColorSupport;
+use crate::theme::{ColorSupport, Defaults};
 
 /// Runs the game in the current terminal until the player quits.
 ///
@@ -78,7 +78,7 @@ fn main() -> anyhow::Result<()> {
     let content = Content::load().context("the game data built into this binary is invalid")?;
     let mut app = App::launch(
         ColorSupport::detect(),
-        Language::detect(),
+        Defaults::detect(),
         &cli,
         &content,
         SaveFile::locate()?,

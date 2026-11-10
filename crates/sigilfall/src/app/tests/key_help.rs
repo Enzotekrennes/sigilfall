@@ -52,7 +52,7 @@ fn the_key_help_of_every_screen_fits_in_80_columns_whole() {
         "game",
         game,
         vec![
-            "←↑→↓/1-9 move",
+            "wasd move",
             ". wait",
             "t trace",
             "g take",
@@ -91,7 +91,7 @@ fn the_key_help_of_every_screen_fits_in_80_columns_whole() {
     let help = rows(&app, 80, 24).pop().unwrap();
     assert!(help.is_ascii() && help.chars().count() <= 80, "{help:?}");
     assert!(
-        help.contains("move") && help.contains("save & quit"),
+        help.contains("wasd move") && help.contains("save & quit"),
         "{help:?}"
     );
 

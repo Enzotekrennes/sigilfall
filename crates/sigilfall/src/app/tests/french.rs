@@ -21,7 +21,7 @@ use crate::clock::ManualClock;
 use crate::language::Language;
 use crate::messages;
 use crate::persist::ScratchFolder;
-use crate::theme::{ColorMode, ColorSupport, GlyphSet, Theme};
+use crate::theme::{ColorMode, ColorSupport, Defaults, GlyphSet, Theme};
 use crate::ui::options::OptionRow;
 use crate::ui::title::TitleItem;
 
@@ -159,16 +159,17 @@ fn screen(app: &App) -> String {
 }
 
 /// Launches the application as `main` does on `folder`, on a system whose
-/// language is `system`, without arguments.
+/// language is `system` and whose keyboard is QWERTY, without arguments.
 fn launch_on(folder: &ScratchFolder, system: Language) -> App {
     App::launch_with_clock(
         ColorSupport::TrueColor,
-        system,
+        Defaults::with_language(system),
         &Cli {
             seed: None,
             daily: false,
             ascii: false,
             lang: None,
+            keyboard: None,
         },
         &shipped_content(),
         folder.save_file(),
@@ -375,13 +376,13 @@ fn every_french_screen_fits_80_by_24_with_its_key_help_whole() {
     let mut game = launch_with_arguments(&folder, &["--lang", "fr", "--seed", "42"]).unwrap();
     let help = rows(&game, 80, 24).pop().unwrap();
     for part in [
-        "←↑→↓/1-9 aller",
+        "wasd aller",
         ". repos",
         "t tracer",
         "g saisir",
         "i sac",
         "> descente",
-        "q quitter",
+        "q sauver et quitter",
     ] {
         assert!(help.contains(part), "`{part}` is missing from {help:?}");
     }

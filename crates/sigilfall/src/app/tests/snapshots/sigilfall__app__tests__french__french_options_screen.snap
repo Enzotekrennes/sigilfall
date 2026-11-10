@@ -1,9 +1,8 @@
 ---
 source: crates/sigilfall/src/app/tests/french.rs
-assertion_line: 510
+assertion_line: 511
 expression: screen(&app)
 ---
-
 
 
 
@@ -13,6 +12,7 @@ expression: screen(&app)
                        Couleurs     Auto · vraies couleurs
                        Thème        Sombre
                      › Langue       Français
+                       Clavier      QWERTY
                        Retour
 
                        Aperçu       @ v s ¡ § ▼ ▒▒▒···

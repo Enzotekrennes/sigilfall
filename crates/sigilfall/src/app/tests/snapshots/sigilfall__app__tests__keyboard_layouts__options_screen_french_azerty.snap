@@ -1,0 +1,29 @@
+---
+source: crates/sigilfall/src/app/tests/keyboard_layouts.rs
+assertion_line: 287
+expression: screen(&app)
+---
+
+
+
+                                 O P T I O N S
+
+                       Glyphes      Unicode
+                       Couleurs     Auto · vraies couleurs
+                       Thème        Sombre
+                       Langue       Français
+                     › Clavier      AZERTY
+                       Retour
+
+                       Aperçu       @ v s ¡ § ▼ ▒▒▒···
+
+   QWERTY : WASD pour bouger ; AZERTY : ZQSD, et la rangée du haut sans Maj.
+
+
+
+
+
+
+
+
+ ↑↓ choisir   ←→ changer   Échap retour

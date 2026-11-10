@@ -16,10 +16,13 @@
 //! new game that would replace a saved one asks first ([`State::Confirm`]),
 //! and deletes the save once the player agrees. The options screen
 //! ([`State::Options`], `ui::options`) changes the glyphs, the colours, the
-//! theme and the language: each change is applied to the screen at once and
-//! written to the options file (`persist::OptionsFile`); `--ascii` keeps
-//! ASCII glyphs and `--lang` a language for the session whatever the
-//! options say. Until the player chooses one, the language is the system's.
+//! theme, the language and the keyboard layout: each change is applied to
+//! the screen at once and written to the options file
+//! (`persist::OptionsFile`); `--ascii` keeps ASCII glyphs, `--lang` a
+//! language and `--keyboard` a layout for the session whatever the options
+//! say. Until the player chooses them, the language and the layout are the
+//! system's ([`Defaults`]). Every key is read through the keymaps of the
+//! layout in use (`input`), which the theme carries.
 //!
 //! The application keeps the message log of the game in progress: the
 //! events of each action are turned into lines of the language in use by
@@ -35,10 +38,10 @@
 //! seal) never closes a summary nobody has seen. The time, and today's UTC
 //! date, are read from a [`Clock`], which tests replace.
 //!
-//! The quit keys are `q`, on the game, end and title screens, and Ctrl+C
-//! everywhere; quitting a game saves it. Escape never quits: it closes the
-//! overlays, verdicts and sub-screens of the title, and does nothing on the
-//! game, end and title screens.
+//! The quit keys are `q` (`p` on AZERTY, where `q` moves), on the game, end
+//! and title screens, and Ctrl+C everywhere; quitting a game saves it.
+//! Escape never quits: it closes the overlays, verdicts and sub-screens of
+//! the title, and does nothing on the game, end and title screens.
 //!
 //! Casting a sigil goes through the overlay ([`State::Casting`]): `t` opens
 //! it, the digits link nodes, Backspace removes the last one, Escape closes
@@ -57,13 +60,13 @@
 //! meantime; a refusal of the game took no time and keeps the inventory
 //! open, with the reason under the list.
 //!
-//! Going down the stairs (`>`, or `D`) is a game action like a move: the
-//! game replaces the floor and its field of view, the screen draws the new
-//! one around the player with the depth on the status line, and the log
-//! keeps the floors above. Off the stairs the game refuses it at no cost,
-//! and the log says so. On the bottom floor the same key, on the seal,
-//! breaks it and wins the run; anywhere else there it is refused the same
-//! way.
+//! Going down the stairs (`>`, or `E`) is a game action like
+//! a move: the game replaces the floor and its field of view, the screen
+//! draws the new one around the player with the depth on the status line,
+//! and the log keeps the floors above. Off the stairs the game refuses it at
+//! no cost, and the log says so. On the bottom floor the same key, on the
+//! seal, breaks it and wins the run; anywhere else there it is refused the
+//! same way.
 //!
 //! `x` explores the floor automatically: the application submits
 //! `Action::Explore` again and again, drawing the screen after every step,
@@ -108,13 +111,14 @@ use crate::input::{
     self, AimCommand, Command, EndCommand, ExploringCommand, InventoryCommand, MenuCommand,
     OptionsCommand, SeedCommand, TraceCommand, VerdictCommand,
 };
+use crate::keyboard::Keyboard;
 use crate::language::Language;
 use crate::message_log::{Message, MessageLog};
 use crate::messages::{self, FileNotice, LaunchWanted};
 use crate::persist::{Loaded, LoadedOptions, OptionsFile, SaveFile};
 #[cfg(test)]
 use crate::theme::Options;
-use crate::theme::{ColorSupport, Settings, Theme};
+use crate::theme::{ColorSupport, Defaults, Settings, Theme};
 use crate::ui::inventory::InventoryScreen;
 use crate::ui::options::{self as options_screen, OptionRow, OptionsMenu};
 use crate::ui::title::{Confirmation, NewRun, SeedEntry, TitleItem, TitleMenu, TitleStep};
@@ -240,15 +244,15 @@ impl App {
     /// Starts the application of a run of the program, tied to the player's
     /// `save` file and to the options file beside it
     /// (`OptionsFile::beside`), for a terminal `detected` to support that
-    /// much colour and a system whose language is `system_language`, with
-    /// the monsters, items and sigils of `content`.
+    /// much colour and a system whose language and usual keyboard layout
+    /// are `system`, with the monsters, items and sigils of `content`.
     ///
     /// The theme comes from the saved options, with ASCII glyphs whatever
-    /// they say when `cli` has `--ascii`, and the language of `--lang` when
-    /// given. Without a language option (no options file, or one written
-    /// before the option existed), the game speaks `system_language`. An
-    /// options file that cannot be read gives the default options and a
-    /// notice, never an error.
+    /// they say when `cli` has `--ascii`, the language of `--lang` and the
+    /// layout of `--keyboard` when given. Without a language or a keyboard
+    /// option (no options file, or one written before the option existed),
+    /// the game follows `system`. An options file that cannot be read gives
+    /// the default options and a notice, never an error.
     ///
     /// Without `--seed`, the title screen opens, its menu on its first
     /// entry:
@@ -281,19 +285,12 @@ impl App {
     /// is never overwritten by a launch.
     pub fn launch(
         detected: ColorSupport,
-        system_language: Language,
+        system: Defaults,
         cli: &Cli,
         content: &Content,
         save: SaveFile,
     ) -> anyhow::Result<Self> {
-        Self::launch_with_clock(
-            detected,
-            system_language,
-            cli,
-            content,
-            save,
-            Box::new(SystemClock),
-        )
+        Self::launch_with_clock(detected, system, cli, content, save, Box::new(SystemClock))
     }
 
     /// [`App::launch`], reading the time and today's UTC date from `clock`
@@ -305,19 +302,20 @@ impl App {
     /// The errors of [`App::launch`].
     pub fn launch_with_clock(
         detected: ColorSupport,
-        system_language: Language,
+        system: Defaults,
         cli: &Cli,
         content: &Content,
         save: SaveFile,
         clock: Box<dyn Clock>,
     ) -> anyhow::Result<Self> {
         let options_file = OptionsFile::beside(&save);
-        let loaded_options = options_file.load(system_language);
+        let loaded_options = options_file.load(system);
         let settings = Settings {
-            options: loaded_options.options(system_language),
+            options: loaded_options.options(system),
             detected,
             forced_ascii: cli.ascii,
             forced_language: cli.lang,
+            forced_keyboard: cli.keyboard,
         };
         let mut app = Self::empty(settings.theme(), settings, content.clone(), clock);
         let requested = if cli.daily {
@@ -394,11 +392,13 @@ impl App {
         let settings = Settings {
             options: Options {
                 language: theme.language,
+                keyboard: theme.keyboard,
                 ..Options::default()
             },
             detected: ColorSupport::TrueColor,
             forced_ascii: false,
             forced_language: None,
+            forced_keyboard: None,
         };
         let welcome = messages::welcome(theme.language);
         let mut app = Self::empty(theme, settings, content, Box::new(ManualClock::new()));
@@ -488,6 +488,11 @@ impl App {
     /// Returns the language every text is written in, the theme's.
     const fn language(&self) -> Language {
         self.theme.language
+    }
+
+    /// Returns the keyboard layout every key is read for, the theme's.
+    const fn keyboard(&self) -> Keyboard {
+        self.theme.keyboard
     }
 
     /// Starts the new game `run`, its log opening with the problems
@@ -601,7 +606,7 @@ impl App {
     /// Ctrl+C quit.
     fn handle_title_key(&mut self, menu: TitleMenu, key: KeyEvent) {
         let has_save = self.saved.is_some();
-        let menu = match input::title_command_for(key) {
+        let menu = match input::title_command_for(self.keyboard(), key) {
             None => return,
             Some(MenuCommand::Quit) => {
                 self.state = State::Quit;
@@ -682,7 +687,7 @@ impl App {
     /// and starts the new game (see [`App::abandon_saved_game`]); Ctrl+C
     /// quits.
     fn handle_confirm_key(&mut self, confirmation: Confirmation, key: KeyEvent) {
-        let confirmation = match input::confirm_command_for(key) {
+        let confirmation = match input::confirm_command_for(self.keyboard(), key) {
             None => return,
             Some(MenuCommand::Quit) => {
                 self.state = State::Quit;
@@ -734,7 +739,7 @@ impl App {
     /// [`App::change_option`]); Escape, or Enter on "Back", goes back to
     /// the menu on "Options"; Ctrl+C quits.
     fn handle_options_key(&mut self, menu: OptionsMenu, key: KeyEvent) {
-        let menu = match input::options_command_for(key) {
+        let menu = match input::options_command_for(self.keyboard(), key) {
             None => return,
             Some(OptionsCommand::Quit) => {
                 self.state = State::Quit;
@@ -803,7 +808,7 @@ impl App {
         if self.exploration.is_some() {
             return self.handle_exploring_key(key);
         }
-        match input::command_for(key) {
+        match input::command_for(self.keyboard(), key) {
             None => {}
             Some(Command::Quit) => self.state = State::Quit,
             Some(_) if !self.screen_is_visible() => {}
@@ -907,7 +912,7 @@ impl App {
     /// Ctrl+C works: Enter and `q` are thrown away, and do not wait for the
     /// end of the period to act.
     fn handle_end_key(&mut self, key: KeyEvent) {
-        match input::end_command_for(key) {
+        match input::end_command_for(self.keyboard(), key) {
             None => {}
             Some(EndCommand::Interrupt) => self.state = State::Quit,
             Some(_) if self.end_screen_is_settling() => {}
@@ -947,7 +952,7 @@ impl App {
     /// Ctrl+C quits. Below 80 × 24 nothing else works.
     fn handle_inventory_key(&mut self, screen: InventoryScreen, key: KeyEvent) {
         let carried = self.carried();
-        let screen = match input::inventory_command_for(key) {
+        let screen = match input::inventory_command_for(self.keyboard(), key) {
             None => return,
             Some(InventoryCommand::Quit) => {
                 self.state = State::Quit;
@@ -1027,7 +1032,7 @@ impl App {
     fn handle_casting_key(&mut self, casting: Casting, key: KeyEvent) {
         let visible = self.screen_is_visible();
         match casting {
-            Casting::Drawing(mut drawing) => match input::trace_command_for(key) {
+            Casting::Drawing(mut drawing) => match input::trace_command_for(self.keyboard(), key) {
                 None => {}
                 Some(TraceCommand::Quit) => self.state = State::Quit,
                 Some(_) if !visible => {}
@@ -1042,7 +1047,7 @@ impl App {
                 }
                 Some(TraceCommand::Cast) => self.validate(drawing),
             },
-            Casting::Aiming { trace, .. } => match input::aim_command_for(key) {
+            Casting::Aiming { trace, .. } => match input::aim_command_for(self.keyboard(), key) {
                 None => {}
                 Some(AimCommand::Quit) => self.state = State::Quit,
                 Some(_) if !visible => {}

@@ -1,8 +1,8 @@
 ---
 source: crates/sigilfall/src/app/tests/options_screen.rs
+assertion_line: 101
 expression: text
 ---
-"                                                                                "
 "                                                                                "
 "                                                                                "
 "                                                                                "
@@ -12,6 +12,7 @@ expression: text
 "                         Colours      Auto · true colour                        "
 "                         Theme        Dark                                      "
 "                         Language     English                                   "
+"                         Keyboard     QWERTY                                    "
 "                         Back                                                   "
 "                                                                                "
 "                         Sample       @ v s ¡ § ▼ ▒▒▒···                        "

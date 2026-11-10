@@ -82,11 +82,12 @@ library, and the terminal application in a binary that depends on it.
 | Module | Responsibility |
 |---|---|
 | `main` | Reads the command line, prepares and restores the terminal (also on a panic), runs the application and saves the game on leaving. |
-| `cli` | `Cli`: the `--seed`, `--daily`, `--ascii` and `--lang` options, parsed by clap; the help is in English, as for most command-line tools. |
+| `cli` | `Cli`: the `--seed`, `--daily`, `--ascii`, `--lang` and `--keyboard` options, parsed by clap; the help is in English, as for most command-line tools. |
 | `language` | `Language` (English or French), its default read from the system's locale (`sys-locale`, `Language::from_locale`), and the order the options screen goes through. |
+| `keyboard` | `Keyboard` (QWERTY or AZERTY), its default guessed from the system's locale (`Keyboard::from_locale`: AZERTY for the French of France or Belgium), and the order the options screen goes through. |
 | `app` | `App`: the screen state machine (title, seed entry, confirmation, options, game, sigil overlay, inventory, end screen), the handling of each key, and the event loop. |
 | `app::exploring` | The walk of automatic exploration (`x`): when it stops, its step limit and the pause between steps. |
-| `input` | The keymaps: one function per kind of screen, from a key press to a command. Only presses count, not releases. |
+| `input` | The keymaps of each keyboard layout: one table of bindings per kind of screen (`game_bindings`, `trace_bindings`…) and one function that looks a key press up in it; the keys the key help names (`key_names`). Only presses count, not releases. |
 | `clock` | Where the application reads the wall-clock time, for the end screen's short grace period only; tests replace it with a manual clock. Game time never depends on it. |
 | `casting` | The sigil overlay's own state: the trace being drawn, the direction prompt, the verdict of a cast. |
 | `messages` | The catalogue: every sentence and label the player reads, in English and in French, including the description of each `Event` and the notices about files (`FileNotice`, worded when shown). |
@@ -94,7 +95,7 @@ library, and the terminal application in a binary that depends on it.
 | `messages::grammar` | Articles, elision and agreement: how a sentence names a creature or an item in each language. |
 | `message_log` | The message log: lines with a tone, oldest first, with a bounded history. |
 | `persist` | The data folder (`SIGILFALL_DATA_DIR` or the system's), `save.ron` and `options.ron`, written atomically; why a file could not be read, as facts (`SaveRefusal`, `OptionsProblem`) that `messages` words. |
-| `theme` | The colour tokens (see [Visual identity](#visual-identity)), the four colour modes and the light theme, colour detection, the player's options, and the language the theme's screens write in. |
+| `theme` | The colour tokens (see [Visual identity](#visual-identity)), the four colour modes and the light theme, colour detection, the player's options with the system's `Defaults`, and the language and the keyboard layout the theme's screens write and name keys for. |
 | `theme::glyphs` | Every character the screens draw with, in Unicode and in ASCII. |
 | `ui` | Drawing with ratatui from read-only state: picks the screen for the terminal's size (a resize message under 80 × 24). |
 | `ui::camera` | Which part of the 80 × 40 floor the map area shows, centred on the player. |
@@ -107,15 +108,16 @@ library, and the terminal application in a binary that depends on it.
 | `ui::death` | The death summary: cause, depth, kills, sigils cast, the seed to replay; and the summary it shares with the victory screen. |
 | `ui::victory` | The victory screen, once the seal is broken: the same summary as a death, under its own title and line. |
 | `ui::title` | The title screen, its menu, the seed entry and the confirmation before a saved game is abandoned. |
-| `ui::options` | The options screen: glyphs, colours, theme and language, each language named in itself. |
+| `ui::options` | The options screen: glyphs, colours, theme, language and keyboard layout, each language named in itself. |
 
 ## Flows
 
 ### A key press becomes a turn
 
 1. `App::run` draws the screen, then waits for a key (crossterm).
-2. `input` turns the key into a command for the active screen; releases,
-   repeats and unbound keys do nothing.
+2. `input` turns the key into a command for the active screen, through
+   the table of the keyboard layout in use (which the theme carries);
+   releases, repeats and unbound keys do nothing.
 3. On the game screen, a command that acts becomes an `Action` and goes to
    `Game::submit`. A sigil is drawn in the overlay first and submitted
    whole, as one `Action::Cast`, once validated.
@@ -216,6 +218,7 @@ Each line gives the choice, then the alternative set aside.
 | D25 | The "IN VIEW" block gives each monster's current and maximum hit points (for a kind seen several times, the most wounded one), so the player chooses a target and the moment to flee on information they can read. | Hit points in the message log only. |
 | D26 | Unlimited rest: waiting regenerates essence at no cost, so Recall heals without limit out of a fight. Monsters never come back and the challenge lies in the fights, where time is short; a common choice of the genre, with no new rule to balance. | Hunger, wandering monsters, or essence regained only by exploring. |
 | D27 | Two languages, English and French, for every text the player reads: a catalogue in `messages`, one function per sentence with both wordings side by side in a `match`, and the fixed texts in a `Labels` struct whose two values the compiler requires to be complete; content names in the RON files, both languages required at loading, French written with its article and gender (and a plural for creatures). The language follows the system's locale until the player picks one in the options, which keeps it; `--lang en|fr` sets it for a session; the theme carries it to every screen. French follows French typography (no-break space before `: ; ! ?`, which the wrapping never breaks). The line to share and the seed stay the same in both languages, so players compare runs as text; `--help` and the errors written on the error output by the system stay in English. A test renders every screen in French and fails on any word of an English witness list. | A translation framework (Fluent, gettext) and files read at run time; names of the content in a table of the binary, away from the entries they name; a translated line to share. |
+| D28 | Two keyboard layouts, QWERTY and AZERTY, so that moving and tracing never need Shift: one table of bindings per screen and layout in `input`, the lookup reading the same table, and a test that goes through every table and fails on a key bound twice. Both layouts keep the arrows, the keypad with or without Num Lock, the digits (Shift accepted) and the vi keys; QWERTY adds WASD, AZERTY adds ZQSD and the top row typed without Shift (`& é " ' ( - è _ ç à`), which stands for `1` to `0` wherever a digit counts (moves, wait, the trace grid, the inventory slots). On AZERTY `q` and `d` move, so quitting takes `p` (under the right hand, away from ZQSD), and the stairs also take `<` there. On both layouts the letter that goes down the stairs, besides `>`, is `E` ("escalier"), which replaced `D` on QWERTY: `d` moves east on both, and `e` does nothing on the map, so Caps Lock never turns a step east into a descent. The layout is an option kept in `options.ron` (a file without it still reads, version 1), `--keyboard qwerty` or `--keyboard azerty` sets it for a session, and until the player chooses, it is guessed from the locale: AZERTY for the French of France or Belgium (or French without a region), QWERTY otherwise. The key help names the layout's keys (`wasd` or `zqsd`, `1-9` or `&…ç`, `q` or `p`) in each language; the game's help leaves the arrows, digits and vi keys to the README so it can say that quitting saves ("save & quit", "sauver et quitter"), and narrows the gap between pairs from three columns to two when three would not fit, which only the French game help needs at 80 columns. | Reading the layout from the system (`GetKeyboardLayout` on Windows, Text Input Sources on macOS: calls that need `unsafe`, forbidden by D9, and nothing reliable in a Linux terminal or over SSH); keys by position (scan codes), which crossterm does not report on every terminal; Shift+q to quit on AZERTY, which Caps Lock would trigger on every step west; `D` to descend, which Caps Lock would trigger on every step east; a French help shortened to "quitter", which hid that quitting saves. |
 
 ## Visual identity
 
@@ -258,14 +261,15 @@ its own. The rules below are the ones those values follow.
   shows only its landmarks (walls, stairs, the seal, carved glyphs), dimmer;
   a cell never seen stays empty. Creatures and items are drawn only in view,
   the player over everything.
-- **Two languages.** Every screen fits 80 × 24 in English and in French;
-  French labels were chosen to fit the same places, the game's key help
-  included.
+- **Two languages, two keyboards.** Every screen fits 80 × 24 in English
+  and in French, on QWERTY and on AZERTY; French labels were chosen to fit
+  the same places, the game's key help included, and the key help names the
+  keys of the layout in use.
 - **Layout at 80 × 24.** The status line on the first row; the map, 58 × 16,
   with the side panel (21 columns and a border) on its right; the log, five
   lines under a separator into which the panel's border comes down; the key
   help on the last row, each key in `text` and its label in `text_muted`,
-  three spaces apart. On a larger terminal only the map grows; on a smaller
+  three spaces apart, two when three would not fit the row (D28). On a larger terminal only the map grows; on a smaller
   one a message asks for 80 × 24. Log lines are wrapped at 76 columns and
   the log keeps the last 100 messages.
 - **Health.** A bar of 18 cells with "HP n/max": `hp_high` above half,

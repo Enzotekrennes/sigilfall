@@ -1,5 +1,6 @@
 ---
 source: crates/sigilfall/src/app/tests/victory_screen.rs
+assertion_line: 225
 expression: screen
 ---
  Depth 10 · Turn 976                                   Seed 7F3A-91C2-0B5E-D4A8 
@@ -25,4 +26,4 @@ expression: screen
                                                                                 
                                                                                 
                                                                                 
- ←↑→↓/1-9 move   . wait   t trace   g take   i pack   > unseal   q save & quit
+ wasd move   . wait   t trace   g take   i pack   > unseal   q save & quit

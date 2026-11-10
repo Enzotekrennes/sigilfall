@@ -1,5 +1,6 @@
 ---
 source: crates/sigilfall/src/app/tests/sigils.rs
+assertion_line: 531
 expression: text(&app)
 ---
 " Depth 1 · Turn 3                                      Seed 7F3A-91C2-0B5E-D4A8 "
@@ -25,4 +26,4 @@ expression: text(&app)
 "                                                                                "
 "                                                                                "
 "                                                                                "
-" ←↑→↓/1-9 move   . wait   t trace   g take   i pack   > descend   q save & quit "
+" wasd move   . wait   t trace   g take   i pack   > descend   q save & quit     "

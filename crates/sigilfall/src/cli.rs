@@ -11,11 +11,14 @@
 //! is reported by clap with the accepted forms of the value and ends the
 //! process with a non-zero exit code, before the terminal is touched. So is
 //! `--daily` given with `--seed`: the daily dungeon has its own seed, so the
-//! two cannot both choose the run.
+//! two cannot both choose the run. `--lang` and `--keyboard` choose the
+//! language and the keyboard layout for one session, without changing the
+//! options.
 
 use clap::Parser;
 use sigilfall_core::rng::Seed;
 
+use crate::keyboard::Keyboard;
 use crate::language::Language;
 
 /// Terminal roguelike where spells are cast by tracing sigils on the
@@ -52,6 +55,13 @@ pub struct Cli {
     /// language chosen in the options, or else the system's.
     #[arg(long, value_name = "LANG")]
     pub lang: Option<Language>,
+
+    /// Keyboard layout for this session, whatever the Keyboard option says:
+    /// qwerty (WASD to move) or azerty (ZQSD to move, the top row without
+    /// Shift for the digits). Without it, the game follows the layout chosen
+    /// in the options, or else the one usual with the system's language.
+    #[arg(long, value_name = "LAYOUT")]
+    pub keyboard: Option<Keyboard>,
 }
 
 /// Returns a new random seed, for a new game started without a seed.
@@ -122,6 +132,7 @@ mod tests {
             daily: true,
             ascii: true,
             lang: None,
+            keyboard: None,
         };
         assert_eq!(parse(&["--daily", "--ascii"]).unwrap(), expected);
         assert_eq!(parse(&["--ascii", "--daily"]).unwrap(), expected);
@@ -233,10 +244,31 @@ mod tests {
             daily: false,
             ascii: true,
             lang: None,
+            keyboard: None,
         };
 
         assert_eq!(parse(&["--ascii", "--seed", "7"]).unwrap(), expected);
         assert_eq!(parse(&["--seed", "7", "--ascii"]).unwrap(), expected);
+    }
+
+    #[test]
+    fn keyboard_takes_qwerty_or_azerty_and_nothing_else() {
+        assert_eq!(parse(&[]).unwrap().keyboard, None);
+        assert_eq!(
+            parse(&["--keyboard", "azerty"]).unwrap().keyboard,
+            Some(Keyboard::Azerty)
+        );
+        assert_eq!(
+            parse(&["--keyboard=qwerty"]).unwrap().keyboard,
+            Some(Keyboard::Qwerty)
+        );
+        let error = parse(&["--keyboard", "qwertz"]).unwrap_err();
+        let message = error.to_string();
+        assert_eq!(error.kind(), ErrorKind::InvalidValue, "{message}");
+        assert!(
+            message.contains("qwerty") && message.contains("azerty"),
+            "{message}"
+        );
     }
 
     #[test]

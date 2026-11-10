@@ -1,11 +1,13 @@
 # Sigilfall
 
+**English** · [Français](README.fr.md)
+
 [![CI](https://github.com/Enzotekrennes/sigilfall/actions/workflows/ci.yml/badge.svg)](https://github.com/Enzotekrennes/sigilfall/actions/workflows/ci.yml)
 
 A terminal roguelike where spells are cast by tracing sigils on a 3 × 3 grid
-with the number keys: the pattern decides the spell, new patterns are learnt
-from glyphs carved in the dungeon floor, and a sloppy trace fizzles or
-backfires.
+with the number keys, on QWERTY and AZERTY keyboards alike: the pattern
+decides the spell, new patterns are learnt from glyphs carved in the dungeon
+floor, and a sloppy trace fizzles or backfires.
 
 <!-- assets/demo.gif is recorded from demo.tape by the `demo` job of the CI
 workflow (run it by hand or push a version tag), then committed by hand. -->
@@ -68,41 +70,56 @@ saved and resumed, even on a later day.
 | `--daily` | Start the daily dungeon at once, without the title screen: the same dungeon for every player of the same version of the game on the same UTC date, a new one each day at midnight UTC. Cannot be combined with `--seed`. Refused while a game is saved, as `--seed` is. |
 | `--ascii` | Draw with plain ASCII characters instead of Unicode glyphs, for this session only, whatever the Glyphs option says. |
 | `--lang <LANG>` | Play in `en` (English) or `fr` (French) for this session only, whatever the Language option says. |
+| `--keyboard <LAYOUT>` | Use the keys of a `qwerty` or an `azerty` keyboard for this session only, whatever the Keyboard option says. |
 | `--help`, `--version` | Print the help or the version. |
 
 ### Keys
 
+The keys follow the keyboard layout chosen in the options, QWERTY or AZERTY
+(see [Options](#options)), so that moving and tracing never need Shift. The
+two layouts share the arrows, the keypad (with or without Num Lock), the
+digits and the vi keys `h j k l y u b n`; QWERTY adds WASD, and AZERTY adds
+ZQSD and the top row typed without Shift, `& é " ' ( - è _ ç à`, which
+stands for the digits `1` to `0` wherever a digit counts (with Shift, the
+same keys give the digits, which work too).
+
 On the map:
 
-| Keys | Action |
-|---|---|
-| Arrows, `1`-`9` around `5` (keypad or top row), `h j k l y u b n` | Move one cell, diagonals included; moving into a monster attacks it |
-| Home, Page Up, End, Page Down | Move diagonally (the keypad without Num Lock) |
-| `.`, `5`, keypad centre | Wait a turn |
-| `t` | Open the sigil grid to trace a sigil |
-| `g`, `,` | Pick up the item underfoot |
-| `i` | Open the inventory |
-| `>`, `D` | Go down the stairs, when standing on them; on the tenth floor, break the seal standing on it |
-| `x` | Explore: walk towards the nearest unexplored place, step by step (see below) |
-| `q` | Save and quit |
-| Ctrl+C | Quit from any screen, saving the game in progress |
+| Action | QWERTY | AZERTY |
+|---|---|---|
+| Move one cell, diagonals included; moving into a monster attacks it | Arrows, `w a s d`, `1`-`9` around `5` (keypad or top row), `h j k l y u b n` | Arrows, `z q s d`, `1`-`9` around `5` (keypad, or top row with or without Shift: `& é " ' - è _ ç`), `h j k l y u b n` |
+| Move diagonally (the keypad without Num Lock) | Home, Page Up, End, Page Down | Home, Page Up, End, Page Down |
+| Wait a turn | `.`, `5`, keypad centre | `.`, `5` or `(`, keypad centre |
+| Open the sigil grid to trace a sigil | `t` | `t` |
+| Pick up the item underfoot | `g`, `,` | `g`, `,` |
+| Open the inventory | `i` | `i` |
+| Go down the stairs, when standing on them; on the tenth floor, break the seal standing on it | `>`, `E` | `>`, `<`, `E` |
+| Explore: walk towards the nearest unexplored place, step by step (see below) | `x` | `x` |
+| Save and quit | `q` | `p` |
+| Quit from any screen, saving the game in progress | Ctrl+C | Ctrl+C |
 
-Escape never quits: it closes the grid, the inventory and the sub-screens of
-the title, and does nothing on the map.
+On AZERTY, `q` and `d` move, so quitting takes `p`. On both layouts the
+letter that goes down the stairs is `E`: `d` moves east, and `e` does
+nothing on the map, so Caps Lock never turns a step into a descent. Escape
+never quits: it closes the grid, the inventory
+and the sub-screens of the title, and does nothing on the map. No key does
+two things on one screen of one layout; a test goes through every key of
+every screen to keep it so.
 
 Exploring with `x` takes one step at a time, each one a normal move, and
 stops as soon as a monster comes into view, an item or an unread glyph
 appears, you are hurt, nothing is left to explore, any key is pressed, or
 after 200 steps; the log says why. It does not start with a monster in view.
-The key help at the bottom of the screen has no room for `x`, so it is
-listed here only.
+The key help at the bottom of the screen names the letters of your layout
+for moving and says that quitting saves the game; it has no room for the
+arrows, the digits, the vi keys or `x`, so they are listed here only.
 
 While tracing a sigil, the grid is numbered like the keypad (7 8 9 on top,
 1 2 3 at the bottom):
 
 | Keys | Action |
 |---|---|
-| `1`-`9`, or the keypad with or without Num Lock | Link that node to the trace |
+| `1`-`9`, on AZERTY also the top row without Shift (`&` for `1` to `ç` for `9`), or the keypad with or without Num Lock | Link that node to the trace |
 | Backspace | Remove the last node |
 | Enter | Cast the trace |
 | Escape | Close the grid; no time passes |
@@ -111,25 +128,28 @@ A sigil aimed in a direction then asks for one: a movement key aims, Escape
 goes back to the trace. After an unstable or failed cast, any key closes the
 verdict.
 
-In the inventory: Up and Down (or `k` and `j`), Home and End, or the digits
-`1`-`9` and `0` choose an item; Enter or `u` uses it, `d` drops it, Escape
-closes the inventory.
+In the inventory: Up and Down (or `k` and `j`, `w` and `s` on QWERTY, `z`
+and `s` on AZERTY), Home and End, or the digits `1`-`9` and `0` (on AZERTY
+also `&` to `à` without Shift) choose an item; Enter or `u` uses it, `d`
+drops it, Escape closes the inventory.
 
 On the title screen and the confirmation before abandoning a saved game: Up
-and Down (or `k` and `j`), Home and End, Enter; Escape goes back from the
-confirmation, `q` quits from the title. While typing a seed: Backspace
-erases, Enter starts, Escape goes back. On the options screen: Up and Down
-(or `k` and `j`) choose, Left and Right (or `h` and `l`), Enter or Space
-change the value, Escape goes back. After death, the summary shows the seed
+and Down (or `k` and `j`, `w` and `s` on QWERTY, `z` and `s` on AZERTY),
+Home and End, Enter; Escape goes back from the confirmation, `q` quits from
+the title (`p` on AZERTY). While typing a seed: Backspace erases, Enter
+starts, Escape goes back. On the options screen: Up and Down (or `k` and
+`j`, `w` and `s`, `z` and `s`) choose, Left and Right (or `h` and `l`, `a`
+and `d` on QWERTY, `q` and `d` on AZERTY), Enter or Space change the value,
+Escape goes back. After death, the summary shows the seed
 of the run and a line to copy and share, such as
 `Sigilfall daily 2026-11-08 - depth 4, turn 812, 23 slain, 9 sigils` (or
 `Sigilfall seed 7F3A-91C2-0B5E-D4A8 - …` for a run of a seed). Breaking the
 seal opens the victory screen, with the same summary and a line that says
 `victory` where the depth would be, such as
 `Sigilfall daily 2026-11-08 - victory, turn 4120, 96 slain, 31 sigils`.
-On either screen Enter goes back to the title, `q` quits. For one second
-after the end of the run only Ctrl+C works, so a key already on its way does
-not close the summary unseen.
+On either screen Enter goes back to the title, `q` quits (`p` on AZERTY).
+For one second after the end of the run only Ctrl+C works, so a key already
+on its way does not close the summary unseen.
 
 ### How sigils work
 
@@ -146,11 +166,16 @@ of a turn for each node linked, and the monsters keep moving meanwhile.
 ### Options
 
 **Glyphs** (Unicode or ASCII), **Colours** (Auto, 16 colours or Monochrome),
-**Theme** (dark, or light for 24-bit colour terminals) and **Language**
-(English or Français) apply at once and are kept for the next sessions. Auto
-follows the terminal and `NO_COLOR`; 16 colours and Monochrome apply
-whatever they say. Until you choose a language, the game speaks French on a
-system set to French and English otherwise. The line to share on the end
+**Theme** (dark, or light for 24-bit colour terminals), **Language**
+(English or Français) and **Keyboard** (QWERTY or AZERTY) apply at once and
+are kept for the next sessions. Auto follows the terminal and `NO_COLOR`; 16
+colours and Monochrome apply whatever they say. Until you choose a language,
+the game speaks French on a system set to French and English otherwise.
+Until you choose a keyboard, it takes AZERTY on a system set to the French
+of France or Belgium, where AZERTY keyboards are the usual ones, and QWERTY
+otherwise: the layout itself cannot be read from every system and terminal
+in a safe and reliable way, so the game guesses from the language and region
+of the system, and the option sets it right. The line to share on the end
 screens stays in English, so two players' lines compare whatever their
 language; `--help` is in English, as for most command-line tools.
 

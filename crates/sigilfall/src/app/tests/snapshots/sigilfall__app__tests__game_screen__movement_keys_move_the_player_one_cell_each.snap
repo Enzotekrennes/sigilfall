@@ -1,5 +1,6 @@
 ---
 source: crates/sigilfall/src/app/tests/game_screen.rs
+assertion_line: 56
 expression: "render(&app, 80, 24).backend()"
 ---
 " Depth 1 · Turn 5                                      Seed 7F3A-91C2-0B5E-D4A8 "
@@ -25,4 +26,4 @@ expression: "render(&app, 80, 24).backend()"
 "                                                                                "
 "                                                                                "
 "                                                                                "
-" ←↑→↓/1-9 move   . wait   t trace   g take   i pack   > descend   q save & quit "
+" wasd move   . wait   t trace   g take   i pack   > descend   q save & quit     "

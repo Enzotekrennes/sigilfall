@@ -29,6 +29,7 @@ use sigilfall_core::content::Content;
 use sigilfall_core::game::{Game, Status};
 use sigilfall_core::stats::Stats;
 
+use crate::input;
 use crate::language::Language;
 use crate::messages;
 use crate::theme::Theme;
@@ -132,7 +133,10 @@ pub(super) fn render_summary(
                 theme.labels().enter_key.to_owned(),
                 theme.labels().title_label,
             ),
-            (messages::QUIT_KEY.to_owned(), theme.labels().quit_label),
+            (
+                input::quit_key(theme.keyboard).to_string(),
+                theme.labels().quit_label,
+            ),
         ],
         theme,
     );

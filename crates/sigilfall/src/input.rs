@@ -1,43 +1,52 @@
-//! Keymap: turns key presses into commands for the application.
+//! Keymap: turns key presses into commands for the application, for the
+//! player's keyboard layout.
 //!
-//! Exposes one keymap per kind of screen: [`command_for`] on the game
-//! screen ([`Command`]), [`trace_command_for`] while a sigil is traced
-//! ([`TraceCommand`]), [`aim_command_for`] while its direction is asked
-//! ([`AimCommand`]), [`verdict_command_for`] while the verdict of a cast
-//! is shown ([`VerdictCommand`]), [`inventory_command_for`] while the
-//! inventory is open ([`InventoryCommand`]), [`exploring_command_for`]
-//! while the floor is explored automatically ([`ExploringCommand`]),
-//! [`end_command_for`] on the end
-//! screen ([`EndCommand`]), and for the screens before a game:
+//! Exposes one keymap per kind of screen, each a table of bindings for a
+//! [`Keyboard`] and a function that looks a key up in it: [`command_for`]
+//! on the game screen ([`Command`], table [`game_bindings`]),
+//! [`trace_command_for`] while a sigil is traced ([`TraceCommand`],
+//! [`trace_bindings`]), [`aim_command_for`] while its direction is asked
+//! ([`AimCommand`], [`aim_bindings`]), [`inventory_command_for`] while the
+//! inventory is open ([`InventoryCommand`], [`inventory_bindings`]),
+//! [`end_command_for`] on the end screen ([`EndCommand`],
+//! [`end_bindings`]), and for the screens before a game:
 //! [`title_command_for`] on the title menu and [`confirm_command_for`] on
-//! the confirmation before a saved game is abandoned ([`MenuCommand`]),
-//! [`seed_command_for`] while a seed is typed ([`SeedCommand`]) and
-//! [`options_command_for`] on the options screen ([`OptionsCommand`]).
+//! the confirmation before a saved game is abandoned ([`MenuCommand`],
+//! [`title_bindings`], [`confirm_bindings`]) and [`options_command_for`]
+//! on the options screen ([`OptionsCommand`], [`options_bindings`]). Three
+//! screens take any key and have no table: [`verdict_command_for`] while
+//! the verdict of a cast is shown ([`VerdictCommand`]),
+//! [`exploring_command_for`] while the floor is explored automatically
+//! ([`ExploringCommand`]) and [`seed_command_for`] while a seed is typed
+//! ([`SeedCommand`]). [`key_names`] gives the keys the key help names that
+//! differ between layouts.
+//!
+//! Every table holds each key once, so no key does two things on one
+//! screen of one layout (a test goes through them all). The layouts share
+//! the arrows, the keypad (with or without Num Lock), the digits typed with
+//! or without Shift and the vi keys `h j k l y u b n`; QWERTY adds WASD,
+//! and AZERTY adds ZQSD and the top row typed without Shift
+//! (`& é " ' ( - è _ ç à`), which stands for the digits `1` to `0` wherever
+//! a digit counts. `q` and `d` move on AZERTY, so quitting and the letter
+//! that goes down the stairs take other keys there (see [`quit_key`] and
+//! [`descend_keys`]).
+//!
 //! Only key presses count: crossterm also reports key releases on Windows,
 //! and treating them as input would play every key twice. Ctrl+C quits from
-//! every screen, since raw mode turns it into a plain key; `q` quits from
-//! the game, end and title screens only. Escape never quits: it closes an
-//! overlay, a verdict or a sub-screen of the title, and does nothing on the
-//! game, end and title screens, so a second press after closing one loses
-//! nothing. This module decides nothing about the game itself; the `app`
-//! module submits the resulting actions to `sigilfall_core`.
+//! every screen, since raw mode turns it into a plain key; the quit key
+//! quits from the game, end and title screens only. Escape never quits: it
+//! closes an overlay, a verdict or a sub-screen of the title, and does
+//! nothing on the game, end and title screens, so a second press after
+//! closing one loses nothing. This module decides nothing about the game
+//! itself; the `app` module submits the resulting actions to
+//! `sigilfall_core`.
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use sigilfall_core::action::Action;
 use sigilfall_core::geometry::Direction;
 use sigilfall_core::sigil::Node;
 
-/// Second key that goes down the stairs, beside `>`: `D`, typed Shift+d.
-///
-/// `>` is the key of the genre, and the one the key help names. On an
-/// AZERTY keyboard it is Shift and the `<` key next to it, as easy as Shift
-/// and `.` on QWERTY; but some layouts, such as AZERTY on a laptop without
-/// the `<` key, have no plain way to type it. `D` sits at the same place on
-/// every Latin layout, reads as "descend", and its lower case is bound to
-/// nothing on the game screen: `d` drops an item in the inventory, so a
-/// player pressing it once too many after a drop never leaves the floor by
-/// mistake.
-pub const DESCEND_ALTERNATIVE_KEY: char = 'D';
+use crate::keyboard::Keyboard;
 
 /// Key that explores the floor automatically, step by step: `x`.
 ///
@@ -48,6 +57,16 @@ pub const DESCEND_ALTERNATIVE_KEY: char = 'D';
 /// roguelikes (NetHack, Angband) open doors with it, which this game may
 /// want one day.
 pub const EXPLORE_KEY: char = 'x';
+
+/// The top row of an AZERTY keyboard typed without Shift, from the key of
+/// `0` to the key of `9`: entry `n` stands for the digit `n`, which the same
+/// key gives with Shift.
+const AZERTY_DIGIT_ROW: [char; 10] = ['à', '&', 'é', '"', '\'', '(', '-', 'è', '_', 'ç'];
+
+/// Mark between the first and the last key of a row in the key help, as in
+/// "&…ç" for the AZERTY keys of the digits `1` to `9`. A dash would read as
+/// one of those keys (`-` is the key of `6`).
+const RANGE_MARK: char = '…';
 
 /// What the player asked for with one key press.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,7 +160,7 @@ pub enum VerdictCommand {
 pub enum EndCommand {
     /// Go back to the title screen (Enter).
     Title,
-    /// Leave the game (`q`).
+    /// Leave the game (the quit key of the layout).
     Quit,
     /// Leave the game at once (Ctrl+C): unlike the other keys, it is never
     /// held back while the end screen settles.
@@ -206,43 +225,153 @@ pub enum OptionsCommand {
     Quit,
 }
 
-/// Returns the command bound to `key`, or `None` when the key does nothing.
+/// One binding of a keymap: a key, as crossterm reports it once pressed
+/// alone or with Shift, and what it does on that screen.
+pub type Binding<C> = (KeyCode, C);
+
+/// The keys the key help names that differ between layouts, written as
+/// the help shows them. The other keys it names (`.`, `t`, `g`, `i`, `>`,
+/// `d`, Enter, Escape, Backspace) are the same on both.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyNames {
+    /// The four letters that move, north, west, south and east: `wasd` or
+    /// `zqsd`.
+    pub movement: String,
+    /// The keys that link the nodes `1` to `9` of the grid: `1-9`, or on
+    /// AZERTY the top row without Shift, `&…ç`.
+    pub nodes: String,
+    /// The keys that choose an item by its slot, the first to the tenth:
+    /// `1-0`, or on AZERTY `&…à`.
+    pub slots: String,
+    /// The key that saves and quits ([`quit_key`]).
+    pub quit: String,
+}
+
+/// Returns the keys the key help names on `keyboard` (see [`KeyNames`]),
+/// taken from the same values as the tables, so the help never names a key
+/// the layout does not bind.
+pub fn key_names(keyboard: Keyboard) -> KeyNames {
+    let range = |first: u8, last: u8| match keyboard {
+        Keyboard::Qwerty => format!("{first}-{last}"),
+        Keyboard::Azerty => {
+            let row = AZERTY_DIGIT_ROW;
+            format!(
+                "{}{RANGE_MARK}{}",
+                row[usize::from(first)],
+                row[usize::from(last)]
+            )
+        }
+    };
+    KeyNames {
+        movement: movement_letters(keyboard).iter().collect(),
+        nodes: range(1, 9),
+        slots: range(1, 0),
+        quit: quit_key(keyboard).to_string(),
+    }
+}
+
+/// Returns the key that saves the game and quits on `keyboard`, from the
+/// game, end and title screens: `q` on QWERTY; `p` on AZERTY, where `q`
+/// moves west.
+///
+/// `p` sits under the right hand, away from ZQSD, so a stray press while
+/// moving does not end the session; Escape stays free to close overlays,
+/// and Shift+q was set aside because Caps Lock would make every step west a
+/// quit.
+pub const fn quit_key(keyboard: Keyboard) -> char {
+    match keyboard {
+        Keyboard::Qwerty => 'q',
+        Keyboard::Azerty => 'p',
+    }
+}
+
+/// Returns the keys that go down the stairs on `keyboard`, the one the key
+/// help names first.
+///
+/// `>` is the key of the genre and the one the help names on both layouts:
+/// Shift and `.` on QWERTY, Shift and the `<` key on AZERTY. Some layouts
+/// have no plain way to type it, such as AZERTY on a laptop without the `<`
+/// key, so a capital letter does the same on both layouts: `E` ("escalier",
+/// or "exit" the floor). `D` was the letter before WASD and ZQSD, but `d`
+/// now moves east on both, and Caps Lock would have turned a step east into
+/// a descent; `e` is bound to nothing on the game screen. AZERTY also takes
+/// `<`, the same key as `>` without Shift, since nothing goes up.
+pub const fn descend_keys(keyboard: Keyboard) -> &'static [char] {
+    match keyboard {
+        Keyboard::Qwerty => &['>', 'E'],
+        Keyboard::Azerty => &['>', '<', 'E'],
+    }
+}
+
+/// Returns the letters that move north, west, south and east on
+/// `keyboard`, in that order: WASD on QWERTY, ZQSD on AZERTY, the same
+/// four keys under the left hand.
+pub const fn movement_letters(keyboard: Keyboard) -> [char; 4] {
+    match keyboard {
+        Keyboard::Qwerty => ['w', 'a', 's', 'd'],
+        Keyboard::Azerty => ['z', 'q', 's', 'd'],
+    }
+}
+
+/// Returns the bindings of the game screen on `keyboard`.
 ///
 /// Bindings:
-/// - moves: arrow keys, the keypad digits around 5 (`7 8 9 / 4 6 / 1 2 3`,
-///   with or without Num Lock, where Home, Page Up, End and Page Down are the
-///   diagonals) and the vi keys `h j k l y u b n`;
-/// - wait: `.`, `5` or the keypad centre key without Num Lock;
-/// - trace a sigil: `t`, shown in the key help (the
-///   digits are taken by movement, and `t` is not a vi key);
-/// - pick up the item underfoot: `g`, shown in the key help, or `,`, the key
-///   of other roguelikes; neither is a vi key;
+/// - moves: the keys of [`direction_bindings`] (arrows, keypad, digits
+///   around 5, vi keys, WASD or ZQSD, and on AZERTY the top row);
+/// - wait: `.`, `5` (also `(` on AZERTY, the same key without Shift) or
+///   the keypad centre key without Num Lock;
+/// - trace a sigil: `t`, shown in the key help (the digits are taken by
+///   movement, and `t` is not a vi key);
+/// - pick up the item underfoot: `g`, shown in the key help, or `,`, the
+///   key of other roguelikes; neither is a vi key;
 /// - open the inventory: `i`;
-/// - go down the stairs: `>`, the key of the genre, or
-///   [`DESCEND_ALTERNATIVE_KEY`]; the game refuses it off the stairs, at no
-///   cost;
+/// - go down the stairs: [`descend_keys`]; the game refuses it off the
+///   stairs, at no cost;
 /// - explore automatically: [`EXPLORE_KEY`];
-/// - quit: `q` or Ctrl+C (raw mode turns Ctrl+C into a plain key).
+/// - quit: [`quit_key`].
 ///
 /// Escape is bound to nothing here: it closes the overlays, and a player
 /// who presses it once too many after closing one must not lose the game.
-/// Releases and repeats are ignored (`None`), so each physical press counts
-/// once. Shift is accepted, because some keyboard layouts need it for `.` or
-/// the digit row; any other key combined with Ctrl or Alt is ignored.
-pub fn command_for(key: KeyEvent) -> Option<Command> {
-    let code = match plain_press(key)? {
-        Press::Quit => return Some(Command::Quit),
-        Press::Code(code) => code,
-    };
-    match code {
-        KeyCode::Char('q') => Some(Command::Quit),
-        KeyCode::Char('t') => Some(Command::Trace),
-        KeyCode::Char('i') => Some(Command::Inventory),
-        KeyCode::Char(EXPLORE_KEY) => Some(Command::Explore),
-        KeyCode::Char('>' | DESCEND_ALTERNATIVE_KEY) => Some(Command::Act(Action::Descend)),
-        KeyCode::Char('g' | ',') => Some(Command::Act(Action::PickUp)),
-        KeyCode::Char('.' | '5') | KeyCode::KeypadBegin => Some(Command::Act(Action::Wait)),
-        code => direction_for(code).map(|direction| Command::Act(Action::Move(direction))),
+pub fn game_bindings(keyboard: Keyboard) -> Vec<Binding<Command>> {
+    let mut bindings = vec![
+        (KeyCode::Char(quit_key(keyboard)), Command::Quit),
+        (KeyCode::Char('t'), Command::Trace),
+        (KeyCode::Char('i'), Command::Inventory),
+        (KeyCode::Char(EXPLORE_KEY), Command::Explore),
+        (KeyCode::Char('g'), Command::Act(Action::PickUp)),
+        (KeyCode::Char(','), Command::Act(Action::PickUp)),
+        (KeyCode::Char('.'), Command::Act(Action::Wait)),
+        (KeyCode::KeypadBegin, Command::Act(Action::Wait)),
+    ];
+    bindings.extend(
+        descend_keys(keyboard)
+            .iter()
+            .map(|&key| (KeyCode::Char(key), Command::Act(Action::Descend))),
+    );
+    bindings.extend(
+        digit_keys(keyboard, 5)
+            .into_iter()
+            .map(|code| (code, Command::Act(Action::Wait))),
+    );
+    bindings.extend(
+        direction_bindings(keyboard)
+            .into_iter()
+            .map(|(code, direction)| (code, Command::Act(Action::Move(direction)))),
+    );
+    bindings
+}
+
+/// Returns the command bound to `key` on the game screen of `keyboard`
+/// (see [`game_bindings`]), or `None` when the key does nothing.
+///
+/// Ctrl+C quits, since raw mode turns it into a plain key. Releases and
+/// repeats are ignored (`None`), so each physical press counts once. Shift
+/// is accepted, because some keyboard layouts need it for `.` or the digit
+/// row; any other key combined with Ctrl or Alt is ignored.
+pub fn command_for(keyboard: Keyboard, key: KeyEvent) -> Option<Command> {
+    match plain_press(key)? {
+        Press::Quit => Some(Command::Quit),
+        Press::Code(code) => bound(&game_bindings(keyboard), code),
     }
 }
 
@@ -251,10 +380,11 @@ pub fn command_for(key: KeyEvent) -> Option<Command> {
 ///
 /// Any key pressed alone or with Shift stops the walk and does nothing
 /// else, so a key meant to stop it never moves the player or quits by
-/// mistake (`q` included); Ctrl+C quits. Releases and repeats are ignored,
-/// so the release of the explore key itself, which Windows reports just
-/// after the walk starts, never stops it; keys with Alt or Ctrl, Ctrl+C
-/// aside, are ignored like everywhere else.
+/// mistake (the quit key included); Ctrl+C quits. Releases and repeats are
+/// ignored, so the release of the explore key itself, which Windows
+/// reports just after the walk starts, never stops it; keys with Alt or
+/// Ctrl, Ctrl+C aside, are ignored like everywhere else. The same on every
+/// layout.
 pub fn exploring_command_for(key: KeyEvent) -> Option<ExploringCommand> {
     match plain_press(key)? {
         Press::Quit => Some(ExploringCommand::Quit),
@@ -262,50 +392,75 @@ pub fn exploring_command_for(key: KeyEvent) -> Option<ExploringCommand> {
     }
 }
 
-/// Returns the command bound to `key` while a sigil is traced, or `None`
-/// when the key does nothing there.
-///
-/// Bindings (decision D7):
-/// - link a node: the digits `1` to `9`, from the keypad or the top row,
-///   numbered like the keypad and the grid; with Num Lock off, the keys the
-///   keypad sends instead (Home, Up, Page Up, Left, centre, Right, End,
-///   Down, Page Down) link the node under them, so tracing on the keypad
-///   never depends on Num Lock;
+/// Returns the bindings of the sigil overlay while a trace is drawn on
+/// `keyboard` (decision D7):
+/// - link a node: the keys of the digits `1` to `9` ([`digit_keys`]:
+///   the keypad, the top row with or without Shift), numbered like the
+///   keypad and the grid; with Num Lock off, the keys the keypad sends
+///   instead (Home, Up, Page Up, Left, centre, Right, End, Down, Page Down)
+///   link the node under them, so tracing on the keypad never depends on
+///   Num Lock;
 /// - undo the last node: Backspace;
 /// - cast: Enter;
-/// - cancel: Escape;
-/// - quit: Ctrl+C only, so that `q` pressed by mistake loses nothing.
+/// - cancel: Escape.
 ///
-/// Releases and repeats are ignored, Shift is accepted (some layouts need
-/// it for the digit row), and keys with Alt or Ctrl, Ctrl+C aside, do
+/// No key quits but Ctrl+C, so that a quit key pressed by mistake loses
 /// nothing.
-pub fn trace_command_for(key: KeyEvent) -> Option<TraceCommand> {
-    let code = match plain_press(key)? {
-        Press::Quit => return Some(TraceCommand::Quit),
-        Press::Code(code) => code,
-    };
-    match code {
-        KeyCode::Enter => Some(TraceCommand::Cast),
-        KeyCode::Backspace => Some(TraceCommand::Undo),
-        KeyCode::Esc => Some(TraceCommand::Cancel),
-        code => node_for(code).map(TraceCommand::Link),
+pub fn trace_bindings(keyboard: Keyboard) -> Vec<Binding<TraceCommand>> {
+    let mut bindings = vec![
+        (KeyCode::Enter, TraceCommand::Cast),
+        (KeyCode::Backspace, TraceCommand::Undo),
+        (KeyCode::Esc, TraceCommand::Cancel),
+    ];
+    for (digit, navigation) in (1..=9).zip(NODE_NAVIGATION_KEYS) {
+        let Some(node) = Node::new(digit) else {
+            continue;
+        };
+        bindings.push((navigation, TraceCommand::Link(node)));
+        bindings.extend(
+            digit_keys(keyboard, digit)
+                .into_iter()
+                .map(|code| (code, TraceCommand::Link(node))),
+        );
+    }
+    bindings
+}
+
+/// Returns the command bound to `key` while a sigil is traced on
+/// `keyboard` (see [`trace_bindings`]), or `None` when the key does nothing
+/// there.
+///
+/// Ctrl+C quits. Releases and repeats are ignored, Shift is accepted (some
+/// layouts need it for the digit row), and keys with Alt or Ctrl, Ctrl+C
+/// aside, do nothing.
+pub fn trace_command_for(keyboard: Keyboard, key: KeyEvent) -> Option<TraceCommand> {
+    match plain_press(key)? {
+        Press::Quit => Some(TraceCommand::Quit),
+        Press::Code(code) => bound(&trace_bindings(keyboard), code),
     }
 }
 
+/// Returns the bindings of the direction prompt of a sigil on `keyboard`:
+/// the movement keys of the game screen ([`direction_bindings`]) aim in
+/// their direction, and Escape goes back to the trace. The wait keys do
+/// nothing: a direction is needed.
+pub fn aim_bindings(keyboard: Keyboard) -> Vec<Binding<AimCommand>> {
+    let mut bindings = vec![(KeyCode::Esc, AimCommand::Back)];
+    bindings.extend(
+        direction_bindings(keyboard)
+            .into_iter()
+            .map(|(code, direction)| (code, AimCommand::Aim(direction))),
+    );
+    bindings
+}
+
 /// Returns the command bound to `key` while the direction of a sigil is
-/// asked, or `None` when the key does nothing there.
-///
-/// Bindings: the movement keys of [`command_for`] aim in their direction
-/// (arrows, keypad digits, vi keys); Escape goes back to the trace; Ctrl+C
-/// quits. The wait keys do nothing: a direction is needed.
-pub fn aim_command_for(key: KeyEvent) -> Option<AimCommand> {
-    let code = match plain_press(key)? {
-        Press::Quit => return Some(AimCommand::Quit),
-        Press::Code(code) => code,
-    };
-    match code {
-        KeyCode::Esc => Some(AimCommand::Back),
-        code => direction_for(code).map(AimCommand::Aim),
+/// asked on `keyboard` (see [`aim_bindings`]), or `None` when the key does
+/// nothing there; Ctrl+C quits.
+pub fn aim_command_for(keyboard: Keyboard, key: KeyEvent) -> Option<AimCommand> {
+    match plain_press(key)? {
+        Press::Quit => Some(AimCommand::Quit),
+        Press::Code(code) => bound(&aim_bindings(keyboard), code),
     }
 }
 
@@ -314,7 +469,7 @@ pub fn aim_command_for(key: KeyEvent) -> Option<AimCommand> {
 /// Any key press closes the verdict (Enter is the one the key help names),
 /// without doing anything else, so a key pressed while reading is never
 /// played in the game; Ctrl+C quits. Releases, repeats and keys with Alt
-/// give `None`.
+/// give `None`. The same on every layout.
 pub fn verdict_command_for(key: KeyEvent) -> Option<VerdictCommand> {
     match plain_press(key)? {
         Press::Quit => Some(VerdictCommand::Quit),
@@ -322,87 +477,122 @@ pub fn verdict_command_for(key: KeyEvent) -> Option<VerdictCommand> {
     }
 }
 
-/// Returns the command bound to `key` while the inventory is open, or
-/// `None` when the key does nothing there.
-///
-/// Bindings:
-/// - choose an item: Up and Down (or `k` and `j`), which wrap around the
-///   list; Home and End for the first and the last; a digit for the item
-///   in its slot, `1` for the first and `0` for the tenth
-///   (`item::INVENTORY_CAPACITY`), as the list numbers them;
+/// Returns the bindings of the inventory on `keyboard`:
+/// - choose an item: Up and Down, `k` and `j`, or the north and south
+///   letters of [`movement_letters`] (`w s` or `z s`), which wrap around
+///   the list; Home and End for the first and the last; the key of a digit
+///   ([`digit_keys`]) for the item in its slot, `1` for the first and `0`
+///   for the tenth (`item::INVENTORY_CAPACITY`), as the list numbers them;
 /// - use the chosen item: Enter or `u`;
 /// - drop it: `d`;
-/// - close: Escape;
-/// - quit: Ctrl+C only, so that `q` pressed by mistake loses nothing.
+/// - close: Escape.
 ///
-/// Releases and repeats are ignored, Shift is accepted (some layouts need
-/// it for the digit row), and keys with Alt or Ctrl, Ctrl+C aside, do
+/// No key quits but Ctrl+C, so that a quit key pressed by mistake loses
 /// nothing.
-pub fn inventory_command_for(key: KeyEvent) -> Option<InventoryCommand> {
-    let code = match plain_press(key)? {
-        Press::Quit => return Some(InventoryCommand::Quit),
-        Press::Code(code) => code,
-    };
-    let command = match code {
-        KeyCode::Up | KeyCode::Char('k') => InventoryCommand::Previous,
-        KeyCode::Down | KeyCode::Char('j') => InventoryCommand::Next,
-        KeyCode::Home => InventoryCommand::First,
-        KeyCode::End => InventoryCommand::Last,
-        KeyCode::Char('0') => InventoryCommand::Slot(9),
-        KeyCode::Char(digit @ '1'..='9') => InventoryCommand::Slot(usize::from(digit as u8 - b'1')),
-        KeyCode::Enter | KeyCode::Char('u') => InventoryCommand::Use,
-        KeyCode::Char('d') => InventoryCommand::Drop,
-        KeyCode::Esc => InventoryCommand::Close,
-        _ => return None,
-    };
-    Some(command)
+pub fn inventory_bindings(keyboard: Keyboard) -> Vec<Binding<InventoryCommand>> {
+    let [north, _, south, _] = movement_letters(keyboard);
+    let mut bindings = vec![
+        (KeyCode::Up, InventoryCommand::Previous),
+        (KeyCode::Char('k'), InventoryCommand::Previous),
+        (KeyCode::Char(north), InventoryCommand::Previous),
+        (KeyCode::Down, InventoryCommand::Next),
+        (KeyCode::Char('j'), InventoryCommand::Next),
+        (KeyCode::Char(south), InventoryCommand::Next),
+        (KeyCode::Home, InventoryCommand::First),
+        (KeyCode::End, InventoryCommand::Last),
+        (KeyCode::Enter, InventoryCommand::Use),
+        (KeyCode::Char('u'), InventoryCommand::Use),
+        (KeyCode::Char('d'), InventoryCommand::Drop),
+        (KeyCode::Esc, InventoryCommand::Close),
+    ];
+    for digit in 0..=9 {
+        // The digits number the slots from 1, and 0 is the tenth.
+        let slot = (usize::from(digit) + 9) % 10;
+        bindings.extend(
+            digit_keys(keyboard, digit)
+                .into_iter()
+                .map(|code| (code, InventoryCommand::Slot(slot))),
+        );
+    }
+    bindings
 }
 
-/// Returns the command bound to `key` on the end screen, or `None` when
-/// the key does nothing there.
+/// Returns the command bound to `key` while the inventory is open on
+/// `keyboard` (see [`inventory_bindings`]), or `None` when the key does
+/// nothing there.
 ///
-/// Bindings: Enter goes back to the title screen; `q` quits
-/// ([`EndCommand::Quit`]) and so does Ctrl+C ([`EndCommand::Interrupt`]),
-/// told apart because only Ctrl+C works during the grace period of the end
-/// screen (`app::END_SCREEN_GRACE`). Escape does nothing, like every other
-/// key, so a press left over from the game never leaves the summary.
-/// Releases, repeats and keys with Alt or Ctrl, Ctrl+C aside, give `None`.
-pub fn end_command_for(key: KeyEvent) -> Option<EndCommand> {
+/// Ctrl+C quits. Releases and repeats are ignored, Shift is accepted (some
+/// layouts need it for the digit row), and keys with Alt or Ctrl, Ctrl+C
+/// aside, do nothing.
+pub fn inventory_command_for(keyboard: Keyboard, key: KeyEvent) -> Option<InventoryCommand> {
+    match plain_press(key)? {
+        Press::Quit => Some(InventoryCommand::Quit),
+        Press::Code(code) => bound(&inventory_bindings(keyboard), code),
+    }
+}
+
+/// Returns the bindings of the end screen on `keyboard`: Enter goes back
+/// to the title screen; the [`quit_key`] quits. Escape does nothing, like
+/// every other key, so a press left over from the game never leaves the
+/// summary.
+pub fn end_bindings(keyboard: Keyboard) -> Vec<Binding<EndCommand>> {
+    vec![
+        (KeyCode::Enter, EndCommand::Title),
+        (KeyCode::Char(quit_key(keyboard)), EndCommand::Quit),
+    ]
+}
+
+/// Returns the command bound to `key` on the end screen of `keyboard` (see
+/// [`end_bindings`]), or `None` when the key does nothing there.
+///
+/// Ctrl+C gives [`EndCommand::Interrupt`], told apart from the quit key
+/// because only Ctrl+C works during the grace period of the end screen
+/// (`app::END_SCREEN_GRACE`). Releases, repeats and keys with Alt or Ctrl,
+/// Ctrl+C aside, give `None`.
+pub fn end_command_for(keyboard: Keyboard, key: KeyEvent) -> Option<EndCommand> {
     match plain_press(key)? {
         Press::Quit => Some(EndCommand::Interrupt),
-        Press::Code(KeyCode::Char('q')) => Some(EndCommand::Quit),
-        Press::Code(KeyCode::Enter) => Some(EndCommand::Title),
-        Press::Code(_) => None,
+        Press::Code(code) => bound(&end_bindings(keyboard), code),
     }
 }
 
-/// Returns the command bound to `key` on the title menu, or `None` when
-/// the key does nothing there.
-///
-/// Bindings: Up and Down (or `k` and `j`), which wrap around the menu;
-/// Home and End; Enter confirms the chosen entry; `q` and Ctrl+C quit.
-/// Escape does nothing: the title is the first screen, there is nothing to
-/// go back to. Releases, repeats and keys with Alt or Ctrl, Ctrl+C aside,
-/// give `None`.
-pub fn title_command_for(key: KeyEvent) -> Option<MenuCommand> {
-    match plain_press(key)? {
-        Press::Quit | Press::Code(KeyCode::Char('q')) => Some(MenuCommand::Quit),
-        Press::Code(KeyCode::Esc) => None,
-        Press::Code(code) => menu_move_for(code),
-    }
+/// Returns the bindings of the title menu on `keyboard`: the moves of
+/// [`menu_bindings`] and the [`quit_key`]. Escape does nothing: the title is
+/// the first screen, there is nothing to go back to.
+pub fn title_bindings(keyboard: Keyboard) -> Vec<Binding<MenuCommand>> {
+    let mut bindings = menu_bindings(keyboard);
+    bindings.push((KeyCode::Char(quit_key(keyboard)), MenuCommand::Quit));
+    bindings
 }
 
-/// Returns the command bound to `key` on the confirmation shown before a
-/// saved game is abandoned, or `None` when the key does nothing there.
-///
-/// Bindings: the moves of [`title_command_for`] and Enter; Escape goes back
-/// and keeps the saved game; Ctrl+C quits, but not `q`, which a player
-/// could press meaning "no".
-pub fn confirm_command_for(key: KeyEvent) -> Option<MenuCommand> {
+/// Returns the command bound to `key` on the title menu of `keyboard` (see
+/// [`title_bindings`]), or `None` when the key does nothing there; Ctrl+C
+/// quits. Releases, repeats and keys with Alt or Ctrl, Ctrl+C aside, give
+/// `None`.
+pub fn title_command_for(keyboard: Keyboard, key: KeyEvent) -> Option<MenuCommand> {
     match plain_press(key)? {
         Press::Quit => Some(MenuCommand::Quit),
-        Press::Code(KeyCode::Esc) => Some(MenuCommand::Back),
-        Press::Code(code) => menu_move_for(code),
+        Press::Code(code) => bound(&title_bindings(keyboard), code),
+    }
+}
+
+/// Returns the bindings of the confirmation shown before a saved game is
+/// abandoned, on `keyboard`: the moves of [`menu_bindings`]; Escape goes
+/// back and keeps the saved game. The quit key does nothing, since a player
+/// could press `q` meaning "no".
+pub fn confirm_bindings(keyboard: Keyboard) -> Vec<Binding<MenuCommand>> {
+    let mut bindings = menu_bindings(keyboard);
+    bindings.push((KeyCode::Esc, MenuCommand::Back));
+    bindings
+}
+
+/// Returns the command bound to `key` on the confirmation of `keyboard`
+/// (see [`confirm_bindings`]), or `None` when the key does nothing there;
+/// Ctrl+C quits.
+pub fn confirm_command_for(keyboard: Keyboard, key: KeyEvent) -> Option<MenuCommand> {
+    match plain_press(key)? {
+        Press::Quit => Some(MenuCommand::Quit),
+        Press::Code(code) => bound(&confirm_bindings(keyboard), code),
     }
 }
 
@@ -413,6 +603,7 @@ pub fn confirm_command_for(key: KeyEvent) -> Option<MenuCommand> {
 /// too, so nothing typed quits); Backspace erases the last one; Enter
 /// starts the game; Escape goes back to the title menu; Ctrl+C quits.
 /// Releases, repeats and keys with Alt or Ctrl, Ctrl+C aside, give `None`.
+/// The same on every layout.
 pub fn seed_command_for(key: KeyEvent) -> Option<SeedCommand> {
     let code = match plain_press(key)? {
         Press::Quit => return Some(SeedCommand::Quit),
@@ -427,45 +618,150 @@ pub fn seed_command_for(key: KeyEvent) -> Option<SeedCommand> {
     }
 }
 
-/// Returns the command bound to `key` on the options screen, or `None`
-/// when the key does nothing there.
-///
-/// Bindings: Up and Down (or `k` and `j`), Home and End choose an entry;
-/// Left and Right (or `h` and `l`) change the chosen option's value, as do
-/// Enter and Space, which go back to the title on "Back"; Escape goes back
-/// to the title; Ctrl+C quits, but not `q`. Releases, repeats and keys with
-/// Alt or Ctrl, Ctrl+C aside, give `None`.
-pub fn options_command_for(key: KeyEvent) -> Option<OptionsCommand> {
-    let code = match plain_press(key)? {
-        Press::Quit => return Some(OptionsCommand::Quit),
-        Press::Code(code) => code,
-    };
-    let command = match code {
-        KeyCode::Up | KeyCode::Char('k') => OptionsCommand::Previous,
-        KeyCode::Down | KeyCode::Char('j') => OptionsCommand::Next,
-        KeyCode::Home => OptionsCommand::First,
-        KeyCode::End => OptionsCommand::Last,
-        KeyCode::Left | KeyCode::Char('h') => OptionsCommand::PreviousValue,
-        KeyCode::Right | KeyCode::Char('l') => OptionsCommand::NextValue,
-        KeyCode::Enter | KeyCode::Char(' ') => OptionsCommand::Confirm,
-        KeyCode::Esc => OptionsCommand::Back,
-        _ => return None,
-    };
-    Some(command)
+/// Returns the bindings of the options screen on `keyboard`: Up and Down,
+/// `k` and `j`, or the north and south letters of [`movement_letters`],
+/// Home and End choose an entry; Left and Right, `h` and `l`, or the west
+/// and east letters (`a d` or `q d`) change the chosen option's value, as
+/// do Enter and Space, which go back to the title on "Back"; Escape goes
+/// back to the title. The quit key does nothing.
+pub fn options_bindings(keyboard: Keyboard) -> Vec<Binding<OptionsCommand>> {
+    let [north, west, south, east] = movement_letters(keyboard);
+    vec![
+        (KeyCode::Up, OptionsCommand::Previous),
+        (KeyCode::Char('k'), OptionsCommand::Previous),
+        (KeyCode::Char(north), OptionsCommand::Previous),
+        (KeyCode::Down, OptionsCommand::Next),
+        (KeyCode::Char('j'), OptionsCommand::Next),
+        (KeyCode::Char(south), OptionsCommand::Next),
+        (KeyCode::Home, OptionsCommand::First),
+        (KeyCode::End, OptionsCommand::Last),
+        (KeyCode::Left, OptionsCommand::PreviousValue),
+        (KeyCode::Char('h'), OptionsCommand::PreviousValue),
+        (KeyCode::Char(west), OptionsCommand::PreviousValue),
+        (KeyCode::Right, OptionsCommand::NextValue),
+        (KeyCode::Char('l'), OptionsCommand::NextValue),
+        (KeyCode::Char(east), OptionsCommand::NextValue),
+        (KeyCode::Enter, OptionsCommand::Confirm),
+        (KeyCode::Char(' '), OptionsCommand::Confirm),
+        (KeyCode::Esc, OptionsCommand::Back),
+    ]
 }
 
-/// The moves and the confirmation shared by the menus: Up and Down (or `k`
-/// and `j`), Home, End and Enter; `None` for any other key.
-const fn menu_move_for(code: KeyCode) -> Option<MenuCommand> {
-    let command = match code {
-        KeyCode::Up | KeyCode::Char('k') => MenuCommand::Previous,
-        KeyCode::Down | KeyCode::Char('j') => MenuCommand::Next,
-        KeyCode::Home => MenuCommand::First,
-        KeyCode::End => MenuCommand::Last,
-        KeyCode::Enter => MenuCommand::Confirm,
-        _ => return None,
-    };
-    Some(command)
+/// Returns the command bound to `key` on the options screen of `keyboard`
+/// (see [`options_bindings`]), or `None` when the key does nothing there;
+/// Ctrl+C quits. Releases, repeats and keys with Alt or Ctrl, Ctrl+C aside,
+/// give `None`.
+pub fn options_command_for(keyboard: Keyboard, key: KeyEvent) -> Option<OptionsCommand> {
+    match plain_press(key)? {
+        Press::Quit => Some(OptionsCommand::Quit),
+        Press::Code(code) => bound(&options_bindings(keyboard), code),
+    }
+}
+
+/// The moves and the confirmation shared by the menus on `keyboard`: Up and
+/// Down, `k` and `j`, or the north and south letters of
+/// [`movement_letters`]; Home, End and Enter.
+fn menu_bindings(keyboard: Keyboard) -> Vec<Binding<MenuCommand>> {
+    let [north, _, south, _] = movement_letters(keyboard);
+    vec![
+        (KeyCode::Up, MenuCommand::Previous),
+        (KeyCode::Char('k'), MenuCommand::Previous),
+        (KeyCode::Char(north), MenuCommand::Previous),
+        (KeyCode::Down, MenuCommand::Next),
+        (KeyCode::Char('j'), MenuCommand::Next),
+        (KeyCode::Char(south), MenuCommand::Next),
+        (KeyCode::Home, MenuCommand::First),
+        (KeyCode::End, MenuCommand::Last),
+        (KeyCode::Enter, MenuCommand::Confirm),
+    ]
+}
+
+/// Returns the keys that point to a direction on `keyboard`, with that
+/// direction:
+/// - the arrows, and Home, Page Up, End and Page Down for the diagonals,
+///   which is what the keypad sends with Num Lock off;
+/// - the keys of the digits around 5 ([`digit_keys`]), laid out like the
+///   keypad, so `8` is up and `3` is down-right;
+/// - the vi keys `h j k l y u b n`;
+/// - the four [`movement_letters`] of the layout, WASD or ZQSD.
+pub fn direction_bindings(keyboard: Keyboard) -> Vec<Binding<Direction>> {
+    let [north, west, south, east] = movement_letters(keyboard);
+    let mut bindings = vec![
+        (KeyCode::Up, Direction::North),
+        (KeyCode::PageUp, Direction::NorthEast),
+        (KeyCode::Right, Direction::East),
+        (KeyCode::PageDown, Direction::SouthEast),
+        (KeyCode::Down, Direction::South),
+        (KeyCode::End, Direction::SouthWest),
+        (KeyCode::Left, Direction::West),
+        (KeyCode::Home, Direction::NorthWest),
+        (KeyCode::Char('k'), Direction::North),
+        (KeyCode::Char('u'), Direction::NorthEast),
+        (KeyCode::Char('l'), Direction::East),
+        (KeyCode::Char('n'), Direction::SouthEast),
+        (KeyCode::Char('j'), Direction::South),
+        (KeyCode::Char('b'), Direction::SouthWest),
+        (KeyCode::Char('h'), Direction::West),
+        (KeyCode::Char('y'), Direction::NorthWest),
+        (KeyCode::Char(north), Direction::North),
+        (KeyCode::Char(west), Direction::West),
+        (KeyCode::Char(south), Direction::South),
+        (KeyCode::Char(east), Direction::East),
+    ];
+    for (digit, direction) in KEYPAD_DIRECTIONS {
+        bindings.extend(
+            digit_keys(keyboard, digit)
+                .into_iter()
+                .map(|code| (code, direction)),
+        );
+    }
+    bindings
+}
+
+/// The digits of the keypad around 5 and the direction each points to.
+const KEYPAD_DIRECTIONS: [(u8, Direction); 8] = [
+    (1, Direction::SouthWest),
+    (2, Direction::South),
+    (3, Direction::SouthEast),
+    (4, Direction::West),
+    (6, Direction::East),
+    (7, Direction::NorthWest),
+    (8, Direction::North),
+    (9, Direction::NorthEast),
+];
+
+/// The keys the keypad sends with Num Lock off in place of the digits `1`
+/// to `9`, in that order.
+const NODE_NAVIGATION_KEYS: [KeyCode; 9] = [
+    KeyCode::End,
+    KeyCode::Down,
+    KeyCode::PageDown,
+    KeyCode::Left,
+    KeyCode::KeypadBegin,
+    KeyCode::Right,
+    KeyCode::Home,
+    KeyCode::Up,
+    KeyCode::PageUp,
+];
+
+/// Returns the keys that type the digit `digit` (0 to 9) on `keyboard`:
+/// the digit itself, from the keypad or from the top row (with Shift on
+/// AZERTY, which crossterm reports as the digit), and on AZERTY the same
+/// top-row key without Shift ([`AZERTY_DIGIT_ROW`]).
+fn digit_keys(keyboard: Keyboard, digit: u8) -> Vec<KeyCode> {
+    let mut keys = vec![KeyCode::Char(char::from(b'0' + digit))];
+    if keyboard == Keyboard::Azerty {
+        keys.push(KeyCode::Char(AZERTY_DIGIT_ROW[usize::from(digit)]));
+    }
+    keys
+}
+
+/// Returns what `code` does in `bindings`, or `None` when it is not bound.
+fn bound<C: Copy>(bindings: &[Binding<C>], code: KeyCode) -> Option<C> {
+    bindings
+        .iter()
+        .find(|(key, _)| *key == code)
+        .map(|&(_, command)| command)
 }
 
 /// A key press that may mean something, once the modifiers are checked.
@@ -492,534 +788,5 @@ fn plain_press(key: KeyEvent) -> Option<Press> {
     Some(Press::Code(key.code))
 }
 
-/// Returns the grid node a key links while tracing, or `None` for any other
-/// key: the digits `1` to `9`, and the keys the keypad sends with Num Lock
-/// off, which stand where the digits are.
-const fn node_for(code: KeyCode) -> Option<Node> {
-    let digit = match code {
-        KeyCode::Char(digit @ '1'..='9') => digit as u8 - b'0',
-        KeyCode::End => 1,
-        KeyCode::Down => 2,
-        KeyCode::PageDown => 3,
-        KeyCode::Left => 4,
-        KeyCode::KeypadBegin => 5,
-        KeyCode::Right => 6,
-        KeyCode::Home => 7,
-        KeyCode::Up => 8,
-        KeyCode::PageUp => 9,
-        _ => return None,
-    };
-    Node::new(digit)
-}
-
-/// Returns the direction a movement key points to, or `None` for any other
-/// key.
-///
-/// Digits follow the keypad layout, so `8` is up and `3` is down-right; the
-/// navigation keys are what the keypad sends with Num Lock off.
-const fn direction_for(code: KeyCode) -> Option<Direction> {
-    let direction = match code {
-        KeyCode::Up | KeyCode::Char('k' | '8') => Direction::North,
-        KeyCode::PageUp | KeyCode::Char('u' | '9') => Direction::NorthEast,
-        KeyCode::Right | KeyCode::Char('l' | '6') => Direction::East,
-        KeyCode::PageDown | KeyCode::Char('n' | '3') => Direction::SouthEast,
-        KeyCode::Down | KeyCode::Char('j' | '2') => Direction::South,
-        KeyCode::End | KeyCode::Char('b' | '1') => Direction::SouthWest,
-        KeyCode::Left | KeyCode::Char('h' | '4') => Direction::West,
-        KeyCode::Home | KeyCode::Char('y' | '7') => Direction::NorthWest,
-        _ => return None,
-    };
-    Some(direction)
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A key press of `code` without modifiers.
-    fn press(code: KeyCode) -> KeyEvent {
-        KeyEvent::new(code, KeyModifiers::NONE)
-    }
-
-    /// The command expected for a move in `direction`.
-    const fn step(direction: Direction) -> Option<Command> {
-        Some(Command::Act(Action::Move(direction)))
-    }
-
-    #[test]
-    fn every_direction_has_an_arrow_or_navigation_key_a_digit_and_a_vi_key() {
-        let bindings = [
-            (Direction::North, KeyCode::Up, '8', 'k'),
-            (Direction::NorthEast, KeyCode::PageUp, '9', 'u'),
-            (Direction::East, KeyCode::Right, '6', 'l'),
-            (Direction::SouthEast, KeyCode::PageDown, '3', 'n'),
-            (Direction::South, KeyCode::Down, '2', 'j'),
-            (Direction::SouthWest, KeyCode::End, '1', 'b'),
-            (Direction::West, KeyCode::Left, '4', 'h'),
-            (Direction::NorthWest, KeyCode::Home, '7', 'y'),
-        ];
-
-        for (direction, navigation, digit, vi) in bindings {
-            for code in [navigation, KeyCode::Char(digit), KeyCode::Char(vi)] {
-                assert_eq!(command_for(press(code)), step(direction), "{code:?}");
-            }
-        }
-    }
-
-    #[test]
-    fn keypad_digits_move_like_the_digit_row() {
-        let keypad_eight = KeyEvent::new_with_kind_and_state(
-            KeyCode::Char('8'),
-            KeyModifiers::NONE,
-            KeyEventKind::Press,
-            ratatui::crossterm::event::KeyEventState::KEYPAD,
-        );
-
-        assert_eq!(command_for(keypad_eight), step(Direction::North));
-    }
-
-    #[test]
-    fn dot_five_and_keypad_centre_wait() {
-        for code in [KeyCode::Char('.'), KeyCode::Char('5'), KeyCode::KeypadBegin] {
-            assert_eq!(
-                command_for(press(code)),
-                Some(Command::Act(Action::Wait)),
-                "{code:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn q_and_ctrl_c_quit_and_escape_does_nothing() {
-        assert_eq!(command_for(press(KeyCode::Char('q'))), Some(Command::Quit));
-        assert_eq!(command_for(press(KeyCode::Esc)), None);
-        assert_eq!(
-            command_for(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
-            Some(Command::Quit)
-        );
-    }
-
-    #[test]
-    fn g_and_comma_pick_up_and_i_opens_the_inventory() {
-        for code in [KeyCode::Char('g'), KeyCode::Char(',')] {
-            assert_eq!(
-                command_for(press(code)),
-                Some(Command::Act(Action::PickUp)),
-                "{code:?}"
-            );
-        }
-        assert_eq!(
-            command_for(press(KeyCode::Char('i'))),
-            Some(Command::Inventory)
-        );
-        assert_eq!(
-            command_for(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::ALT)),
-            None
-        );
-    }
-
-    #[test]
-    fn greater_than_and_shift_d_descend_but_d_and_less_than_do_nothing() {
-        let descend = Some(Command::Act(Action::Descend));
-        // `>` arrives with Shift on most layouts, `D` always does.
-        for key in [
-            press(KeyCode::Char('>')),
-            KeyEvent::new(KeyCode::Char('>'), KeyModifiers::SHIFT),
-            KeyEvent::new(KeyCode::Char('D'), KeyModifiers::SHIFT),
-        ] {
-            assert_eq!(command_for(key), descend, "{key:?}");
-        }
-        for key in [
-            press(KeyCode::Char('d')),
-            press(KeyCode::Char('<')),
-            KeyEvent::new(KeyCode::Char('>'), KeyModifiers::ALT),
-            KeyEvent::new_with_kind(
-                KeyCode::Char('>'),
-                KeyModifiers::NONE,
-                KeyEventKind::Release,
-            ),
-        ] {
-            assert_eq!(command_for(key), None, "{key:?}");
-        }
-    }
-
-    #[test]
-    fn in_the_inventory_arrows_vi_keys_and_digits_choose_an_item() {
-        for (code, expected) in [
-            (KeyCode::Up, InventoryCommand::Previous),
-            (KeyCode::Char('k'), InventoryCommand::Previous),
-            (KeyCode::Down, InventoryCommand::Next),
-            (KeyCode::Char('j'), InventoryCommand::Next),
-            (KeyCode::Home, InventoryCommand::First),
-            (KeyCode::End, InventoryCommand::Last),
-            (KeyCode::Char('1'), InventoryCommand::Slot(0)),
-            (KeyCode::Char('9'), InventoryCommand::Slot(8)),
-            (KeyCode::Char('0'), InventoryCommand::Slot(9)),
-        ] {
-            assert_eq!(
-                inventory_command_for(press(code)),
-                Some(expected),
-                "{code:?}"
-            );
-        }
-        let shifted = KeyEvent::new(KeyCode::Char('3'), KeyModifiers::SHIFT);
-        assert_eq!(
-            inventory_command_for(shifted),
-            Some(InventoryCommand::Slot(2))
-        );
-    }
-
-    #[test]
-    fn in_the_inventory_enter_and_u_use_d_drops_and_escape_closes() {
-        for (code, expected) in [
-            (KeyCode::Enter, InventoryCommand::Use),
-            (KeyCode::Char('u'), InventoryCommand::Use),
-            (KeyCode::Char('d'), InventoryCommand::Drop),
-            (KeyCode::Esc, InventoryCommand::Close),
-        ] {
-            assert_eq!(
-                inventory_command_for(press(code)),
-                Some(expected),
-                "{code:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn in_the_inventory_only_ctrl_c_quits_and_other_keys_do_nothing() {
-        assert_eq!(
-            inventory_command_for(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
-            Some(InventoryCommand::Quit)
-        );
-        for key in [
-            press(KeyCode::Char('q')),
-            press(KeyCode::Char('i')),
-            press(KeyCode::Char('g')),
-            press(KeyCode::Left),
-            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::ALT),
-            KeyEvent::new_with_kind(KeyCode::Enter, KeyModifiers::NONE, KeyEventKind::Release),
-            KeyEvent::new_with_kind(KeyCode::Down, KeyModifiers::NONE, KeyEventKind::Repeat),
-        ] {
-            assert_eq!(inventory_command_for(key), None, "{key:?}");
-        }
-    }
-
-    #[test]
-    fn t_opens_the_sigil_overlay() {
-        assert_eq!(command_for(press(KeyCode::Char('t'))), Some(Command::Trace));
-        assert_eq!(
-            command_for(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::ALT)),
-            None
-        );
-    }
-
-    /// The node numbered `digit`.
-    fn node(digit: u8) -> Node {
-        Node::new(digit).expect("a digit from 1 to 9")
-    }
-
-    #[test]
-    fn while_tracing_digits_and_the_keypad_without_num_lock_link_their_node() {
-        let navigation = [
-            (1, KeyCode::End),
-            (2, KeyCode::Down),
-            (3, KeyCode::PageDown),
-            (4, KeyCode::Left),
-            (5, KeyCode::KeypadBegin),
-            (6, KeyCode::Right),
-            (7, KeyCode::Home),
-            (8, KeyCode::Up),
-            (9, KeyCode::PageUp),
-        ];
-        for (digit, key) in navigation {
-            let expected = Some(TraceCommand::Link(node(digit)));
-            let char_key = KeyCode::Char(char::from(b'0' + digit));
-            assert_eq!(trace_command_for(press(char_key)), expected, "{digit}");
-            let shifted = KeyEvent::new(char_key, KeyModifiers::SHIFT);
-            assert_eq!(trace_command_for(shifted), expected, "Shift+{digit}");
-            assert_eq!(trace_command_for(press(key)), expected, "{key:?}");
-        }
-        assert_eq!(trace_command_for(press(KeyCode::Char('0'))), None);
-    }
-
-    #[test]
-    fn while_tracing_enter_casts_backspace_undoes_and_escape_cancels() {
-        assert_eq!(
-            trace_command_for(press(KeyCode::Enter)),
-            Some(TraceCommand::Cast)
-        );
-        assert_eq!(
-            trace_command_for(press(KeyCode::Backspace)),
-            Some(TraceCommand::Undo)
-        );
-        assert_eq!(
-            trace_command_for(press(KeyCode::Esc)),
-            Some(TraceCommand::Cancel)
-        );
-    }
-
-    #[test]
-    fn while_tracing_only_ctrl_c_quits_and_other_keys_do_nothing() {
-        assert_eq!(
-            trace_command_for(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
-            Some(TraceCommand::Quit)
-        );
-        for key in [
-            press(KeyCode::Char('q')),
-            press(KeyCode::Char('t')),
-            press(KeyCode::Char('.')),
-            KeyEvent::new(KeyCode::Char('5'), KeyModifiers::ALT),
-            KeyEvent::new_with_kind(
-                KeyCode::Char('5'),
-                KeyModifiers::NONE,
-                KeyEventKind::Release,
-            ),
-            KeyEvent::new_with_kind(KeyCode::Enter, KeyModifiers::NONE, KeyEventKind::Repeat),
-        ] {
-            assert_eq!(trace_command_for(key), None, "{key:?}");
-        }
-    }
-
-    #[test]
-    fn while_aiming_movement_keys_aim_and_escape_goes_back() {
-        for (code, direction) in [
-            (KeyCode::Right, Direction::East),
-            (KeyCode::Char('7'), Direction::NorthWest),
-            (KeyCode::Char('j'), Direction::South),
-            (KeyCode::PageDown, Direction::SouthEast),
-        ] {
-            assert_eq!(
-                aim_command_for(press(code)),
-                Some(AimCommand::Aim(direction)),
-                "{code:?}"
-            );
-        }
-        assert_eq!(aim_command_for(press(KeyCode::Esc)), Some(AimCommand::Back));
-        for code in [
-            KeyCode::Char('5'),
-            KeyCode::Char('.'),
-            KeyCode::Enter,
-            KeyCode::Char('q'),
-        ] {
-            assert_eq!(aim_command_for(press(code)), None, "{code:?}");
-        }
-    }
-
-    #[test]
-    fn a_verdict_closes_on_any_press_and_ctrl_c_quits() {
-        for code in [
-            KeyCode::Enter,
-            KeyCode::Char('q'),
-            KeyCode::Right,
-            KeyCode::Esc,
-        ] {
-            assert_eq!(
-                verdict_command_for(press(code)),
-                Some(VerdictCommand::Continue),
-                "{code:?}"
-            );
-        }
-        assert_eq!(
-            verdict_command_for(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
-            Some(VerdictCommand::Quit)
-        );
-        let release =
-            KeyEvent::new_with_kind(KeyCode::Enter, KeyModifiers::NONE, KeyEventKind::Release);
-        assert_eq!(verdict_command_for(release), None);
-    }
-
-    #[test]
-    fn x_explores_and_capital_x_does_nothing() {
-        assert_eq!(
-            command_for(press(KeyCode::Char(EXPLORE_KEY))),
-            Some(Command::Explore)
-        );
-        assert_eq!(command_for(press(KeyCode::Char('X'))), None);
-        let release = KeyEvent::new_with_kind(
-            KeyCode::Char(EXPLORE_KEY),
-            KeyModifiers::NONE,
-            KeyEventKind::Release,
-        );
-        assert_eq!(command_for(release), None);
-    }
-
-    #[test]
-    fn while_exploring_any_press_stops_and_only_ctrl_c_quits() {
-        for code in [
-            KeyCode::Char('q'),
-            KeyCode::Char(EXPLORE_KEY),
-            KeyCode::Right,
-            KeyCode::Char('.'),
-            KeyCode::Esc,
-            KeyCode::Enter,
-        ] {
-            assert_eq!(
-                exploring_command_for(press(code)),
-                Some(ExploringCommand::Stop),
-                "{code:?}"
-            );
-        }
-        assert_eq!(
-            exploring_command_for(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT)),
-            Some(ExploringCommand::Stop)
-        );
-        assert_eq!(
-            exploring_command_for(ctrl_c()),
-            Some(ExploringCommand::Quit)
-        );
-    }
-
-    #[test]
-    fn while_exploring_releases_repeats_and_alt_keys_do_not_stop() {
-        for kind in [KeyEventKind::Release, KeyEventKind::Repeat] {
-            let key = KeyEvent::new_with_kind(KeyCode::Char(EXPLORE_KEY), KeyModifiers::NONE, kind);
-            assert_eq!(exploring_command_for(key), None, "{kind:?}");
-        }
-        let alt = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT);
-        assert_eq!(exploring_command_for(alt), None);
-    }
-
-    #[test]
-    fn releases_and_repeats_are_ignored() {
-        for kind in [KeyEventKind::Release, KeyEventKind::Repeat] {
-            for code in [KeyCode::Right, KeyCode::Char('.'), KeyCode::Char('q')] {
-                let key = KeyEvent::new_with_kind(code, KeyModifiers::NONE, kind);
-                assert_eq!(command_for(key), None, "{kind:?} {code:?}");
-            }
-        }
-    }
-
-    #[test]
-    fn shift_is_accepted_for_layouts_that_need_it() {
-        let shifted_dot = KeyEvent::new(KeyCode::Char('.'), KeyModifiers::SHIFT);
-
-        assert_eq!(command_for(shifted_dot), Some(Command::Act(Action::Wait)));
-    }
-
-    #[test]
-    fn keys_with_ctrl_or_alt_and_unbound_keys_do_nothing() {
-        for key in [
-            KeyEvent::new(KeyCode::Char('h'), KeyModifiers::CONTROL),
-            KeyEvent::new(KeyCode::Left, KeyModifiers::ALT),
-            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::ALT),
-            press(KeyCode::Char('z')),
-            press(KeyCode::Char('K')),
-            press(KeyCode::Enter),
-            press(KeyCode::F(1)),
-        ] {
-            assert_eq!(command_for(key), None, "{key:?}");
-        }
-    }
-
-    /// Ctrl+C, which quits from every screen.
-    fn ctrl_c() -> KeyEvent {
-        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)
-    }
-
-    #[test]
-    fn the_end_screen_goes_back_to_the_title_on_enter_and_quits_on_q() {
-        assert_eq!(
-            end_command_for(press(KeyCode::Enter)),
-            Some(EndCommand::Title)
-        );
-        assert_eq!(
-            end_command_for(press(KeyCode::Char('q'))),
-            Some(EndCommand::Quit)
-        );
-        assert_eq!(end_command_for(ctrl_c()), Some(EndCommand::Interrupt));
-        for code in [KeyCode::Esc, KeyCode::Char('.'), KeyCode::Right] {
-            assert_eq!(end_command_for(press(code)), None, "{code:?}");
-        }
-    }
-
-    #[test]
-    fn the_title_menu_moves_confirms_and_quits_on_q_but_not_on_escape() {
-        for (code, command) in [
-            (KeyCode::Up, MenuCommand::Previous),
-            (KeyCode::Char('k'), MenuCommand::Previous),
-            (KeyCode::Down, MenuCommand::Next),
-            (KeyCode::Char('j'), MenuCommand::Next),
-            (KeyCode::Home, MenuCommand::First),
-            (KeyCode::End, MenuCommand::Last),
-            (KeyCode::Enter, MenuCommand::Confirm),
-            (KeyCode::Char('q'), MenuCommand::Quit),
-        ] {
-            assert_eq!(title_command_for(press(code)), Some(command), "{code:?}");
-        }
-        assert_eq!(title_command_for(ctrl_c()), Some(MenuCommand::Quit));
-        assert_eq!(title_command_for(press(KeyCode::Esc)), None);
-    }
-
-    #[test]
-    fn the_confirmation_goes_back_on_escape_and_ignores_q() {
-        assert_eq!(
-            confirm_command_for(press(KeyCode::Esc)),
-            Some(MenuCommand::Back)
-        );
-        assert_eq!(
-            confirm_command_for(press(KeyCode::Enter)),
-            Some(MenuCommand::Confirm)
-        );
-        assert_eq!(confirm_command_for(press(KeyCode::Char('q'))), None);
-        assert_eq!(confirm_command_for(ctrl_c()), Some(MenuCommand::Quit));
-    }
-
-    #[test]
-    fn every_character_is_typed_into_the_seed_even_q() {
-        for typed in ['7', 'F', 'a', '-', 'q', ' '] {
-            assert_eq!(
-                seed_command_for(press(KeyCode::Char(typed))),
-                Some(SeedCommand::Type(typed))
-            );
-        }
-        let shifted = KeyEvent::new(KeyCode::Char('F'), KeyModifiers::SHIFT);
-        assert_eq!(seed_command_for(shifted), Some(SeedCommand::Type('F')));
-        assert_eq!(
-            seed_command_for(press(KeyCode::Backspace)),
-            Some(SeedCommand::Erase)
-        );
-        assert_eq!(
-            seed_command_for(press(KeyCode::Enter)),
-            Some(SeedCommand::Submit)
-        );
-        assert_eq!(
-            seed_command_for(press(KeyCode::Esc)),
-            Some(SeedCommand::Back)
-        );
-        assert_eq!(seed_command_for(ctrl_c()), Some(SeedCommand::Quit));
-        assert_eq!(seed_command_for(press(KeyCode::Left)), None);
-    }
-
-    #[test]
-    fn the_options_screen_moves_changes_values_and_goes_back() {
-        for (code, command) in [
-            (KeyCode::Up, OptionsCommand::Previous),
-            (KeyCode::Down, OptionsCommand::Next),
-            (KeyCode::Home, OptionsCommand::First),
-            (KeyCode::End, OptionsCommand::Last),
-            (KeyCode::Left, OptionsCommand::PreviousValue),
-            (KeyCode::Char('h'), OptionsCommand::PreviousValue),
-            (KeyCode::Right, OptionsCommand::NextValue),
-            (KeyCode::Char('l'), OptionsCommand::NextValue),
-            (KeyCode::Enter, OptionsCommand::Confirm),
-            (KeyCode::Char(' '), OptionsCommand::Confirm),
-            (KeyCode::Esc, OptionsCommand::Back),
-        ] {
-            assert_eq!(options_command_for(press(code)), Some(command), "{code:?}");
-        }
-        assert_eq!(options_command_for(press(KeyCode::Char('q'))), None);
-        assert_eq!(options_command_for(ctrl_c()), Some(OptionsCommand::Quit));
-    }
-
-    #[test]
-    fn the_menu_keymaps_ignore_releases() {
-        let release =
-            KeyEvent::new_with_kind(KeyCode::Enter, KeyModifiers::NONE, KeyEventKind::Release);
-
-        assert_eq!(title_command_for(release), None);
-        assert_eq!(confirm_command_for(release), None);
-        assert_eq!(seed_command_for(release), None);
-        assert_eq!(options_command_for(release), None);
-        assert_eq!(end_command_for(release), None);
-    }
-}
+mod tests;

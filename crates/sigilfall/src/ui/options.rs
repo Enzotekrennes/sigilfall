@@ -1,6 +1,6 @@
-//! The options screen, opened from the title menu: glyphs, colours, theme
-//! and language, each changed in place and shown at once in the screen's
-//! own colours, glyphs and words.
+//! The options screen, opened from the title menu: glyphs, colours, theme,
+//! language and keyboard layout, each changed in place and shown at once in
+//! the screen's own colours, glyphs, words and key help.
 //!
 //! Exposes [`OptionRow`], the entries of the screen; [`OptionsMenu`], the
 //! screen's own state (which entry is chosen); [`change`], which gives an
@@ -10,10 +10,11 @@
 //! sample line draws a few map glyphs in their tokens, so the effect of a
 //! change is seen on the screen itself, then what the chosen entry does,
 //! the notes that explain why the screen may differ from the options
-//! (`--ascii` or `--lang` given, the light theme without true colour) and
-//! the notice of a failed write. A language is always named in itself
-//! ("English", "Français"), so a player who cannot read the language in use
-//! still finds their own.
+//! (`--ascii`, `--lang` or `--keyboard` given, the light theme without true
+//! colour) and the notice of a failed write. A language is always named in
+//! itself ("English", "Français"), so a player who cannot read the language
+//! in use still finds their own; a layout by its own name ("QWERTY",
+//! "AZERTY"), the same in every language.
 //!
 //! Nothing here writes a file: the application applies and saves the
 //! options. Every word comes from `messages`.
@@ -39,21 +40,25 @@ pub enum OptionRow {
     Theme,
     /// English or French.
     Language,
+    /// QWERTY or AZERTY.
+    Keyboard,
     /// Back to the title menu.
     Back,
 }
 
 /// The entries, top to bottom.
-const ROWS: [OptionRow; 5] = [
+const ROWS: [OptionRow; 6] = [
     OptionRow::Glyphs,
     OptionRow::Colors,
     OptionRow::Theme,
     OptionRow::Language,
+    OptionRow::Keyboard,
     OptionRow::Back,
 ];
 
 /// Columns of a line taken by an option's label, before its value: the
-/// longest label, "Language" (or "Couleurs"), and five blank columns.
+/// longest label, "Language" or "Keyboard" (or "Couleurs"), and five blank
+/// columns.
 const LABEL_WIDTH: usize = 13;
 
 /// Columns the notice of a failed write is wrapped to: the 80 columns of
@@ -63,8 +68,9 @@ const LABEL_WIDTH: usize = 13;
 const NOTICE_WIDTH: usize = 76;
 
 /// Most notes the screen shows under the description: `--ascii` given,
-/// `--lang` given, and the light theme drawn in monochrome (see [`notes`]).
-const NOTES: usize = 3;
+/// `--lang` given, `--keyboard` given, and the light theme drawn in
+/// monochrome (see [`notes`]).
+const NOTES: usize = 4;
 
 /// The options screen's own state: which entry is chosen, as a position
 /// in [`ROWS`]. It opens on the first option.
@@ -113,7 +119,7 @@ impl OptionsMenu {
 /// Returns `options` with the option of `row` given its next value
 /// (`forward` true) or its previous one, wrapping around: Unicode and
 /// ASCII; Auto, 16 colours and monochrome; dark and light; English and
-/// French. "Back" changes nothing.
+/// French; QWERTY and AZERTY. "Back" changes nothing.
 pub const fn change(options: Options, row: OptionRow, forward: bool) -> Options {
     match row {
         OptionRow::Glyphs => Options {
@@ -146,6 +152,14 @@ pub const fn change(options: Options, row: OptionRow, forward: bool) -> Options 
             },
             ..options
         },
+        OptionRow::Keyboard => Options {
+            keyboard: if forward {
+                options.keyboard.next()
+            } else {
+                options.keyboard.previous()
+            },
+            ..options
+        },
         OptionRow::Back => options,
     }
 }
@@ -154,7 +168,8 @@ pub const fn change(options: Options, row: OptionRow, forward: bool) -> Options 
 /// for `settings`, with `theme` (the theme of those settings, so a change
 /// shows at once): the title, one line per entry with its value, the
 /// sample line, what the chosen entry does, the notes on `--ascii`, on
-/// `--lang` and on the light theme without true colour when they apply,
+/// `--lang`, on `--keyboard` and on the light theme without true colour
+/// when they apply,
 /// and `notice`, the
 /// reason the options could not be written, if any; the key help on the
 /// last row.
@@ -266,6 +281,10 @@ fn entry_lines(
                 labels.language_option,
                 settings.options.language.endonym().to_owned(),
             ),
+            OptionRow::Keyboard => (
+                labels.keyboard_option,
+                settings.options.keyboard.name().to_owned(),
+            ),
             OptionRow::Back => (labels.back_item, String::new()),
         })
         .collect();
@@ -340,15 +359,16 @@ const fn help_of(row: OptionRow, labels: &'static Labels) -> &'static str {
         OptionRow::Colors => 1,
         OptionRow::Theme => 2,
         OptionRow::Language => 3,
-        OptionRow::Back => 4,
+        OptionRow::Keyboard => 4,
+        OptionRow::Back => 5,
     };
     labels.option_help[index]
 }
 
 /// The notes that explain why the screen differs from the options, in the
 /// language of `theme`: ASCII glyphs forced by `--ascii`, the language
-/// forced by `--lang`, and the light theme drawn in monochrome because the
-/// colours are not 24-bit.
+/// forced by `--lang`, the layout forced by `--keyboard`, and the light
+/// theme drawn in monochrome because the colours are not 24-bit.
 fn notes(settings: &Settings, theme: &Theme) -> Vec<String> {
     let mut notes = Vec::new();
     if settings.forced_ascii {
@@ -356,6 +376,9 @@ fn notes(settings: &Settings, theme: &Theme) -> Vec<String> {
     }
     if let Some(forced) = settings.forced_language {
         notes.push(messages::language_forced(theme.language, forced));
+    }
+    if let Some(forced) = settings.forced_keyboard {
+        notes.push(messages::keyboard_forced(theme.language, forced));
     }
     let light_in_monochrome = settings.options.appearance == Appearance::Light
         && settings.options.colors.support(settings.detected) == ColorSupport::Ansi16;

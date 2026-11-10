@@ -1,5 +1,6 @@
 ---
 source: crates/sigilfall/src/app/tests/descent.rs
+assertion_line: 148
 expression: terminal.backend()
 ---
 " Depth 2 · Turn 98                                     Seed 7F3A-91C2-0B5E-D4A8 "
@@ -25,4 +26,4 @@ expression: terminal.backend()
 "                                                                                "
 "                                                                                "
 "                                                                                "
-" ←↑→↓/1-9 move   . wait   t trace   g take   i pack   > descend   q save & quit "
+" wasd move   . wait   t trace   g take   i pack   > descend   q save & quit     "

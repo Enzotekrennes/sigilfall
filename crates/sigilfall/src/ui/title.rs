@@ -26,6 +26,7 @@ use sigilfall_core::rng::{DailyDate, Seed};
 
 use super::log::wrap;
 use super::{draw_centred_rows, key_help, up_down};
+use crate::input;
 use crate::messages::{self, Labels};
 use crate::theme::Theme;
 
@@ -660,7 +661,8 @@ fn warning(text: String, theme: &Theme) -> Line<'static> {
     ])
 }
 
-/// The key help of the menu: "↑↓ choose   Enter confirm   q quit".
+/// The key help of the menu: "↑↓ choose   Enter confirm   q quit", with
+/// the quit key of the layout (`p` on AZERTY).
 fn menu_help(theme: &Theme) -> Line<'static> {
     key_help(
         vec![
@@ -669,7 +671,10 @@ fn menu_help(theme: &Theme) -> Line<'static> {
                 theme.labels().enter_key.to_owned(),
                 theme.labels().confirm_label,
             ),
-            (messages::QUIT_KEY.to_owned(), theme.labels().quit_label),
+            (
+                input::quit_key(theme.keyboard).to_string(),
+                theme.labels().quit_label,
+            ),
         ],
         theme,
     )

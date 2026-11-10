@@ -27,7 +27,7 @@ use crate::app::{App, END_SCREEN_GRACE, State};
 use crate::cli::Cli;
 use crate::clock::ManualClock;
 use crate::persist::ScratchFolder;
-use crate::theme::{ColorMode, ColorSupport, GlyphSet, Theme};
+use crate::theme::{ColorMode, ColorSupport, Defaults, GlyphSet, Theme};
 use crate::ui::title::TitleMenu;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -79,7 +79,7 @@ pub(super) fn harmless() -> Content {
 fn launch(folder: &ScratchFolder, cli: &Cli, clock: &ManualClock) -> App {
     App::launch_with_clock(
         ColorSupport::TrueColor,
-        Language::English,
+        Defaults::default(),
         cli,
         &harmless(),
         folder.save_file(),
@@ -95,6 +95,7 @@ const fn command_line(daily: bool) -> Cli {
         daily,
         ascii: false,
         lang: None,
+        keyboard: None,
     }
 }
 
@@ -203,6 +204,7 @@ fn breaking_the_seal_with_keys_shows_the_victory_screen_and_deletes_the_save() {
         daily: false,
         ascii: false,
         lang: None,
+        keyboard: None,
     };
     let mut app = launch(&folder, &plain, &clock);
     assert!(app.has_saved_game());
@@ -704,7 +706,7 @@ fn to_the_bottom(game: &mut Game) {
 fn launch_with_dust(folder: &ScratchFolder, cli: &Cli, clock: &ManualClock) -> App {
     App::launch_with_clock(
         ColorSupport::TrueColor,
-        Language::English,
+        Defaults::default(),
         cli,
         &harmless_dust(),
         folder.save_file(),
@@ -731,6 +733,7 @@ const fn no_options() -> Cli {
         daily: false,
         ascii: false,
         lang: None,
+        keyboard: None,
     }
 }
 

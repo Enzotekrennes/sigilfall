@@ -50,8 +50,9 @@ use sigilfall_core::content::Content;
 use sigilfall_core::game::Game;
 use sigilfall_core::save::{self, SaveError};
 
+use crate::keyboard::Keyboard;
 use crate::language::Language;
-use crate::theme::{Appearance, ColorChoice, GlyphSet, Options};
+use crate::theme::{Appearance, ColorChoice, Defaults, GlyphSet, Options};
 
 /// Environment variable that replaces the operating system's data folder,
 /// as a path to a folder, created if missing; an empty value is ignored.
@@ -309,12 +310,14 @@ pub enum LoadedOptions {
 
 impl LoadedOptions {
     /// Returns the options to play with: those found, or the defaults with
-    /// the language `system`, the one of the operating system.
-    pub fn options(&self, system: Language) -> Options {
+    /// the language and keyboard layout of `system`, the operating
+    /// system's.
+    pub fn options(&self, system: Defaults) -> Options {
         match self {
             Self::Found(options) => *options,
             Self::Missing | Self::Unreadable { .. } => Options {
-                language: system,
+                language: system.language,
+                keyboard: system.keyboard,
                 ..Options::default()
             },
         }
@@ -445,10 +448,11 @@ pub enum OptionsProblem {
 /// The options file as written on disk: the format version first, then
 /// one field per option, such as
 /// `(format_version: 1, glyphs: Unicode, colors: Auto, theme: Dark,
-/// language: French)`.
+/// language: French, keyboard: Azerty)`.
 ///
-/// `language` came after the first files were written: a file without it
-/// is still of version 1, and its language is the system's.
+/// `language` and `keyboard` came after the first files were written: a
+/// file without them is still of version 1, and its language and keyboard
+/// layout are the system's.
 #[derive(Debug, Serialize, Deserialize)]
 struct OptionsRecord {
     /// [`OPTIONS_FORMAT_VERSION`] when the file was written.
@@ -463,29 +467,39 @@ struct OptionsRecord {
     /// option existed.
     #[serde(
         default,
-        deserialize_with = "read_language",
-        serialize_with = "write_language",
+        deserialize_with = "read_bare",
+        serialize_with = "write_bare",
         skip_serializing_if = "Option::is_none"
     )]
     language: Option<Language>,
+    /// Keyboard layout the keys follow; `None` in a file written before
+    /// the option existed.
+    #[serde(
+        default,
+        deserialize_with = "read_bare",
+        serialize_with = "write_bare",
+        skip_serializing_if = "Option::is_none"
+    )]
+    keyboard: Option<Keyboard>,
 }
 
-/// Reads the `language` setting, written bare (`French`) rather than as
-/// RON's `Some(French)`.
-fn read_language<'de, D: serde::Deserializer<'de>>(
+/// Reads a setting added after the first files, written bare (`French`,
+/// `Azerty`) rather than as RON's `Some(French)`; its absence is left to
+/// `#[serde(default)]`.
+fn read_bare<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     deserializer: D,
-) -> Result<Option<Language>, D::Error> {
-    Language::deserialize(deserializer).map(Some)
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
 }
 
-/// Writes the `language` setting bare, as [`read_language`] reads it; only
-/// called with a language, the field being skipped otherwise.
-fn write_language<S: serde::Serializer>(
-    language: &Option<Language>,
+/// Writes a setting bare, as [`read_bare`] reads it; only called with a
+/// value, the field being skipped otherwise.
+fn write_bare<S: serde::Serializer, T: Serialize>(
+    value: &Option<T>,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
-    match language {
-        Some(language) => language.serialize(serializer),
+    match value {
+        Some(value) => value.serialize(serializer),
         None => serializer.serialize_none(),
     }
 }
@@ -520,14 +534,15 @@ impl OptionsFile {
     }
 
     /// Reads the player's options back; a file written before the language
-    /// option existed gives the language `system`, the operating system's.
+    /// or the keyboard option existed gives the language or the layout of
+    /// `system`, the operating system's.
     ///
     /// Never fails: a missing file gives [`LoadedOptions::Missing`], and a
     /// file that cannot be read (permissions, larger than
     /// [`MAX_FILE_BYTES`], not text, not RON, another format version, an
     /// unknown value) gives [`LoadedOptions::Unreadable`] with the reason.
     /// The file itself is left as it is.
-    pub fn load(&self, system: Language) -> LoadedOptions {
+    pub fn load(&self, system: Defaults) -> LoadedOptions {
         let bytes = match read_bounded(&self.path) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return LoadedOptions::Missing,
@@ -563,6 +578,7 @@ impl OptionsFile {
             colors: options.colors,
             theme: options.appearance,
             language: Some(options.language),
+            keyboard: Some(options.keyboard),
         };
         let text = ron::ser::to_string_pretty(&record, ron::ser::PrettyConfig::default())
             .context("cannot write the options as text")?;
@@ -581,11 +597,12 @@ const fn unreadable(reason: OptionsProblem) -> LoadedOptions {
     LoadedOptions::Unreadable { reason }
 }
 
-/// Reads the text of an options file, `system` being the language of a
-/// file that names none, or returns why it cannot be read: it is empty, it
+/// Reads the text of an options file, `system` giving the language and the
+/// keyboard layout of a file that names none, or returns why it cannot be
+/// read: it is empty, it
 /// has another format version, or what is wrong and on which line (see
 /// [`describe_parse_error`]).
-fn parse_options(text: &str, system: Language) -> Result<Options, OptionsProblem> {
+fn parse_options(text: &str, system: Defaults) -> Result<Options, OptionsProblem> {
     if text.trim().is_empty() {
         return Err(OptionsProblem::Empty);
     }
@@ -602,7 +619,8 @@ fn parse_options(text: &str, system: Language) -> Result<Options, OptionsProblem
         glyphs: record.glyphs,
         colors: record.colors,
         appearance: record.theme,
-        language: record.language.unwrap_or(system),
+        language: record.language.unwrap_or(system.language),
+        keyboard: record.keyboard.unwrap_or(system.keyboard),
     })
 }
 
@@ -612,11 +630,12 @@ fn parse_options(text: &str, system: Language) -> Result<Options, OptionsProblem
 /// The parser reports an unknown value with the type's name (`GlyphSet`),
 /// which means nothing to a player; the key (`glyphs`) is what they read in
 /// the file.
-const SETTING_KEYS: [(&str, &str); 4] = [
+const SETTING_KEYS: [(&str, &str); 5] = [
     ("GlyphSet", "glyphs"),
     ("ColorChoice", "colors"),
     ("Appearance", "theme"),
     ("Language", "language"),
+    ("Keyboard", "keyboard"),
 ];
 
 /// Key of the format version in the options file.
@@ -1314,17 +1333,24 @@ mod tests {
                 ColorChoice::Ansi16,
                 ColorChoice::Monochrome,
             ] {
-                for appearance in [Appearance::Dark, Appearance::Light] {
+                for (appearance, keyboard) in [
+                    (Appearance::Dark, Keyboard::Azerty),
+                    (Appearance::Light, Keyboard::Qwerty),
+                ] {
                     let options = Options {
                         glyphs,
                         colors,
                         appearance,
                         language: Language::French,
+                        keyboard,
                     };
 
                     file.write(&options).unwrap();
 
-                    assert_eq!(file.load(Language::English), LoadedOptions::Found(options));
+                    assert_eq!(
+                        file.load(Defaults::default()),
+                        LoadedOptions::Found(options)
+                    );
                     assert!(!with_suffix(file.path(), TEMPORARY_SUFFIX).exists());
                 }
             }
@@ -1340,13 +1366,20 @@ mod tests {
             colors: ColorChoice::Ansi16,
             appearance: Appearance::Light,
             language: Language::English,
+            keyboard: Keyboard::Qwerty,
         };
 
         file.write(&options).unwrap();
 
         let text = fs::read_to_string(file.path()).unwrap();
         let version = text.find("format_version: 1").expect("the version");
-        for field in ["glyphs: Ascii", "colors: Ansi16", "theme: Light"] {
+        for field in [
+            "glyphs: Ascii",
+            "colors: Ansi16",
+            "theme: Light",
+            "language: English",
+            "keyboard: Qwerty",
+        ] {
             let at = text
                 .find(field)
                 .unwrap_or_else(|| panic!("{field}:\n{text}"));
@@ -1358,17 +1391,71 @@ mod tests {
             "(theme: Light, colors: Ansi16, glyphs: Ascii, format_version: 1)",
         )
         .unwrap();
-        assert_eq!(file.load(Language::English), LoadedOptions::Found(options));
+        assert_eq!(
+            file.load(Defaults::default()),
+            LoadedOptions::Found(options)
+        );
     }
 
     #[test]
     fn no_options_file_reads_as_missing_with_the_defaults() {
         let folder = ScratchFolder::new("options-missing");
 
-        let loaded = folder.options_file().load(Language::English);
+        let loaded = folder.options_file().load(Defaults::default());
 
         assert_eq!(loaded, LoadedOptions::Missing);
-        assert_eq!(loaded.options(Language::English), Options::default());
+        assert_eq!(loaded.options(Defaults::default()), Options::default());
+        let french_azerty = Defaults {
+            language: Language::French,
+            keyboard: Keyboard::Azerty,
+        };
+        assert_eq!(
+            loaded.options(french_azerty),
+            Options {
+                language: Language::French,
+                keyboard: Keyboard::Azerty,
+                ..Options::default()
+            }
+        );
+    }
+
+    #[test]
+    fn a_file_written_before_the_keyboard_option_keeps_its_settings_and_the_system_layout() {
+        let folder = ScratchFolder::new("options-before-keyboard");
+        let file = folder.options_file();
+        fs::write(
+            file.path(),
+            "(format_version: 1, glyphs: Ascii, colors: Auto, theme: Dark, language: French)",
+        )
+        .unwrap();
+        for keyboard in Keyboard::ALL {
+            let system = Defaults {
+                language: Language::English,
+                keyboard,
+            };
+            assert_eq!(
+                file.load(system),
+                LoadedOptions::Found(Options {
+                    glyphs: GlyphSet::Ascii,
+                    language: Language::French,
+                    keyboard,
+                    ..Options::default()
+                }),
+                "{keyboard:?}"
+            );
+        }
+        // Once chosen, the layout is written and wins over the system's.
+        let chosen = Options {
+            keyboard: Keyboard::Azerty,
+            ..Options::default()
+        };
+        file.write(&chosen).unwrap();
+        assert!(
+            fs::read_to_string(file.path())
+                .unwrap()
+                .contains("keyboard: Azerty")
+        );
+        assert_eq!(file.load(Defaults::default()), LoadedOptions::Found(chosen));
     }
 
     #[test]
@@ -1391,7 +1478,7 @@ mod tests {
             let file = folder.options_file();
             fs::write(file.path(), &bytes).unwrap();
 
-            let loaded = file.load(Language::English);
+            let loaded = file.load(Defaults::default());
 
             let LoadedOptions::Unreadable { reason } = &loaded else {
                 panic!("{label}: {loaded:?}");
@@ -1401,7 +1488,7 @@ mod tests {
                 "{label}"
             );
             assert_eq!(
-                loaded.options(Language::French),
+                loaded.options(Defaults::with_language(Language::French)),
                 Options {
                     language: Language::French,
                     ..Options::default()
@@ -1422,7 +1509,7 @@ mod tests {
         )
         .unwrap();
 
-        let LoadedOptions::Unreadable { reason } = file.load(Language::English) else {
+        let LoadedOptions::Unreadable { reason } = file.load(Defaults::default()) else {
             panic!("a version 2 file is not read");
         };
 
@@ -1435,7 +1522,7 @@ mod tests {
     /// The reason given for an options file whose text is `text`, in
     /// English.
     fn reason_for(text: &str) -> String {
-        let problem = parse_options(text, Language::English).expect_err(text);
+        let problem = parse_options(text, Defaults::default()).expect_err(text);
         messages::options_problem(Language::English, &problem)
     }
 
@@ -1614,7 +1701,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            file.load(Language::English),
+            file.load(Defaults::default()),
             LoadedOptions::Unreadable {
                 reason: OptionsProblem::TooLarge {
                     limit: MAX_FILE_BYTES
@@ -1630,7 +1717,7 @@ mod tests {
         fs::create_dir(file.path()).unwrap();
 
         assert!(matches!(
-            file.load(Language::English),
+            file.load(Defaults::default()),
             LoadedOptions::Unreadable { .. }
         ));
     }
@@ -1655,7 +1742,7 @@ mod tests {
             "{message}"
         );
         assert_eq!(
-            file.load(Language::English),
+            file.load(Defaults::default()),
             LoadedOptions::Found(Options::default())
         );
     }
@@ -1668,7 +1755,7 @@ mod tests {
         file.write(&Options::default()).unwrap();
 
         assert_eq!(
-            file.load(Language::English),
+            file.load(Defaults::default()),
             LoadedOptions::Found(Options::default())
         );
     }

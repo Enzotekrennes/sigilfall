@@ -3,7 +3,7 @@
 //!
 //! The first tests walk the bare floors of [`SEED`] (see
 //! [`generated_floor_app`]), where no monster stands in the way. The others
-//! check the descent from the player's side: `>` or `D` on the stairs shows a
+//! check the descent from the player's side: `>` or `E` on the stairs shows a
 //! new floor one level deeper, the same one for the same seed; the floor's
 //! creatures come from the table of its depth; off the stairs the keys do
 //! nothing and the log says so. Beyond them they check what the player keeps
@@ -157,7 +157,7 @@ fn a_descent_off_the_stairs_is_refused_at_no_cost_and_logged() {
 
     for key in [
         press(KeyCode::Char('>')),
-        KeyEvent::new(KeyCode::Char('D'), KeyModifiers::SHIFT),
+        KeyEvent::new(KeyCode::Char('E'), KeyModifiers::SHIFT),
     ] {
         app.handle_key(key);
     }
@@ -180,10 +180,17 @@ fn lowercase_d_and_less_than_never_descend() {
     let before = clock(&app);
     let messages = app.log().len();
 
-    press_all(&mut app, &[KeyCode::Char('d'), KeyCode::Char('<')]);
+    press_all(&mut app, &[KeyCode::Char('<')]);
 
     assert_eq!(clock(&app), before);
     assert_eq!(app.log().len(), messages, "unbound keys log nothing");
+
+    // On QWERTY `d` is the east key of WASD: one step east, at depth 1.
+    let (depth, _, _, position) = before;
+    press_all(&mut app, &[KeyCode::Char('d')]);
+    let (depth_after, _, _, position_after) = clock(&app);
+    assert_eq!(depth_after, depth, "d never descends");
+    assert_eq!(position_after, position.step(Direction::East));
 }
 
 #[test]
@@ -197,7 +204,7 @@ fn descending_again_and_again_counts_each_floor() {
         let key = if depth % 2 == 0 {
             KeyEvent::new(KeyCode::Char('>'), KeyModifiers::SHIFT)
         } else {
-            KeyEvent::new(KeyCode::Char('D'), KeyModifiers::SHIFT)
+            KeyEvent::new(KeyCode::Char('E'), KeyModifiers::SHIFT)
         };
         app.handle_key(key);
 
@@ -236,11 +243,12 @@ fn the_ascii_status_line_and_help_stay_plain_ascii() {
     let help = row_text(&buffer, 23);
 
     assert!(status.starts_with(" Depth 1 - Turn 1 "), "{status:?}");
-    // Seven help entries fit the 80 columns, one to spare: nothing cut.
+    // Seven help entries fit the 80 columns: nothing cut.
     assert_eq!(
-        help,
-        " <^>v/1-9 move   . wait   t trace   g take   i pack   > descend   q save & quit "
+        help.trim_end(),
+        " wasd move   . wait   t trace   g take   i pack   > descend   q save & quit"
     );
+    assert!(help.is_ascii(), "{help:?}");
 }
 
 /// Creatures that never get to act (speed 1) and die in one blow, in four
@@ -525,7 +533,7 @@ fn pressed(digits: &[u8]) -> Trace {
     trace
 }
 
-// --- On the stairs, > or D shows the next floor -----------------
+// --- On the stairs, > or E shows the next floor -----------------
 
 #[test]
 fn greater_than_on_the_stairs_shows_depth_two_and_logs_it() {
@@ -579,12 +587,12 @@ fn greater_than_on_the_stairs_shows_depth_two_and_logs_it() {
 }
 
 #[test]
-fn capital_d_descends_like_greater_than_with_or_without_shift() {
+fn capital_e_descends_like_greater_than_with_or_without_shift() {
     for modifiers in [KeyModifiers::SHIFT, KeyModifiers::NONE] {
         let mut app = app(Seed::new(42));
         walk_to_stairs(&mut app);
 
-        app.handle_key(KeyEvent::new(KeyCode::Char('D'), modifiers));
+        app.handle_key(KeyEvent::new(KeyCode::Char('E'), modifiers));
 
         assert_eq!(app.game().depth(), 2, "{modifiers:?}");
         assert!(
@@ -706,7 +714,7 @@ fn the_creatures_shown_after_each_descent_come_from_the_table_of_the_depth() {
 #[test]
 fn off_the_stairs_both_keys_change_nothing_and_the_log_says_so() {
     for seed in seeds() {
-        for key in ['>', 'D'] {
+        for key in ['>', 'E'] {
             let mut app = app(seed);
             let before = clock_with_vitals(&app);
             let history = log(&app);
@@ -746,7 +754,7 @@ fn a_step_short_of_the_stairs_is_still_refused_and_a_repeat_costs_nothing() {
     let before = clock_with_vitals(&app);
 
     for _ in 0..4 {
-        keys(&mut app, ">D");
+        keys(&mut app, ">E");
     }
 
     assert_eq!(clock_with_vitals(&app), before);
@@ -778,7 +786,7 @@ fn after_a_refusal_one_more_step_and_the_stairs_work() {
 #[test]
 fn the_refusal_does_not_end_the_game_or_open_anything() {
     let mut app = app(Seed::new(0));
-    keys(&mut app, "D");
+    keys(&mut app, "E");
     assert_eq!(app.state(), State::Playing);
     keys(&mut app, ".");
     assert_eq!(app.game().player_turns(), 1, "the game still takes turns");
@@ -793,8 +801,10 @@ fn other_keys_do_not_descend_even_on_the_stairs() {
     let before = clock_with_vitals(&app);
 
     for event in [
-        press(KeyCode::Char('d')),
         press(KeyCode::Char('<')),
+        press(KeyCode::Char('e')),
+        KeyEvent::new(KeyCode::Char('D'), KeyModifiers::SHIFT),
+        KeyEvent::new(KeyCode::Char('D'), KeyModifiers::NONE),
         press(KeyCode::Char('x')),
         press(KeyCode::Enter),
         press(KeyCode::Esc),
@@ -818,7 +828,7 @@ fn the_inventory_overlay_ignores_the_descent_keys_on_the_stairs() {
     keys(&mut app, "i");
     assert!(matches!(app.state(), State::Inventory(_)));
 
-    keys(&mut app, ">D");
+    keys(&mut app, ">E");
 
     assert_eq!(app.game().depth(), 1, "an open inventory does not descend");
     assert!(matches!(app.state(), State::Inventory(_)));
@@ -830,7 +840,7 @@ fn on_a_screen_under_80_by_24_the_descent_keys_do_nothing() {
     walk_to_stairs(&mut app);
     let _ = buffer_at(&app, 79, 24);
 
-    keys(&mut app, ">D");
+    keys(&mut app, ">E");
 
     assert_eq!(app.game().depth(), 1, "the game screen is not shown");
     let _ = buffer_at(&app, 80, 24);

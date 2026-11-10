@@ -164,16 +164,48 @@ pub fn render_menu(frame: &mut Frame, screen: MenuScreen<'_>, theme: &Theme) {
     }
 }
 
+/// Blank columns between two pairs of the key help.
+const KEY_HELP_GAP: usize = 3;
+
+/// Blank columns between two pairs of a key help that would not fit its row
+/// with [`KEY_HELP_GAP`]: two still set the pairs apart, since a key and
+/// its label are one column apart and differ in style.
+const NARROW_KEY_HELP_GAP: usize = 2;
+
 /// Builds a line of key help from `bindings`, pairs of a key and what it
 /// does: each key in `text`, its label in `text_muted`, three blank columns
-/// between two pairs, one before the first, the same on every screen.
+/// between two pairs ([`KEY_HELP_GAP`]), one before the first, the same on
+/// every screen.
 pub(crate) fn key_help(bindings: Vec<(String, &str)>, theme: &Theme) -> Line<'static> {
+    help_line(&bindings, KEY_HELP_GAP, theme)
+}
+
+/// Builds the line of [`key_help`] for a row `width` columns wide: with
+/// three columns between two pairs when it fits, with two
+/// ([`NARROW_KEY_HELP_GAP`]) otherwise, so the longest help, the French one
+/// of the game screen, keeps every pair whole within 80 columns. Wider than
+/// the row even then, it is cut at the right like any line.
+pub(crate) fn key_help_within(
+    bindings: Vec<(String, &str)>,
+    width: u16,
+    theme: &Theme,
+) -> Line<'static> {
+    let line = help_line(&bindings, KEY_HELP_GAP, theme);
+    if line.width() <= usize::from(width) {
+        return line;
+    }
+    help_line(&bindings, NARROW_KEY_HELP_GAP, theme)
+}
+
+/// The line of key help of `bindings` with `gap` blank columns between two
+/// pairs and one before the first.
+fn help_line(bindings: &[(String, &str)], gap: usize, theme: &Theme) -> Line<'static> {
     let mut spans = vec![Span::raw(" ")];
-    for (index, (key, label)) in bindings.into_iter().enumerate() {
+    for (index, (key, label)) in bindings.iter().enumerate() {
         if index > 0 {
-            spans.push(Span::raw("   "));
+            spans.push(Span::raw(" ".repeat(gap)));
         }
-        spans.push(Span::styled(key, theme.text));
+        spans.push(Span::styled(key.clone(), theme.text));
         spans.push(Span::styled(format!(" {label}"), theme.text_muted));
     }
     Line::from(spans)
@@ -283,10 +315,10 @@ mod tests {
     const SEED_LABEL_CELL: (u16, u16) = (55, 0);
     /// Screen cell of the first digit of the seed.
     const SEED_VALUE_CELL: (u16, u16) = (60, 0);
-    /// Screen cell of the first key of the key help (the left arrow).
+    /// Screen cell of the first key of the key help (the `w` of `wasd`).
     const HELP_KEY_CELL: (u16, u16) = (1, 23);
     /// Screen cell of the first letter of the help label "move".
-    const HELP_LABEL_CELL: (u16, u16) = (10, 23);
+    const HELP_LABEL_CELL: (u16, u16) = (6, 23);
 
     /// The game's own monsters, for their names.
     fn content() -> Content {

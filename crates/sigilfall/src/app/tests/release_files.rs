@@ -51,6 +51,15 @@ fn the_release_files_agree_on_targets_trigger_installers_and_tool_version() {
     assert!(dist.contains("ci = \"github\""));
     assert!(dist.contains("installers = [\"shell\", \"powershell\"]"));
     assert!(dist.contains("[workspace]") && dist.contains("members = [\"cargo:.\"]"));
+    // Every archive ships the notices of the crates and the French README
+    // beside the files dist adds on its own (README.md, LICENSE-*).
+    assert!(
+        dist.contains("include = [\"THIRD-PARTY-LICENSES\", \"README.fr.md\"]"),
+        "the archives include both files"
+    );
+    for file in ["THIRD-PARTY-LICENSES", "README.fr.md"] {
+        assert!(root.join(file).is_file(), "{file} exists");
+    }
 
     // The version of dist is the one of the configuration everywhere: in the
     // action that installs it, in the archive it downloads, and in the

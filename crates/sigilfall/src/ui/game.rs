@@ -34,6 +34,7 @@ use sigilfall_core::map::Tile;
 use super::camera::Camera;
 use super::{Overlay, hud, inventory, log, sigil};
 use crate::casting::Casting;
+use crate::input;
 use crate::message_log::MessageLog;
 use crate::messages::{self, Labels};
 use crate::theme::Theme;
@@ -148,7 +149,13 @@ pub fn render(
     let carries_items = game.inventory().next().is_some();
     let bottom_floor = generation::is_bottom_floor(game.depth());
     frame.render_widget(
-        key_help(overlay, carries_items, bottom_floor, theme),
+        key_help(
+            overlay,
+            carries_items,
+            bottom_floor,
+            layout.help.width,
+            theme,
+        ),
         layout.help,
     );
 }
@@ -201,93 +208,84 @@ fn run_label(game: &Game, theme: &Theme) -> Line<'static> {
     .right_aligned()
 }
 
-/// Builds the key help: each key in the text style, followed by what it
-/// does in the muted style, so keys stand out from their labels.
+/// Builds the key help for a row `width` columns wide: each key in the
+/// text style, followed by what it does in the muted style, so keys stand
+/// out from their labels. The keys are those of the keyboard layout of
+/// `theme` (`input::key_names`), in its language.
 ///
 /// The keys are those of the screen in front of the player: the game's
-/// (move, wait, trace, take, pack, descend, save & quit), which fit the
-/// 80 columns with one to spare, so the explore key (`input::EXPLORE_KEY`)
-/// is left to the README; on the bottom floor (`bottom_floor` true), where
-/// the same key breaks the seal instead, "descend" becomes "unseal",
-/// which fits as well; under the sigil overlay,
-/// the overlay's (link a node, undo, cast, cancel), the direction prompt's
-/// (aim, back) or the verdict's (continue); in the inventory, its own
-/// (choose, use, drop, close), or only close while the player carries
-/// nothing (`carries_items` false).
+/// (move, wait, trace, take, pack, descend, save and quit); under the sigil
+/// overlay, the overlay's (link a node, undo, cast, cancel), the direction
+/// prompt's (aim, back) or the verdict's (continue); in the inventory, its
+/// own (choose, use, drop, close), or only close while the player carries
+/// nothing (`carries_items` false). On the bottom floor (`bottom_floor`
+/// true), where the same key breaks the seal instead, "descend" becomes
+/// "unseal".
+///
+/// The game's help names the layout's letters for moving (WASD or ZQSD):
+/// the arrows, the digits and the vi keys, the same on every layout, are
+/// left to the README with the explore key (`input::EXPLORE_KEY`), so the
+/// help can say, in both languages, that quitting saves the game. In
+/// French it then fits 80 columns with two blank columns between pairs
+/// instead of three (`ui::key_help_within`). The direction prompt, which
+/// has room, names the letters, the arrows and the digits, which give the
+/// diagonals.
 fn key_help(
     overlay: Option<Overlay<'_>>,
     carries_items: bool,
     bottom_floor: bool,
+    width: u16,
     theme: &Theme,
 ) -> Line<'static> {
-    let glyphs = &theme.glyphs;
-    let directions = format!("{}/1-9", glyphs.arrows());
+    let (labels, glyphs) = (theme.labels(), &theme.glyphs);
+    let keys = input::key_names(theme.keyboard);
     let descend_label = if bottom_floor {
-        theme.labels().unseal_label
+        labels.unseal_label
     } else {
-        theme.labels().descend_label
+        labels.descend_label
     };
     let bindings: Vec<(String, &str)> = match overlay {
         None => vec![
-            (directions, theme.labels().move_label),
-            (messages::WAIT_KEY.to_owned(), theme.labels().wait_label),
-            (
-                messages::TRACE_KEY.to_owned(),
-                theme.labels().trace_key_label,
-            ),
-            (
-                messages::PICK_UP_KEY.to_owned(),
-                theme.labels().pick_up_label,
-            ),
-            (
-                messages::INVENTORY_KEY.to_owned(),
-                theme.labels().inventory_label,
-            ),
+            (keys.movement, labels.move_label),
+            (messages::WAIT_KEY.to_owned(), labels.wait_label),
+            (messages::TRACE_KEY.to_owned(), labels.trace_key_label),
+            (messages::PICK_UP_KEY.to_owned(), labels.pick_up_label),
+            (messages::INVENTORY_KEY.to_owned(), labels.inventory_label),
             (messages::DESCEND_KEY.to_owned(), descend_label),
-            (
-                messages::QUIT_KEY.to_owned(),
-                theme.labels().save_and_quit_label,
-            ),
+            (keys.quit, labels.save_and_quit_label),
         ],
         Some(Overlay::Inventory(_)) if carries_items => vec![
             (
-                format!(
-                    "{}{}/{}",
-                    glyphs.arrow_up,
-                    glyphs.arrow_down,
-                    messages::SLOT_KEYS
-                ),
-                theme.labels().choose_label,
+                format!("{}{}/{}", glyphs.arrow_up, glyphs.arrow_down, keys.slots),
+                labels.choose_label,
             ),
-            (theme.labels().use_keys.to_owned(), theme.labels().use_label),
-            (messages::DROP_KEY.to_owned(), theme.labels().drop_label),
-            (
-                theme.labels().escape_key.to_owned(),
-                theme.labels().close_label,
-            ),
+            (labels.use_keys.to_owned(), labels.use_label),
+            (messages::DROP_KEY.to_owned(), labels.drop_label),
+            (labels.escape_key.to_owned(), labels.close_label),
         ],
         Some(Overlay::Inventory(_)) => {
-            vec![(
-                theme.labels().escape_key.to_owned(),
-                theme.labels().close_label,
-            )]
+            vec![(labels.escape_key.to_owned(), labels.close_label)]
         }
-        Some(Overlay::Casting(casting)) => casting_bindings(casting, directions, theme.labels()),
+        Some(Overlay::Casting(casting)) => {
+            let directions = format!("{}/{}/{}", keys.movement, glyphs.arrows(), keys.nodes);
+            casting_bindings(casting, directions, keys.nodes, labels)
+        }
     };
-    super::key_help(bindings, theme)
+    super::key_help_within(bindings, width, theme)
 }
 
 /// The keys of the sigil overlay at the step `casting`, with their labels,
 /// for [`key_help`], in the words of `labels`; `directions` names the
-/// movement keys.
+/// movement keys and `nodes` the keys that link a node.
 fn casting_bindings(
     casting: &Casting,
     directions: String,
+    nodes: String,
     labels: &'static Labels,
 ) -> Vec<(String, &'static str)> {
     match casting {
         Casting::Drawing(_) => vec![
-            (messages::LINK_KEYS.to_owned(), labels.link_label),
+            (nodes, labels.link_label),
             (labels.backspace_key.to_owned(), labels.undo_label),
             (labels.enter_key.to_owned(), labels.cast_label),
             (labels.escape_key.to_owned(), labels.cancel_label),
@@ -486,6 +484,8 @@ mod tests {
     use sigilfall_core::rng::Seed;
 
     use super::*;
+    use crate::keyboard::Keyboard;
+    use crate::language::Language;
     use crate::theme::{ColorMode, GlyphSet};
 
     /// The four rendering modes ([`ColorMode`]).
@@ -794,14 +794,78 @@ mod tests {
     #[test]
     fn the_key_help_says_unseal_on_the_bottom_floor_and_still_fits() {
         for glyph_set in GLYPH_SETS {
-            let theme = Theme::new(ColorMode::TrueColorDark, glyph_set);
-            let above = key_help(None, false, false, &theme).to_string();
-            let bottom = key_help(None, false, true, &theme).to_string();
+            for language in Language::ALL {
+                for keyboard in Keyboard::ALL {
+                    let theme = Theme::new(ColorMode::TrueColorDark, glyph_set)
+                        .in_language(language)
+                        .on_keyboard(keyboard);
+                    let labels = theme.labels();
+                    let above = key_help(None, false, false, 80, &theme).to_string();
+                    let bottom = key_help(None, false, true, 80, &theme).to_string();
 
-            assert!(above.contains("> descend"), "{above}");
-            assert!(bottom.contains("> unseal"), "{bottom}");
-            assert!(!bottom.contains("descend"), "{bottom}");
-            assert!(bottom.chars().count() < 80, "{bottom}");
+                    let (descend, unseal) = (
+                        format!("> {}", labels.descend_label),
+                        format!("> {}", labels.unseal_label),
+                    );
+                    assert!(above.contains(&descend), "{above}");
+                    assert!(bottom.contains(&unseal), "{bottom}");
+                    assert!(!bottom.contains(&descend), "{bottom}");
+                    for help in [&above, &bottom] {
+                        assert!(help.chars().count() <= 80, "{help}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_key_help_names_the_keys_of_the_layout_and_says_that_quitting_saves() {
+        let help = |language, keyboard, width| {
+            let theme = Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode)
+                .in_language(language)
+                .on_keyboard(keyboard);
+            key_help(None, false, false, width, &theme).to_string()
+        };
+        let cases = [
+            (
+                Language::English,
+                Keyboard::Qwerty,
+                "wasd move",
+                "q save & quit",
+            ),
+            (
+                Language::English,
+                Keyboard::Azerty,
+                "zqsd move",
+                "p save & quit",
+            ),
+            (
+                Language::French,
+                Keyboard::Qwerty,
+                "wasd aller",
+                "q sauver et quitter",
+            ),
+            (
+                Language::French,
+                Keyboard::Azerty,
+                "zqsd aller",
+                "p sauver et quitter",
+            ),
+        ];
+        for (language, keyboard, movement, quit) in cases {
+            let narrow = help(language, keyboard, 80);
+            assert!(narrow.starts_with(&format!(" {movement}")), "{narrow:?}");
+            assert!(narrow.ends_with(quit), "{narrow:?}");
+            // Three columns between pairs when they fit, two otherwise.
+            let wide = help(language, keyboard, 120);
+            assert!(wide.contains(&format!("   {quit}")), "{wide:?}");
+            let gap = if wide.chars().count() <= 80 {
+                "   "
+            } else {
+                "  "
+            };
+            assert!(narrow.contains(&format!("{gap}{quit}")), "{narrow:?}");
+            assert!(!narrow.contains(&format!("{gap} {quit}")), "{narrow:?}");
         }
     }
 

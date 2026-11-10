@@ -21,9 +21,10 @@ use super::*;
 use crate::app::{App, END_SCREEN_GRACE, State};
 use crate::cli::Cli;
 use crate::clock::ManualClock;
+use crate::keyboard::Keyboard;
 use crate::message_log::Tone;
 use crate::persist::{Loaded, SaveFile, ScratchFolder};
-use crate::theme::{ColorMode, ColorSupport, GlyphSet, Theme};
+use crate::theme::{ColorMode, ColorSupport, Defaults, GlyphSet, Theme};
 use crate::ui::title::TitleMenu;
 use clap::Parser as _;
 use ratatui::Terminal;
@@ -69,6 +70,7 @@ const fn command_line(seed: Option<Seed>) -> Cli {
         daily: false,
         ascii: false,
         lang: None,
+        keyboard: None,
     }
 }
 
@@ -77,7 +79,7 @@ const fn command_line(seed: Option<Seed>) -> Cli {
 pub(super) fn launch(folder: &ScratchFolder, seed: Option<Seed>) -> anyhow::Result<App> {
     App::launch_with_clock(
         ColorSupport::TrueColor,
-        Language::English,
+        Defaults::default(),
         &command_line(seed),
         &shipped_content(),
         folder.save_file(),
@@ -216,7 +218,9 @@ fn a_resumed_game_goes_on_exactly_as_if_never_left() {
     let mut twin = never_left.clone();
     let mut copy = resumed.game().clone();
     for key in WALK.iter().chain(WALK) {
-        let Some(Command::Act(action)) = input::command_for(press(KeyCode::Char(*key))) else {
+        let Some(Command::Act(action)) =
+            input::command_for(Keyboard::Qwerty, press(KeyCode::Char(*key)))
+        else {
             panic!("{key} is a game action");
         };
         assert_eq!(copy.submit(action), twin.submit(action), "{key}");
@@ -489,7 +493,7 @@ fn a_saved_finished_game_is_deleted_and_a_new_game_starts() {
 
     let app = App::launch_with_clock(
         ColorSupport::TrueColor,
-        Language::English,
+        Defaults::default(),
         &command_line(Some(OTHER_SEED)),
         &content,
         folder.save_file(),
@@ -574,7 +578,7 @@ fn command_line_of(arguments: &[&str]) -> Cli {
 fn open(folder: &ScratchFolder, arguments: &[&str]) -> anyhow::Result<App> {
     App::launch(
         ColorSupport::TrueColor,
-        Language::English,
+        Defaults::default(),
         &command_line_of(arguments),
         &shipped(),
         folder.save_file(),
@@ -1532,7 +1536,7 @@ fn a_20_kb_error_and_a_120_character_path_show_whole_on_the_title_and_in_the_log
 
     let mut app = App::launch(
         ColorSupport::TrueColor,
-        Language::English,
+        Defaults::default(),
         &command_line_of(&[]),
         &shipped(),
         save.clone(),

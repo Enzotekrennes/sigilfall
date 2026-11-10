@@ -26,8 +26,9 @@ use super::*;
 use crate::app::{App, State};
 use crate::cli::Cli;
 use crate::clock::ManualClock;
+use crate::keyboard::Keyboard;
 use crate::persist::ScratchFolder;
-use crate::theme::{Appearance, ColorChoice, ColorSupport, GlyphSet, Options};
+use crate::theme::{Appearance, ColorChoice, ColorSupport, Defaults, GlyphSet, Options};
 use crate::ui::title::{Confirmation, NewRun, TitleItem, TitleMenu};
 use clap::Parser as _;
 use clap::error::ErrorKind;
@@ -65,6 +66,7 @@ const fn command_line(daily: bool) -> Cli {
         daily,
         ascii: false,
         lang: None,
+        keyboard: None,
     }
 }
 
@@ -73,7 +75,7 @@ const fn command_line(daily: bool) -> Cli {
 fn launch_at(folder: &ScratchFolder, daily: bool, clock: &ManualClock) -> anyhow::Result<App> {
     App::launch_with_clock(
         ColorSupport::TrueColor,
-        Language::English,
+        Defaults::with_language(Language::English),
         &command_line(daily),
         &shipped_content(),
         folder.save_file(),
@@ -1010,10 +1012,12 @@ fn the_line_is_plain_ascii_in_every_mode_and_with_the_ascii_option() {
                 colors,
                 appearance,
                 language: Language::English,
+                keyboard: Keyboard::Qwerty,
             },
             detected: ColorSupport::TrueColor,
             forced_ascii: false,
             forced_language: None,
+            forced_keyboard: None,
         };
         let mut shown = App::with_game(settings.theme(), game.clone(), content.clone());
         shown.handle_key(press(KeyCode::Char('.')));
