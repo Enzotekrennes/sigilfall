@@ -15,6 +15,7 @@ mod casting;
 mod cli;
 mod clock;
 mod input;
+mod language;
 mod message_log;
 mod messages;
 mod persist;
@@ -37,6 +38,7 @@ use sigilfall_core::content::Content;
 
 use crate::app::App;
 use crate::cli::Cli;
+use crate::language::Language;
 use crate::persist::SaveFile;
 use crate::theme::ColorSupport;
 
@@ -74,7 +76,13 @@ fn main() -> anyhow::Result<()> {
     theme::let_the_theme_decide_colours();
 
     let content = Content::load().context("the game data built into this binary is invalid")?;
-    let mut app = App::launch(ColorSupport::detect(), &cli, &content, SaveFile::locate()?)?;
+    let mut app = App::launch(
+        ColorSupport::detect(),
+        Language::detect(),
+        &cli,
+        &content,
+        SaveFile::locate()?,
+    )?;
     let outcome = enter_terminal().and_then(|mut terminal| app.run(&mut terminal));
     // Restore even when the game failed, so the error is printed on the
     // normal screen; the game's own error is the more useful one to report.

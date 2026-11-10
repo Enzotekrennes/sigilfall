@@ -50,7 +50,7 @@ use std::fs;
 /// A single kind of monster that never gets to hurt: at speed 1 it gains a
 /// hundredth of the energy it needs to act, and any blow kills it.
 const HARMLESS: &str = r#"[
-    Monster(id: "mote", name: "dust mote", family: Vermin, elite: false,
+    Monster(id: "mote", name: "dust mote", name_fr: Masculine("le grain de poussière"), plural: "dust motes", plural_fr: "grains de poussière", family: Vermin, elite: false,
         speed: 1, hp: 1, attack: 0, defense: 0, min_depth: 1),
 ]"#;
 
@@ -70,7 +70,7 @@ const MODES: [ColorMode; 4] = [
 ];
 
 /// The harmless monsters on the shipped floors, items and sigils.
-fn harmless() -> Content {
+pub(super) fn harmless() -> Content {
     Content::parse(HARMLESS).expect("valid test monsters")
 }
 
@@ -79,6 +79,7 @@ fn harmless() -> Content {
 fn launch(folder: &ScratchFolder, cli: &Cli, clock: &ManualClock) -> App {
     App::launch_with_clock(
         ColorSupport::TrueColor,
+        Language::English,
         cli,
         &harmless(),
         folder.save_file(),
@@ -93,6 +94,7 @@ const fn command_line(daily: bool) -> Cli {
         seed: if daily { None } else { Some(SEED) },
         daily,
         ascii: false,
+        lang: None,
     }
 }
 
@@ -147,7 +149,7 @@ fn descend_to_the_bottom(app: &mut App) {
 /// A game of the harmless monsters on `seed`, played to the end without
 /// the application: down every staircase, then onto the seal, which is
 /// broken. Faster than keys, for the tests of the screen's look.
-fn won_game(seed: Seed) -> Game {
+pub(super) fn won_game(seed: Seed) -> Game {
     let mut game = Game::new(seed, &harmless());
     loop {
         for _ in 0..MAX_KEYS_PER_FLOOR {
@@ -200,6 +202,7 @@ fn breaking_the_seal_with_keys_shows_the_victory_screen_and_deletes_the_save() {
         seed: None,
         daily: false,
         ascii: false,
+        lang: None,
     };
     let mut app = launch(&folder, &plain, &clock);
     assert!(app.has_saved_game());
@@ -248,8 +251,8 @@ fn breaking_the_seal_with_keys_shows_the_victory_screen_and_deletes_the_save() {
     let rows = screen_rows(&app, 80, 24);
     let text = rows.join("\n");
     for needle in [
-        messages::VICTORY_TITLE,
-        messages::victory_line(SEED),
+        messages::ENGLISH.victory_title,
+        messages::victory_line(Language::English, SEED),
         "You broke the seal at depth 10, on turn ",
         "SEED   7F3A-91C2-0B5E-D4A8",
         "Replay this seed: sigilfall --seed 7F3A-91C2-0B5E-D4A8",
@@ -257,31 +260,35 @@ fn breaking_the_seal_with_keys_shows_the_victory_screen_and_deletes_the_save() {
         assert!(text.contains(needle), "{needle}:\n{text}");
     }
     assert!(
-        text.contains(&messages::victory_outcome(BOTTOM, turns + 1)),
+        text.contains(&messages::victory_outcome(
+            Language::English,
+            BOTTOM,
+            turns + 1
+        )),
         "{text}"
     );
-    assert!(!text.contains(messages::DEATH_TITLE), "{text}");
+    assert!(!text.contains(messages::ENGLISH.death_title), "{text}");
     assert!(!text.contains("Killed by"), "{text}");
-    assert_eq!(count(&rows, messages::DEPTH_REACHED_LABEL).0, "10");
+    assert_eq!(count(&rows, messages::ENGLISH.depth_reached_label).0, "10");
     assert_eq!(
-        count(&rows, messages::TURNS_LABEL).0,
+        count(&rows, messages::ENGLISH.turns_label).0,
         stats.turns().to_string()
     );
     assert_eq!(stats.turns(), turns + 1);
     assert_eq!(
-        count(&rows, messages::KILLS_LABEL).0,
+        count(&rows, messages::ENGLISH.kills_label).0,
         stats.total_kills().to_string()
     );
     assert_eq!(
-        count(&rows, messages::GLYPHS_LABEL).0,
+        count(&rows, messages::ENGLISH.glyphs_label).0,
         stats.glyphs_learnt().to_string()
     );
     assert_eq!(
-        count(&rows, messages::CASTS_LABEL).0,
+        count(&rows, messages::ENGLISH.casts_label).0,
         stats.casts().total().to_string()
     );
     assert_eq!(
-        count(&rows, messages::ITEMS_USED_LABEL).0,
+        count(&rows, messages::ENGLISH.items_used_label).0,
         stats.items_used().to_string()
     );
     // The line to share, written out by hand from the counts.
@@ -344,7 +351,7 @@ fn the_line_to_share_of_a_daily_victory_names_the_date_and_the_victory() {
         text.contains(&format!("SEED   {}", Seed::daily(date))),
         "{text}"
     );
-    assert!(text.contains(&messages::replay_hint(Seed::daily(date))));
+    assert!(text.contains(&messages::replay_hint(Language::English, Seed::daily(date))));
 }
 
 #[test]
@@ -363,7 +370,7 @@ fn the_victory_screen_fits_80_by_24_and_centres_on_larger_screens() {
     let large_text = large.join("\n");
     let title_row = large
         .iter()
-        .position(|row| row.contains(messages::VICTORY_TITLE))
+        .position(|row| row.contains(messages::ENGLISH.victory_title))
         .unwrap();
     let share_row = large
         .iter()
@@ -410,7 +417,7 @@ fn the_victory_screen_is_drawn_with_the_theme_tokens_in_every_mode() {
         let token = |style: Style| (style.fg.unwrap_or(Color::Reset), style.add_modifier);
 
         assert_eq!(style_of("T H E"), token(theme.text_title), "{mode:?}");
-        let line = messages::victory_line(SEED);
+        let line = messages::victory_line(Language::English, SEED);
         assert_eq!(style_of(line), token(theme.text_muted), "{mode:?}");
         assert_eq!(style_of("You broke"), token(theme.text), "{mode:?}");
         assert_eq!(style_of("7F3A-"), token(theme.text_title), "{mode:?}");
@@ -441,7 +448,7 @@ fn with_ascii_glyphs_the_victory_screen_is_plain_ascii_in_every_mode() {
         let text = screen_rows(&app, 80, 24).join("\n");
 
         assert!(text.is_ascii(), "{mode:?}:\n{text}");
-        assert!(text.contains(messages::VICTORY_TITLE), "{text}");
+        assert!(text.contains(messages::ENGLISH.victory_title), "{text}");
         assert!(
             text.contains("|    SEED   7F3A-91C2-0B5E-D4A8    |"),
             "{text}"
@@ -453,7 +460,7 @@ fn with_ascii_glyphs_the_victory_screen_is_plain_ascii_in_every_mode() {
 fn a_death_still_opens_the_death_summary_and_not_the_victory_screen() {
     let content = Content::parse(
         r#"[
-            Monster(id: "executioner", name: "executioner", family: Acolyte, elite: true,
+            Monster(id: "executioner", name: "executioner", name_fr: Masculine("le monstre"), plural: "executioners", plural_fr: "monstres", family: Acolyte, elite: true,
                 speed: 100, hp: 999, attack: 99, defense: 0, min_depth: 1),
         ]"#,
     )
@@ -474,8 +481,8 @@ fn a_death_still_opens_the_death_summary_and_not_the_victory_screen() {
     );
     let text = screen_rows(&app, 80, 24).join("\n");
 
-    assert!(text.contains(messages::DEATH_TITLE), "{text}");
-    assert!(!text.contains(messages::VICTORY_TITLE), "{text}");
+    assert!(text.contains(messages::ENGLISH.death_title), "{text}");
+    assert!(!text.contains(messages::ENGLISH.victory_title), "{text}");
     assert!(share_row(&screen_rows(&app, 80, 24)).contains(" - depth 1, "));
 }
 
@@ -495,7 +502,7 @@ const NO_STAIRS: &str = "There are no stairs here.";
 /// One kind of monster that never gets to hurt: at speed 1 it gains a
 /// hundredth of the energy it needs to act, and one blow kills it.
 const HARMLESS_DUST: &str = r#"[
-    Monster(id: "dust", name: "dust", family: Vermin, elite: false,
+    Monster(id: "dust", name: "dust", name_fr: Masculine("le monstre"), plural: "dust", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 1, hp: 1, attack: 0, defense: 0, min_depth: 1),
 ]"#;
 
@@ -697,6 +704,7 @@ fn to_the_bottom(game: &mut Game) {
 fn launch_with_dust(folder: &ScratchFolder, cli: &Cli, clock: &ManualClock) -> App {
     App::launch_with_clock(
         ColorSupport::TrueColor,
+        Language::English,
         cli,
         &harmless_dust(),
         folder.save_file(),
@@ -722,6 +730,7 @@ const fn no_options() -> Cli {
         seed: None,
         daily: false,
         ascii: false,
+        lang: None,
     }
 }
 

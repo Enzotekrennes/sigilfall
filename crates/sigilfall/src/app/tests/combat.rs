@@ -20,11 +20,11 @@ use std::collections::HashMap;
 /// - the executioner (attack 99) kills the player's 30 hit points in
 ///   one blow.
 const TEST_MONSTERS: &str = r#"[
-            Monster(id: "gnat", name: "cave gnat", family: Vermin, elite: false,
+            Monster(id: "gnat", name: "cave gnat", name_fr: Masculine("le monstre"), plural: "cave gnats", plural_fr: "monstres", family: Vermin, elite: false,
                 speed: 100, hp: 999, attack: 0, defense: 0, min_depth: 1),
-            Monster(id: "moth", name: "wax moth", family: Vermin, elite: false,
+            Monster(id: "moth", name: "wax moth", name_fr: Masculine("le monstre"), plural: "wax moths", plural_fr: "monstres", family: Vermin, elite: false,
                 speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
-            Monster(id: "executioner", name: "executioner", family: Acolyte, elite: true,
+            Monster(id: "executioner", name: "executioner", name_fr: Masculine("le monstre"), plural: "executioners", plural_fr: "monstres", family: Acolyte, elite: true,
                 speed: 100, hp: 999, attack: 99, defense: 0, min_depth: 1),
         ]"#;
 
@@ -475,17 +475,17 @@ fn the_combat_screens_are_plain_ascii_with_ascii_glyphs() {
 ///   6 to 10 blows, the exact number depending on the seed;
 /// - the brute has 40 hit points and 2 defense.
 const MONSTERS: &str = r#"[
-            Monster(id: "gnat", name: "cave gnat", family: Vermin, elite: false,
+            Monster(id: "gnat", name: "cave gnat", name_fr: Masculine("le monstre"), plural: "cave gnats", plural_fr: "monstres", family: Vermin, elite: false,
                 speed: 100, hp: 999, attack: 0, defense: 0, min_depth: 1),
-            Monster(id: "sloth", name: "sloth", family: Vermin, elite: false,
+            Monster(id: "sloth", name: "sloth", name_fr: Masculine("le monstre"), plural: "sloths", plural_fr: "monstres", family: Vermin, elite: false,
                 speed: 1, hp: 999, attack: 0, defense: 0, min_depth: 1),
-            Monster(id: "moth", name: "wax moth", family: Vermin, elite: false,
+            Monster(id: "moth", name: "wax moth", name_fr: Masculine("le monstre"), plural: "wax moths", plural_fr: "monstres", family: Vermin, elite: false,
                 speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
-            Monster(id: "executioner", name: "executioner", family: Acolyte, elite: true,
+            Monster(id: "executioner", name: "executioner", name_fr: Masculine("le monstre"), plural: "executioners", plural_fr: "monstres", family: Acolyte, elite: true,
                 speed: 100, hp: 999, attack: 99, defense: 0, min_depth: 1),
-            Monster(id: "hammer", name: "iron hammer", family: Homunculus, elite: false,
+            Monster(id: "hammer", name: "iron hammer", name_fr: Masculine("le monstre"), plural: "iron hammers", plural_fr: "monstres", family: Homunculus, elite: false,
                 speed: 100, hp: 999, attack: 5, defense: 0, min_depth: 1),
-            Monster(id: "brute", name: "brute", family: Acolyte, elite: false,
+            Monster(id: "brute", name: "brute", name_fr: Masculine("le monstre"), plural: "brutes", plural_fr: "monstres", family: Acolyte, elite: false,
                 speed: 100, hp: 40, attack: 0, defense: 2, min_depth: 1),
         ]"#;
 
@@ -1200,7 +1200,7 @@ const LONGEST_NAME: &str = "eldest crypt executioner";
 /// blow.
 fn long_named_file(name: &str) -> String {
     format!(
-        r#"[Monster(id: "long", name: "{name}", family: Acolyte, elite: true,
+        r#"[Monster(id: "long", name: "{name}", name_fr: Masculine("le monstre"), plural: "{name}", plural_fr: "monstres", family: Acolyte, elite: true,
                     speed: 100, hp: 999, attack: 99, defense: 0, min_depth: 1)]"#
     )
 }

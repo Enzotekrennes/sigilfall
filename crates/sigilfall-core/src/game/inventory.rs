@@ -266,7 +266,7 @@ mod tests {
     /// in a test: normal speed, attack 1, no defense.
     fn creature(hp: i32) -> MonsterDef {
         let source = format!(
-            "[Monster(id: \"test_creature\", name: \"test creature\", family: Vermin, \
+            "[Monster(id: \"test_creature\", name: \"test creature\", name_fr: Masculine(\"le monstre\"), plural: \"test creatures\", plural_fr: \"monstres\", family: Vermin, \
              elite: false, speed: {NORMAL_SPEED}, hp: {hp}, attack: 1, defense: 0, \
              min_depth: 1)]"
         );

@@ -29,6 +29,7 @@ use sigilfall_core::content::Content;
 use sigilfall_core::game::{Game, Status};
 use sigilfall_core::stats::Stats;
 
+use crate::language::Language;
 use crate::messages;
 use crate::theme::Theme;
 
@@ -68,13 +69,22 @@ const SEED_LABEL_GAP: usize = 3;
 /// and an area too small for the text is clipped without panicking.
 pub fn render(frame: &mut Frame, area: Rect, game: &Game, content: &Content, theme: &Theme) {
     let mut head = vec![
-        Line::styled(messages::DEATH_TITLE, theme.text_title),
-        Line::styled(messages::epitaph(game.seed()), theme.text_muted),
+        Line::styled(theme.labels().death_title, theme.text_title),
+        Line::styled(
+            messages::epitaph(theme.language, game.seed()),
+            theme.text_muted,
+        ),
         Line::default(),
     ];
     if let Status::GameOver { killed_by } = game.status() {
         head.push(Line::styled(
-            messages::cause_of_death(killed_by, game.depth(), game.player_turns(), content),
+            messages::cause_of_death(
+                theme.language,
+                killed_by,
+                game.depth(),
+                game.player_turns(),
+                content,
+            ),
             theme.text,
         ));
         head.push(Line::default());
@@ -118,8 +128,11 @@ pub(super) fn render_summary(
 
     let help = super::key_help(
         vec![
-            (messages::TITLE_KEY.to_owned(), messages::TITLE_LABEL),
-            (messages::QUIT_KEY.to_owned(), messages::QUIT_LABEL),
+            (
+                theme.labels().enter_key.to_owned(),
+                theme.labels().title_label,
+            ),
+            (messages::QUIT_KEY.to_owned(), theme.labels().quit_label),
         ],
         theme,
     );
@@ -142,7 +155,7 @@ fn summary(game: &Game, content: &Content, theme: &Theme) -> Vec<Line<'static>> 
     lines.extend(seed_frame(game, theme));
     lines.push(Line::default());
     lines.push(Line::styled(
-        messages::replay_hint(game.seed()),
+        messages::replay_hint(theme.language, game.seed()),
         theme.text_muted,
     ));
     // Right under the replay command, without a blank row, so the summary
@@ -212,27 +225,30 @@ impl CountRow {
 /// sigils cast with their qualities, items used.
 fn counts(stats: &Stats, content: &Content, theme: &Theme) -> Vec<Line<'static>> {
     let mut rows = vec![
-        CountRow::new(messages::DEPTH_REACHED_LABEL, stats.deepest()),
-        CountRow::new(messages::TURNS_LABEL, stats.turns()),
+        CountRow::new(theme.labels().depth_reached_label, stats.deepest()),
+        CountRow::new(theme.labels().turns_label, stats.turns()),
     ];
-    let mut kills = kill_details(stats, content).into_iter();
+    let mut kills = kill_details(stats, content, theme.language).into_iter();
     rows.push(CountRow {
         detail: kills.next().unwrap_or_default(),
-        ..CountRow::new(messages::KILLS_LABEL, stats.total_kills())
+        ..CountRow::new(theme.labels().kills_label, stats.total_kills())
     });
     rows.extend(kills.map(CountRow::continuation));
-    rows.push(CountRow::new(messages::GLYPHS_LABEL, stats.glyphs_learnt()));
+    rows.push(CountRow::new(
+        theme.labels().glyphs_label,
+        stats.glyphs_learnt(),
+    ));
     let casts = stats.casts();
     rows.push(CountRow {
         detail: if casts.total() == 0 {
             String::new()
         } else {
-            messages::cast_breakdown(casts, theme.glyphs.separator)
+            messages::cast_breakdown(theme.language, casts, theme.glyphs.separator)
         },
-        ..CountRow::new(messages::CASTS_LABEL, casts.total())
+        ..CountRow::new(theme.labels().casts_label, casts.total())
     });
     rows.push(CountRow::new(
-        messages::ITEMS_USED_LABEL,
+        theme.labels().items_used_label,
         stats.items_used(),
     ));
     // The details start in one column, just past the widest value.
@@ -249,11 +265,15 @@ fn counts(stats: &Stats, content: &Content, theme: &Theme) -> Vec<Line<'static>>
 /// The creatures slain, one kind per row, most slain first (ties by name),
 /// as "12 ossuary rat" with the counts right-aligned; at most
 /// [`MAX_KILL_ROWS`] rows, the last one saying how many kinds are left out
-/// when they do not all fit. Empty when nothing was slain.
-fn kill_details(stats: &Stats, content: &Content) -> Vec<String> {
+/// when they do not all fit, named in `language`. Empty when nothing was
+/// slain.
+fn kill_details(stats: &Stats, content: &Content, language: Language) -> Vec<String> {
     let mut kinds: Vec<(u32, &str)> = stats
         .kills()
-        .map(|(definition, count)| (count, messages::monster_name(content, definition)))
+        .map(|(definition, count)| {
+            let name = messages::monster_count_name(language, content, definition, count);
+            (count, name)
+        })
         .collect();
     kinds.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
     let shown = if kinds.len() > MAX_KILL_ROWS {
@@ -273,7 +293,7 @@ fn kill_details(stats: &Stats, content: &Content) -> Vec<String> {
         .map(|(count, name)| format!("{count:>count_width$} {name}"))
         .collect();
     if kinds.len() > shown {
-        rows.push(messages::more_in_view(kinds.len() - shown));
+        rows.push(messages::more_in_view(language, kinds.len() - shown));
     }
     rows
 }
@@ -284,7 +304,7 @@ fn seed_frame(game: &Game, theme: &Theme) -> Vec<Line<'static>> {
     let glyphs = theme.glyphs;
     let seed = game.seed().to_string();
     let inner = SEED_PADDING * 2
-        + messages::SEED_LABEL.chars().count()
+        + theme.labels().seed_label.chars().count()
         + SEED_LABEL_GAP
         + seed.chars().count();
     let horizontal = glyphs.frame_horizontal.to_string().repeat(inner);
@@ -301,7 +321,7 @@ fn seed_frame(game: &Game, theme: &Theme) -> Vec<Line<'static>> {
         Line::from(vec![
             Span::styled(vertical.clone(), theme.border),
             Span::raw(padding.clone()),
-            Span::styled(messages::SEED_LABEL, theme.text_muted),
+            Span::styled(theme.labels().seed_label, theme.text_muted),
             Span::raw(" ".repeat(SEED_LABEL_GAP)),
             Span::styled(seed, theme.text_title),
             Span::raw(padding),

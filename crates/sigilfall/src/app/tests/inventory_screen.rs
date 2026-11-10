@@ -40,7 +40,7 @@ use sigilfall_core::rng::Seed;
 /// the first blow it takes: the nibbler deals the minimum damage of a blow
 /// (attack 0) and has 1 hit point.
 const NIBBLER: &str = r#"[
-    Monster(id: "nibbler", name: "nibbler", family: Vermin, elite: false,
+    Monster(id: "nibbler", name: "nibbler", name_fr: Masculine("le monstre"), plural: "nibblers", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
 ]"#;
 
@@ -737,7 +737,7 @@ fn q_does_not_quit_from_the_inventory_and_i_does_not_open_it_after_death() {
     assert!(matches!(app.state(), State::Inventory(_)));
 
     let content = Content::parse(
-        r#"[Monster(id: "executioner", name: "executioner", family: Acolyte, elite: true,
+        r#"[Monster(id: "executioner", name: "executioner", name_fr: Masculine("le monstre"), plural: "executioners", plural_fr: "monstres", family: Acolyte, elite: true,
             speed: 100, hp: 999, attack: 99, defense: 0, min_depth: 1)]"#,
     )
     .unwrap();
@@ -757,11 +757,11 @@ fn q_does_not_quit_from_the_inventory_and_i_does_not_open_it_after_death() {
 /// The monsters of the tests: the gnat never hurts; the biter strikes hard
 /// and dies in a couple of blows, to wound the player on purpose.
 const MONSTERS: &str = r#"[
-    Monster(id: "gnat", name: "cave gnat", family: Vermin, elite: false,
+    Monster(id: "gnat", name: "cave gnat", name_fr: Masculine("le monstre"), plural: "cave gnats", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 100, hp: 999, attack: 0, defense: 0, min_depth: 1),
-    Monster(id: "biter", name: "biter", family: Vermin, elite: false,
+    Monster(id: "biter", name: "biter", name_fr: Masculine("le monstre"), plural: "biters", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 100, hp: 5, attack: 6, defense: 0, min_depth: 1),
-    Monster(id: "pest", name: "pest", family: Vermin, elite: false,
+    Monster(id: "pest", name: "pest", name_fr: Masculine("le monstre"), plural: "pests", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 100, hp: 1, attack: 2, defense: 0, min_depth: 1),
 ]"#;
 
@@ -2002,7 +2002,7 @@ fn long_names_screen(content: Content) {
 fn nothing_is_picked_up_nor_opened_after_the_death() {
     // A biter with a mighty attack kills a player standing still.
     let killer = r#"[
-        Monster(id: "killer", name: "killer", family: Vermin, elite: false,
+        Monster(id: "killer", name: "killer", name_fr: Masculine("le monstre"), plural: "killers", plural_fr: "monstres", family: Vermin, elite: false,
             speed: 400, hp: 999, attack: 99, defense: 0, min_depth: 1),
     ]"#;
     let sigils = include_str!("../../../../sigilfall-core/content/sigils.ron");
@@ -2097,7 +2097,7 @@ fn a_scripted_game_with_items_replays_identically_in_a_fixed_room() {
 #[test]
 fn dying_right_after_drinking_ends_on_the_end_screen_not_in_the_inventory() {
     let killer = r#"[
-        Monster(id: "killer", name: "killer", family: Vermin, elite: false,
+        Monster(id: "killer", name: "killer", name_fr: Masculine("le monstre"), plural: "killers", plural_fr: "monstres", family: Vermin, elite: false,
             speed: 400, hp: 999, attack: 99, defense: 0, min_depth: 1),
     ]"#;
     let sigils = include_str!("../../../../sigilfall-core/content/sigils.ron");

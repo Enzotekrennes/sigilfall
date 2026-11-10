@@ -1,0 +1,29 @@
+---
+source: crates/sigilfall/src/app/tests/french.rs
+assertion_line: 500
+expression: screen(&app)
+---
+
+
+
+                                 ●─────●─────●
+                                           ╱
+                                         ╱
+                                 ○     ●     ○
+                                     ╱
+                                   ╱
+                                 ●─────●─────●
+
+                               S I G I L F A L L
+                        Tracez juste. Le donjon écoute.
+
+                   › Continuer          profondeur 1 · tour 4
+                     Nouvelle partie
+                     Graine
+                     Donjon du jour     2026-11-08
+                     Options
+                     Quitter
+
+
+
+ ↑↓ choisir   Entrée valider   q quitter                                 v0.1.0

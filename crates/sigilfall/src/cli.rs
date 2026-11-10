@@ -1,7 +1,10 @@
 //! The command line: options the game is started with.
 //!
 //! Exposes [`Cli`], read from the process arguments by clap, which also
-//! generates `--help` and `--version`. The help is wrapped to the width of
+//! generates `--help` and `--version`. The help is in English whatever the
+//! language of the game, as the help of command-line tools usually is: it
+//! is printed before any option is read, and names options that are
+//! English words. The help is wrapped to the width of
 //! the terminal (clap's `wrap_help` feature; when the output is not a
 //! terminal, to `COLUMNS`, else 100 columns), so it reads whole in an
 //! 80-column terminal. An invalid value, such as `--seed abc` or `--seed -1`,
@@ -12,6 +15,8 @@
 
 use clap::Parser;
 use sigilfall_core::rng::Seed;
+
+use crate::language::Language;
 
 /// Terminal roguelike where spells are cast by tracing sigils on the
 /// keyboard.
@@ -41,6 +46,12 @@ pub struct Cli {
     /// this session only, whatever the glyph option says.
     #[arg(long)]
     pub ascii: bool,
+
+    /// Language of the game for this session, whatever the Language option
+    /// says: en (English) or fr (French). Without it, the game speaks the
+    /// language chosen in the options, or else the system's.
+    #[arg(long, value_name = "LANG")]
+    pub lang: Option<Language>,
 }
 
 /// Returns a new random seed, for a new game started without a seed.
@@ -110,6 +121,7 @@ mod tests {
             seed: None,
             daily: true,
             ascii: true,
+            lang: None,
         };
         assert_eq!(parse(&["--daily", "--ascii"]).unwrap(), expected);
         assert_eq!(parse(&["--ascii", "--daily"]).unwrap(), expected);
@@ -220,6 +232,7 @@ mod tests {
             seed: Some(Seed::new(7)),
             daily: false,
             ascii: true,
+            lang: None,
         };
 
         assert_eq!(parse(&["--ascii", "--seed", "7"]).unwrap(), expected);

@@ -38,7 +38,7 @@ const WALK_BUDGET: usize = 1500;
 /// Monsters that never get to hurt: at speed 1 they gain a hundredth of the
 /// energy they need to act, and one blow kills them.
 const HARMLESS: &str = r#"[
-    Monster(id: "mote_one", name: "mote one", family: Vermin, elite: false,
+    Monster(id: "mote_one", name: "mote one", name_fr: Masculine("le monstre"), plural: "mote ones", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 1, hp: 1, attack: 0, defense: 0, min_depth: 1),
 ]"#;
 

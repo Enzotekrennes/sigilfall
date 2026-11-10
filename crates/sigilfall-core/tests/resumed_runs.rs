@@ -32,7 +32,7 @@ use sigilfall_core::stats::CastCounts;
 /// Slow, weak, sturdy monsters: they wound the bot slowly, and a few blows
 /// of the bot leave them hurt but alive.
 const MONSTERS: &str = r#"[
-    Monster(id: "brute", name: "brute", family: Vermin, elite: false,
+    Monster(id: "brute", name: "brute", name_fr: Masculine("le monstre"), plural: "brutes", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 25, hp: 60, attack: 1, defense: 0, min_depth: 1),
 ]"#;
 

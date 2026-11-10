@@ -1,5 +1,6 @@
 ---
 source: crates/sigilfall/src/app/tests/victory_screen.rs
+assertion_line: 392
 expression: large_text
 ---
                                                                                                                         
@@ -17,12 +18,12 @@ expression: large_text
                                                                                                                         
                                       You broke the seal at depth 10, on turn 977.                                      
                                                                                                                         
-                                         Depth reached ....... 10                                                       
-                                         Turns ............... 977                                                      
-                                         Creatures slain ..... 2     2 dust mote                                        
-                                         Glyphs learnt ....... 0                                                        
-                                         Sigils cast ......... 0                                                        
-                                         Items used .......... 0                                                        
+                                        Depth reached ....... 10                                                        
+                                        Turns ............... 977                                                       
+                                        Creatures slain ..... 2     2 dust motes                                        
+                                        Glyphs learnt ....... 0                                                         
+                                        Sigils cast ......... 0                                                         
+                                        Items used .......... 0                                                         
                                                                                                                         
                                           ╭──────────────────────────────────╮                                          
                                           │    SEED   7F3A-91C2-0B5E-D4A8    │                                          

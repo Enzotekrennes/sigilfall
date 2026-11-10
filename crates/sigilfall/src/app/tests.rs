@@ -30,6 +30,7 @@ mod demo_tape;
 mod descent;
 mod exploration;
 mod field_of_view;
+mod french;
 mod game_screen;
 mod inventory_screen;
 mod key_help;

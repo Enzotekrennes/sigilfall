@@ -116,7 +116,7 @@ fn open_room(width: usize, height: usize) -> Vec<String> {
 /// let a few turns pass without it moving.
 fn snail() -> sigilfall_core::content::MonsterDef {
     let content = Content::parse(
-        "[Monster(id: \"snail\", name: \"snail\", family: Vermin, elite: false, speed: 1, \
+        "[Monster(id: \"snail\", name: \"snail\", name_fr: Masculine(\"le monstre\"), plural: \"snails\", plural_fr: \"monstres\", family: Vermin, elite: false, speed: 1, \
          hp: 900, attack: 0, defense: 0, min_depth: 1)]",
     )
     .expect("test content is valid");

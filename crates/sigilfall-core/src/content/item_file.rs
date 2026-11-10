@@ -11,6 +11,7 @@ use serde::de::MapAccess;
 
 use super::ITEMS_FILE;
 use super::entry_file::{EntryKind, RawEntry, fill};
+use super::french::FrenchNounEntry;
 
 /// The effect of an item as written in the file, before validation: the
 /// strength is not bounded yet and a taught sigil is only an identifier.
@@ -36,8 +37,10 @@ pub(super) enum EffectEntry {
 pub(super) struct ItemEntry {
     /// Stable identifier, not yet checked.
     pub(super) id: Option<String>,
-    /// Name shown to the player.
+    /// Name shown to the player, in English.
     pub(super) name: Option<String>,
+    /// French name, with its article and gender.
+    pub(super) name_fr: Option<FrenchNounEntry>,
     /// What using the item does.
     pub(super) effect: Option<EffectEntry>,
     /// Shallowest floor the item can be found on.
@@ -45,7 +48,7 @@ pub(super) struct ItemEntry {
 }
 
 /// Names of the fields of an `Item(...)` entry, in the order of [`Field`].
-const FIELDS: &[&str] = &["id", "name", "effect", "min_depth"];
+const FIELDS: &[&str] = &["id", "name", "name_fr", "effect", "min_depth"];
 
 /// A field of an `Item(...)` entry, read from its name in the file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -55,6 +58,8 @@ pub(super) enum Field {
     Id,
     /// `name`
     Name,
+    /// `name_fr`
+    NameFr,
     /// `effect`
     Effect,
     /// `min_depth`
@@ -92,6 +97,7 @@ impl RawEntry for ItemEntry {
         match field {
             Field::Id => fill(&mut self.id, map.next_value()?, name),
             Field::Name => fill(&mut self.name, map.next_value()?, name),
+            Field::NameFr => fill(&mut self.name_fr, map.next_value()?, name),
             Field::Effect => fill(&mut self.effect, map.next_value()?, name),
             Field::MinDepth => fill(&mut self.min_depth, map.next_value()?, name),
         }

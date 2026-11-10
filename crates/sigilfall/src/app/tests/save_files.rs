@@ -42,7 +42,7 @@ use std::path::Path;
 
 /// A monster that kills the player in one blow, so a death takes one key.
 const EXECUTIONER: &str = r#"[
-    Monster(id: "executioner", name: "executioner", family: Acolyte, elite: true,
+    Monster(id: "executioner", name: "executioner", name_fr: Masculine("le monstre"), plural: "executioners", plural_fr: "monstres", family: Acolyte, elite: true,
         speed: 100, hp: 999, attack: 99, defense: 0, min_depth: 1),
 ]"#;
 
@@ -68,6 +68,7 @@ const fn command_line(seed: Option<Seed>) -> Cli {
         seed,
         daily: false,
         ascii: false,
+        lang: None,
     }
 }
 
@@ -76,6 +77,7 @@ const fn command_line(seed: Option<Seed>) -> Cli {
 pub(super) fn launch(folder: &ScratchFolder, seed: Option<Seed>) -> anyhow::Result<App> {
     App::launch_with_clock(
         ColorSupport::TrueColor,
+        Language::English,
         &command_line(seed),
         &shipped_content(),
         folder.save_file(),
@@ -281,7 +283,11 @@ fn quitting_from_the_end_screen_brings_no_save_back() {
     assert!(!folder.save_file().path().exists());
     assert!(!folder.path().join("save.ron.tmp").exists());
     let next = launch_new_game(&folder);
-    assert_eq!(log_lines(&next), vec![messages::welcome()], "a new game");
+    assert_eq!(
+        log_lines(&next),
+        vec![messages::welcome(Language::English)],
+        "a new game"
+    );
 }
 
 #[test]
@@ -294,7 +300,7 @@ fn a_save_that_cannot_be_deleted_at_death_is_logged_and_reported_on_leaving() {
     wait_for_death(&mut app);
 
     let newest = app.log().newest_first().next().unwrap().clone();
-    assert_eq!(newest, messages::save_not_deleted());
+    assert_eq!(newest, messages::save_not_deleted(Language::English));
     let error = app.save_on_exit().unwrap_err();
     assert!(format!("{error:#}").contains("cannot delete"), "{error:#}");
 }
@@ -325,12 +331,24 @@ fn a_corrupt_save_is_set_aside_with_a_message_and_a_new_game_starts() {
             .starts_with("Your saved game could not be read: "),
         "{opening:?}"
     );
+    // The path is shown whole, or its end after an ellipsis when it is
+    // longer than a line (as in the long temporary folders of some
+    // systems): either way, the end of what is shown is the real path's.
     let moved_to = folder.path().join("save.ron.bad");
+    let shown = opening[0]
+        .text
+        .rsplit_once(" kept as ")
+        .map(|(_, path)| path.trim_end_matches('.'))
+        .expect("the message names where the save went");
+    let full = moved_to.display().to_string();
+    assert!(shown.ends_with("save.ron.bad"), "{shown}");
     assert!(
-        opening[0].text.contains(&moved_to.display().to_string()),
-        "{opening:?}"
+        shown == full
+            || (shown.starts_with(messages::ELLIPSIS)
+                && full.ends_with(shown.trim_start_matches(messages::ELLIPSIS))),
+        "{shown} for {full}"
     );
-    assert_eq!(opening[1], messages::welcome());
+    assert_eq!(opening[1], messages::welcome(Language::English));
     assert_eq!(
         fs::read_to_string(&moved_to).unwrap(),
         "(format_version: 1, seed: oops",
@@ -398,7 +416,7 @@ fn a_leftover_temporary_file_is_never_resumed() {
     let app = launch(&folder, Some(OTHER_SEED)).unwrap();
 
     assert_eq!(app.game().seed(), OTHER_SEED);
-    assert_eq!(log_lines(&app), vec![messages::welcome()]);
+    assert_eq!(log_lines(&app), vec![messages::welcome(Language::English)]);
 }
 
 #[test]
@@ -458,7 +476,7 @@ fn a_seed_given_without_a_save_starts_that_seed() {
     let app = launch(&folder, Some(OTHER_SEED)).unwrap();
 
     assert_eq!(app.game().seed(), OTHER_SEED);
-    assert_eq!(log_lines(&app), vec![messages::welcome()]);
+    assert_eq!(log_lines(&app), vec![messages::welcome(Language::English)]);
 }
 
 #[test]
@@ -471,6 +489,7 @@ fn a_saved_finished_game_is_deleted_and_a_new_game_starts() {
 
     let app = App::launch_with_clock(
         ColorSupport::TrueColor,
+        Language::English,
         &command_line(Some(OTHER_SEED)),
         &content,
         folder.save_file(),
@@ -555,6 +574,7 @@ fn command_line_of(arguments: &[&str]) -> Cli {
 fn open(folder: &ScratchFolder, arguments: &[&str]) -> anyhow::Result<App> {
     App::launch(
         ColorSupport::TrueColor,
+        Language::English,
         &command_line_of(arguments),
         &shipped(),
         folder.save_file(),
@@ -1512,6 +1532,7 @@ fn a_20_kb_error_and_a_120_character_path_show_whole_on_the_title_and_in_the_log
 
     let mut app = App::launch(
         ColorSupport::TrueColor,
+        Language::English,
         &command_line_of(&[]),
         &shipped(),
         save.clone(),

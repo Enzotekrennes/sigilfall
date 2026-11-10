@@ -39,11 +39,16 @@ pub fn lines(grimoire: &Grimoire, rows: usize, width: u16, theme: &Theme) -> Vec
     if rows == 0 {
         return Vec::new();
     }
-    let mut lines = vec![Line::styled(messages::GRIMOIRE_TITLE, theme.text_muted)];
+    let mut lines = vec![Line::styled(
+        theme.labels().grimoire_title,
+        theme.text_muted,
+    )];
     let room = rows - 1;
     if grimoire.is_empty() {
         lines.extend(
-            messages::EMPTY_GRIMOIRE
+            theme
+                .labels()
+                .empty_grimoire
                 .iter()
                 .take(room)
                 .map(|text| empty_state_line(text, theme)),
@@ -56,9 +61,16 @@ pub fn lines(grimoire: &Grimoire, rows: usize, width: u16, theme: &Theme) -> Vec
         .sigils()
         .iter()
         .map(|sigil| {
-            let name: String = sigil.name().chars().take(NAME_COLUMNS).collect();
+            let name: String = messages::sigil_def_name(theme.language, sigil)
+                .chars()
+                .take(NAME_COLUMNS)
+                .collect();
             let pattern = messages::pattern_text(sigil.pattern().nodes(), separator);
-            (name, pattern, messages::effect_summary(sigil, separator))
+            (
+                name,
+                pattern,
+                messages::effect_summary(theme.language, sigil, separator),
+            )
         })
         .collect();
     let name_width = column_width(entries.iter().map(|entry| &entry.0));
@@ -87,7 +99,7 @@ pub fn lines(grimoire: &Grimoire, rows: usize, width: u16, theme: &Theme) -> Vec
     );
     if overflows && room > 0 {
         lines.push(Line::styled(
-            messages::more_in_view(hidden),
+            messages::more_in_view(theme.language, hidden),
             theme.text_muted,
         ));
     }

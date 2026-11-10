@@ -1,0 +1,29 @@
+---
+source: crates/sigilfall/src/app/tests/french.rs
+assertion_line: 538
+expression: screen(&app)
+---
+ Profondeur 1 · Tour 5                               Graine 7F3A-91C2-0B5E-D4A8
+╭─ Inventaire ─────────────────────────────────── 4/10 ─╮ │ PV            30/30
+│                                                       │ │ ██████████████████
+│   1  ¡ Philtre de soin  soigne 10 PV                  │ │ Essence         6/6
+│   2  ¡ Fiole d'essence  rend 4 d'essence              │ │
+│ › 3  ♦ Encre d'aplomb   stabilise 2 lancers           │ │ SIGILLES        0/5
+│   4  ¶ Page du Voile    enseigne Voile                │ │ aucun encore
+│                                                       │ │
+│                                                       │ │ EN VUE
+│                                                       │ │ @ vous
+│                                                       │ │
+│                                                       │ │
+│                                                       │ │
+│                                                       │ │
+│                                                       │ │
+╰───────────────────────────────────────────────────────╯ │
+                                                          │
+─ Journal ────────────────────────────────────────────────┴─────────────────────
+   Vous entrez dans le donjon.
+
+
+
+
+ ↑↓/1-0 choisir   Entrée/u utiliser   d poser   Échap fermer

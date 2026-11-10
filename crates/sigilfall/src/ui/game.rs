@@ -35,7 +35,7 @@ use super::camera::Camera;
 use super::{Overlay, hud, inventory, log, sigil};
 use crate::casting::Casting;
 use crate::message_log::MessageLog;
-use crate::messages;
+use crate::messages::{self, Labels};
 use crate::theme::Theme;
 
 /// Width of the side panel, in columns, its left border included.
@@ -167,10 +167,13 @@ pub fn render(
 fn status_line(game: &Game, theme: &Theme) -> Line<'static> {
     let current_turn = game.player_turns() + 1;
     Line::from(vec![
-        Span::styled(format!(" {} ", messages::DEPTH_LABEL), theme.text_muted),
+        Span::styled(
+            format!(" {} ", theme.labels().depth_label),
+            theme.text_muted,
+        ),
         Span::styled(game.depth().to_string(), theme.text),
         Span::styled(
-            format!(" {} {} ", theme.glyphs.separator, messages::TURN_LABEL),
+            format!(" {} {} ", theme.glyphs.separator, theme.labels().turn_label),
             theme.text_muted,
         ),
         Span::styled(current_turn.to_string(), theme.text),
@@ -188,8 +191,8 @@ fn status_line(game: &Game, theme: &Theme) -> Line<'static> {
 /// summary.
 fn run_label(game: &Game, theme: &Theme) -> Line<'static> {
     let (label, value) = match game.daily_date() {
-        Some(date) => (messages::STATUS_DAILY_LABEL, date.to_string()),
-        None => (messages::STATUS_SEED_LABEL, game.seed().to_string()),
+        Some(date) => (theme.labels().status_daily_label, date.to_string()),
+        None => (theme.labels().status_seed_label, game.seed().to_string()),
     };
     Line::from(vec![
         Span::styled(format!("{label} "), theme.text_muted),
@@ -220,22 +223,31 @@ fn key_help(
     let glyphs = &theme.glyphs;
     let directions = format!("{}/1-9", glyphs.arrows());
     let descend_label = if bottom_floor {
-        messages::UNSEAL_LABEL
+        theme.labels().unseal_label
     } else {
-        messages::DESCEND_LABEL
+        theme.labels().descend_label
     };
     let bindings: Vec<(String, &str)> = match overlay {
         None => vec![
-            (directions, messages::MOVE_LABEL),
-            (messages::WAIT_KEY.to_owned(), messages::WAIT_LABEL),
-            (messages::TRACE_KEY.to_owned(), messages::TRACE_KEY_LABEL),
-            (messages::PICK_UP_KEY.to_owned(), messages::PICK_UP_LABEL),
+            (directions, theme.labels().move_label),
+            (messages::WAIT_KEY.to_owned(), theme.labels().wait_label),
+            (
+                messages::TRACE_KEY.to_owned(),
+                theme.labels().trace_key_label,
+            ),
+            (
+                messages::PICK_UP_KEY.to_owned(),
+                theme.labels().pick_up_label,
+            ),
             (
                 messages::INVENTORY_KEY.to_owned(),
-                messages::INVENTORY_LABEL,
+                theme.labels().inventory_label,
             ),
             (messages::DESCEND_KEY.to_owned(), descend_label),
-            (messages::QUIT_KEY.to_owned(), messages::SAVE_AND_QUIT_LABEL),
+            (
+                messages::QUIT_KEY.to_owned(),
+                theme.labels().save_and_quit_label,
+            ),
         ],
         Some(Overlay::Inventory(_)) if carries_items => vec![
             (
@@ -245,36 +257,47 @@ fn key_help(
                     glyphs.arrow_down,
                     messages::SLOT_KEYS
                 ),
-                messages::CHOOSE_LABEL,
+                theme.labels().choose_label,
             ),
-            (messages::USE_KEYS.to_owned(), messages::USE_LABEL),
-            (messages::DROP_KEY.to_owned(), messages::DROP_LABEL),
-            (messages::CANCEL_KEY.to_owned(), messages::CLOSE_LABEL),
+            (theme.labels().use_keys.to_owned(), theme.labels().use_label),
+            (messages::DROP_KEY.to_owned(), theme.labels().drop_label),
+            (
+                theme.labels().escape_key.to_owned(),
+                theme.labels().close_label,
+            ),
         ],
         Some(Overlay::Inventory(_)) => {
-            vec![(messages::CANCEL_KEY.to_owned(), messages::CLOSE_LABEL)]
+            vec![(
+                theme.labels().escape_key.to_owned(),
+                theme.labels().close_label,
+            )]
         }
-        Some(Overlay::Casting(casting)) => casting_bindings(casting, directions),
+        Some(Overlay::Casting(casting)) => casting_bindings(casting, directions, theme.labels()),
     };
     super::key_help(bindings, theme)
 }
 
 /// The keys of the sigil overlay at the step `casting`, with their labels,
-/// for [`key_help`]; `directions` names the movement keys.
-fn casting_bindings(casting: &Casting, directions: String) -> Vec<(String, &'static str)> {
+/// for [`key_help`], in the words of `labels`; `directions` names the
+/// movement keys.
+fn casting_bindings(
+    casting: &Casting,
+    directions: String,
+    labels: &'static Labels,
+) -> Vec<(String, &'static str)> {
     match casting {
         Casting::Drawing(_) => vec![
-            (messages::LINK_KEYS.to_owned(), messages::LINK_LABEL),
-            (messages::UNDO_KEY.to_owned(), messages::UNDO_LABEL),
-            (messages::CAST_KEY.to_owned(), messages::CAST_LABEL),
-            (messages::CANCEL_KEY.to_owned(), messages::CANCEL_LABEL),
+            (messages::LINK_KEYS.to_owned(), labels.link_label),
+            (labels.backspace_key.to_owned(), labels.undo_label),
+            (labels.enter_key.to_owned(), labels.cast_label),
+            (labels.escape_key.to_owned(), labels.cancel_label),
         ],
         Casting::Aiming { .. } => vec![
-            (directions, messages::AIM_LABEL),
-            (messages::CANCEL_KEY.to_owned(), messages::BACK_LABEL),
+            (directions, labels.aim_label),
+            (labels.escape_key.to_owned(), labels.back_label),
         ],
         Casting::Verdict(_) => {
-            vec![(messages::CAST_KEY.to_owned(), messages::CONTINUE_LABEL)]
+            vec![(labels.enter_key.to_owned(), labels.continue_label)]
         }
     }
 }
@@ -786,25 +809,25 @@ mod tests {
     /// the tests can draw forms the shipped content does not have yet (no
     /// elite vermin, eye or spectre).
     const EVERY_FORM: &str = r#"[
-        Monster(id: "vermin", name: "vermin", family: Vermin, elite: false,
+        Monster(id: "vermin", name: "vermin", name_fr: Masculine("le monstre"), plural: "vermins", plural_fr: "monstres", family: Vermin, elite: false,
             speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
-        Monster(id: "vermin_elite", name: "elite vermin", family: Vermin, elite: true,
+        Monster(id: "vermin_elite", name: "elite vermin", name_fr: Masculine("le monstre"), plural: "elite vermins", plural_fr: "monstres", family: Vermin, elite: true,
             speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
-        Monster(id: "acolyte", name: "acolyte", family: Acolyte, elite: false,
+        Monster(id: "acolyte", name: "acolyte", name_fr: Masculine("le monstre"), plural: "acolytes", plural_fr: "monstres", family: Acolyte, elite: false,
             speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
-        Monster(id: "acolyte_elite", name: "elite acolyte", family: Acolyte, elite: true,
+        Monster(id: "acolyte_elite", name: "elite acolyte", name_fr: Masculine("le monstre"), plural: "elite acolytes", plural_fr: "monstres", family: Acolyte, elite: true,
             speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
-        Monster(id: "homunculus", name: "homunculus", family: Homunculus, elite: false,
+        Monster(id: "homunculus", name: "homunculus", name_fr: Masculine("le monstre"), plural: "homunculuss", plural_fr: "monstres", family: Homunculus, elite: false,
             speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
-        Monster(id: "homunculus_elite", name: "elite homunculus", family: Homunculus,
+        Monster(id: "homunculus_elite", name: "elite homunculus", name_fr: Masculine("le monstre"), plural: "elite homunculuss", plural_fr: "monstres", family: Homunculus,
             elite: true, speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
-        Monster(id: "eye", name: "eye", family: Eye, elite: false,
+        Monster(id: "eye", name: "eye", name_fr: Masculine("le monstre"), plural: "eyes", plural_fr: "monstres", family: Eye, elite: false,
             speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
-        Monster(id: "eye_elite", name: "elite eye", family: Eye, elite: true,
+        Monster(id: "eye_elite", name: "elite eye", name_fr: Masculine("le monstre"), plural: "elite eyes", plural_fr: "monstres", family: Eye, elite: true,
             speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
-        Monster(id: "spectre", name: "spectre", family: Spectre, elite: false,
+        Monster(id: "spectre", name: "spectre", name_fr: Masculine("le monstre"), plural: "spectres", plural_fr: "monstres", family: Spectre, elite: false,
             speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
-        Monster(id: "spectre_elite", name: "elite spectre", family: Spectre, elite: true,
+        Monster(id: "spectre_elite", name: "elite spectre", name_fr: Masculine("le monstre"), plural: "elite spectres", plural_fr: "monstres", family: Spectre, elite: true,
             speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
     ]"#;
 

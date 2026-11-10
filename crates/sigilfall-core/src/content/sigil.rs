@@ -89,8 +89,10 @@ pub struct SigilDef {
     index: usize,
     /// Stable key used by saves and the grimoire.
     id: String,
-    /// Name shown to the player.
+    /// Name shown to the player, in English.
     name: String,
+    /// Name shown to the player, in French.
+    name_fr: String,
     /// Nodes to link, in order.
     pattern: Trace,
     /// What the sigil does.
@@ -124,6 +126,13 @@ impl SigilDef {
     /// Returns the name shown to the player, in English.
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Returns the name shown to the player in French, a proper noun
+    /// written without an article; at most `content::MAX_NAME_LENGTH`
+    /// characters.
+    pub fn french_name(&self) -> &str {
+        &self.name_fr
     }
 
     /// Returns the pattern: the nodes to link, in order, at least
@@ -184,6 +193,7 @@ impl SigilDef {
             index: 0,
             id: id.to_owned(),
             name: id.to_owned(),
+            name_fr: id.to_owned(),
             pattern: Trace::from_pattern(digits).expect("a drawable test pattern"),
             effect: Effect::Damage,
             power: 1,
@@ -262,6 +272,7 @@ fn validate_entry(index: usize, entry: SigilEntry) -> Result<SigilDef, ContentEr
     let id = EntryCheck::new(&kind, position, None).identifier(entry.id)?;
     let check = EntryCheck::new(&kind, position, Some(&id));
     let name = check.name(entry.name)?;
+    let name_fr = check.french_name(entry.name_fr)?;
     let pattern = pattern(&check, entry.pattern)?;
     let effect = check.required(entry.effect, "effect")?;
     let power = check.in_range(entry.power, "power", 1, MAX_POWER)?;
@@ -269,6 +280,7 @@ fn validate_entry(index: usize, entry: SigilEntry) -> Result<SigilDef, ContentEr
     Ok(SigilDef {
         index,
         name,
+        name_fr,
         pattern,
         effect,
         power,
@@ -358,6 +370,7 @@ mod tests {
             ("targeting", "NearestEnemy".to_owned()),
             ("min_depth", "1".to_owned()),
             ("known_at_start", "false".to_owned()),
+            ("name_fr", "\"sigille\"".to_owned()),
         ]
         .into()
     }
@@ -476,6 +489,7 @@ mod tests {
                 ("targeting", "Caster".to_owned()),
                 ("min_depth", "2".to_owned()),
                 ("known_at_start", "false".to_owned()),
+                ("name_fr", "\"Rappel\"".to_owned()),
             ]),
         ]);
 
@@ -717,6 +731,7 @@ mod tests {
     fn missing_field_is_refused_with_its_entry() {
         for field in [
             "name",
+            "name_fr",
             "pattern",
             "effect",
             "power",

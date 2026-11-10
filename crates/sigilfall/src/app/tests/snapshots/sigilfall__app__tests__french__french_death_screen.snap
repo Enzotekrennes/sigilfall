@@ -1,0 +1,29 @@
+---
+source: crates/sigilfall/src/app/tests/french.rs
+assertion_line: 574
+expression: screen(&app)
+---
+
+
+                     L A   D E S C E N T E   S ' A C H È V E
+                   L'encre a survécu à la main qui l'a tracée.
+
+             Victime d'un hiérophante à la profondeur 1, au tour 13.
+
+                  Profondeur atteinte . 1
+                  Tours ............... 13
+                  Créatures tuées ..... 2    2 rats d'ossuaire
+                  Glyphes appris ...... 0
+                  Sigilles tracés ..... 0
+                  Objets utilisés ..... 0
+
+                     ╭────────────────────────────────────╮
+                     │    GRAINE   7F3A-91C2-0B5E-D4A8    │
+                     ╰────────────────────────────────────╯
+
+           Rejouer cette graine : sigilfall --seed 7F3A-91C2-0B5E-D4A8
+    Sigilfall seed 7F3A-91C2-0B5E-D4A8 - depth 1, turn 13, 2 slain, 0 sigils
+
+
+
+ Entrée écran titre   q quitter

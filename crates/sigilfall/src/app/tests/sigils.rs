@@ -37,7 +37,7 @@ use sigilfall_core::sigil::{Backlash, CastQuality, ESSENCE_COST, Node, draw_back
 /// A monster that never threatens the tests: the cave gnat has
 /// 999 hit points and deals 1 damage per blow.
 const GNAT: &str = r#"[
-            Monster(id: "gnat", name: "cave gnat", family: Vermin, elite: false,
+            Monster(id: "gnat", name: "cave gnat", name_fr: Masculine("le monstre"), plural: "cave gnats", plural_fr: "monstres", family: Vermin, elite: false,
                 speed: 100, hp: 999, attack: 0, defense: 0, min_depth: 1),
         ]"#;
 
@@ -796,11 +796,11 @@ fn the_side_panel_shows_the_essence_and_the_sigils_known() {
 /// The monsters of the tests: the gnat has 999 hit points and deals 1 per
 /// blow; the sloth acts once per hundred actions of the player.
 const MONSTERS: &str = r#"[
-    Monster(id: "gnat", name: "cave gnat", family: Vermin, elite: false,
+    Monster(id: "gnat", name: "cave gnat", name_fr: Masculine("le monstre"), plural: "cave gnats", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 100, hp: 999, attack: 0, defense: 0, min_depth: 1),
-    Monster(id: "sloth", name: "sloth", family: Vermin, elite: false,
+    Monster(id: "sloth", name: "sloth", name_fr: Masculine("le monstre"), plural: "sloths", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 1, hp: 999, attack: 0, defense: 0, min_depth: 1),
-    Monster(id: "moth", name: "wax moth", family: Vermin, elite: false,
+    Monster(id: "moth", name: "wax moth", name_fr: Masculine("le monstre"), plural: "wax moths", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
 ]"#;
 
@@ -2103,9 +2103,9 @@ fn q_quits_from_the_game_screen_but_not_from_an_overlay() {
 #[test]
 fn the_screens_fit_and_the_longest_log_lines_stay_whole_at_80_by_24() {
     // The worst legal line: a sigil and a monster with 24-character names.
-    let monsters = r#"[Monster(id: "long", name: "Archivist of Lower Vault", family: Acolyte,
+    let monsters = r#"[Monster(id: "long", name: "Archivist of Lower Vault", name_fr: Masculine("le monstre"), plural: "Archivists of Low Vault", plural_fr: "monstres", family: Acolyte,
         elite: false, speed: 1, hp: 999, attack: 0, defense: 0, min_depth: 1)]"#;
-    let sigils = r#"[Sigil(id: "long", name: "Ember of the Deep Hearth", pattern: [7, 5, 3],
+    let sigils = r#"[Sigil(id: "long", name: "Ember of the Deep Hearth", name_fr: "sigille", pattern: [7, 5, 3],
         effect: Damage, power: 6, targeting: NearestEnemy, min_depth: 1,
         known_at_start: false)]"#;
     let items = "[]";

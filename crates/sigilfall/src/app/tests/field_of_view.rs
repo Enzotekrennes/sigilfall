@@ -771,7 +771,7 @@ fn the_lit_area_looks_round_on_screen_at_120_by_40_and_is_clipped_by_one_row_at_
 #[test]
 fn a_group_in_view_shows_the_health_of_its_most_wounded_member() {
     let content = sigilfall_core::content::Content::parse(
-        "[Monster(id: \"brute\", name: \"brute\", family: Vermin, elite: false, speed: 1, \
+        "[Monster(id: \"brute\", name: \"brute\", name_fr: Masculine(\"le monstre\"), plural: \"brutes\", plural_fr: \"monstres\", family: Vermin, elite: false, speed: 1, \
          hp: 900, attack: 0, defense: 0, min_depth: 1)]",
     )
     .expect("test content is valid");

@@ -26,7 +26,7 @@ use sigilfall_core::rng::{DailyDate, Seed};
 
 use super::log::wrap;
 use super::{draw_centred_rows, key_help, up_down};
-use crate::messages;
+use crate::messages::{self, Labels};
 use crate::theme::Theme;
 
 /// An entry of the title menu.
@@ -47,15 +47,16 @@ pub enum TitleItem {
 }
 
 impl TitleItem {
-    /// Returns the entry's label, as the menu shows it.
-    pub const fn label(self) -> &'static str {
+    /// Returns the entry's label, as the menu shows it in the words of
+    /// `labels`.
+    pub const fn label(self, labels: &'static Labels) -> &'static str {
         match self {
-            Self::Continue => messages::CONTINUE_ITEM,
-            Self::NewGame => messages::NEW_GAME_ITEM,
-            Self::Seed => messages::SEED_ITEM,
-            Self::Daily => messages::DAILY_ITEM,
-            Self::Options => messages::OPTIONS_ITEM,
-            Self::Quit => messages::QUIT_ITEM,
+            Self::Continue => labels.continue_item,
+            Self::NewGame => labels.new_game_item,
+            Self::Seed => labels.seed_item,
+            Self::Daily => labels.daily_item,
+            Self::Options => labels.options_item,
+            Self::Quit => labels.quit_item,
         }
     }
 }
@@ -346,10 +347,10 @@ const EMBLEM: [&str; 7] = [
     "N-----N-----N",
 ];
 
-/// Columns of a menu line taken by an entry's label, before the detail
-/// beside it ("Continue" and its depth and turn, "Daily" and its date): the
-/// longest label, "Continue" or "New game", and four blank columns.
-const LABEL_WIDTH: usize = 12;
+/// Blank columns between the longest label of a menu and the details beside
+/// the labels ("Continue" and its depth and turn, "Daily" and its date), so
+/// the details start in one column whatever the language.
+const LABEL_GAP: usize = 4;
 
 /// Narrowest a menu is drawn, so its left edge stays in one column (22 on 80
 /// columns) whether "Continue" and its detail are listed or not, and on the
@@ -430,7 +431,7 @@ pub fn render(
     rows.extend([
         Row::blank(),
         Row::plain(Line::styled(messages::GAME_TITLE, theme.text_title)),
-        Row::plain(Line::styled(messages::TAGLINE, theme.text_muted)),
+        Row::plain(Line::styled(theme.labels().tagline, theme.text_muted)),
         Row::blank(),
     ]);
     let help = match step {
@@ -508,9 +509,15 @@ fn emblem(theme: &Theme) -> Vec<Row> {
 /// [`MENU_MIN_WIDTH`], so the menu stays aligned on its left edge once
 /// centred, in the same column from one menu to the next.
 fn menu_lines(entries: &[(&'static str, String)], chosen: usize, theme: &Theme) -> Vec<Row> {
+    let label_width = LABEL_GAP
+        + entries
+            .iter()
+            .map(|(label, _)| label.chars().count())
+            .max()
+            .unwrap_or(0);
     let width = entries
         .iter()
-        .map(|(label, detail)| 2 + LABEL_WIDTH.max(label.chars().count()) + detail.chars().count())
+        .map(|(_, detail)| 2 + label_width + detail.chars().count())
         .max()
         .unwrap_or(0)
         .max(MENU_MIN_WIDTH);
@@ -523,9 +530,9 @@ fn menu_lines(entries: &[(&'static str, String)], chosen: usize, theme: &Theme) 
             } else {
                 ' '
             };
-            let used = 2 + LABEL_WIDTH.max(label.chars().count()) + detail.chars().count();
+            let used = 2 + label_width + detail.chars().count();
             let line = Line::from(vec![
-                Span::styled(format!("{marker} {label:<LABEL_WIDTH$}"), theme.text),
+                Span::styled(format!("{marker} {label:<label_width$}"), theme.text),
                 Span::styled(
                     format!("{detail}{}", " ".repeat(width - used)),
                     theme.text_muted,
@@ -551,7 +558,7 @@ fn menu_rows(menu: TitleMenu, saved: Option<&str>, today: DailyDate, theme: &The
                 (TitleItem::Daily, _) => today.to_string(),
                 _ => String::new(),
             };
-            (item.label(), detail)
+            (item.label(theme.labels()), detail)
         })
         .collect();
     menu_lines(&entries, menu.selected(has_save), theme)
@@ -569,24 +576,24 @@ fn seed_rows(entry: &SeedEntry, theme: &Theme) -> Vec<Row> {
         None => Line::default(),
         Some(problem) => {
             let text = match problem {
-                SeedProblem::Empty => messages::EMPTY_SEED.to_owned(),
-                SeedProblem::Invalid => messages::invalid_seed(typed.trim()),
+                SeedProblem::Empty => theme.labels().empty_seed.to_owned(),
+                SeedProblem::Invalid => messages::invalid_seed(theme.language, typed.trim()),
             };
             warning(text, theme)
         }
     };
     vec![
-        Row::plain(Line::styled(messages::SEED_PROMPT, theme.text_muted)),
+        Row::plain(Line::styled(theme.labels().seed_prompt, theme.text_muted)),
         Row::blank(),
         Row::plain(Line::from(vec![
             Span::styled(
-                format!("{}  ", messages::SEED_FIELD_LABEL),
+                format!("{}  ", theme.labels().seed_field_label),
                 theme.text_muted,
             ),
             Span::styled(field, theme.text.patch(theme.bg_selection)),
         ])),
         Row::blank(),
-        Row::plain(Line::styled(messages::SEED_FORMS, theme.text_muted)),
+        Row::plain(Line::styled(theme.labels().seed_forms, theme.text_muted)),
         Row::plain(problem),
     ]
 }
@@ -596,18 +603,18 @@ fn seed_rows(entry: &SeedEntry, theme: &Theme) -> Vec<Row> {
 /// abandoned and its save deleted, and the two answers as a menu.
 fn confirmation_rows(confirmation: Confirmation, saved: Option<&str>, theme: &Theme) -> Vec<Row> {
     let mut rows = vec![Row::plain(Line::styled(
-        messages::ABANDON_QUESTION,
+        theme.labels().abandon_question,
         theme.text_title,
     ))];
     rows.extend(
-        messages::abandon_warning(saved.unwrap_or_default())
+        messages::abandon_warning(theme.language, saved.unwrap_or_default())
             .into_iter()
             .map(|text| Row::plain(Line::styled(text, theme.text))),
     );
     rows.push(Row::blank());
     let answers = [
-        (messages::KEEP_ITEM, String::new()),
-        (messages::ABANDON_ITEM, String::new()),
+        (theme.labels().keep_item, String::new()),
+        (theme.labels().abandon_item, String::new()),
     ];
     rows.extend(menu_lines(
         &answers,
@@ -657,9 +664,12 @@ fn warning(text: String, theme: &Theme) -> Line<'static> {
 fn menu_help(theme: &Theme) -> Line<'static> {
     key_help(
         vec![
-            (up_down(theme), messages::CHOOSE_LABEL),
-            (messages::CONFIRM_KEY.to_owned(), messages::CONFIRM_LABEL),
-            (messages::QUIT_KEY.to_owned(), messages::QUIT_LABEL),
+            (up_down(theme), theme.labels().choose_label),
+            (
+                theme.labels().enter_key.to_owned(),
+                theme.labels().confirm_label,
+            ),
+            (messages::QUIT_KEY.to_owned(), theme.labels().quit_label),
         ],
         theme,
     )
@@ -670,9 +680,18 @@ fn menu_help(theme: &Theme) -> Line<'static> {
 fn seed_help(theme: &Theme) -> Line<'static> {
     key_help(
         vec![
-            (messages::CONFIRM_KEY.to_owned(), messages::START_LABEL),
-            (messages::UNDO_KEY.to_owned(), messages::ERASE_LABEL),
-            (messages::CANCEL_KEY.to_owned(), messages::MENU_BACK_LABEL),
+            (
+                theme.labels().enter_key.to_owned(),
+                theme.labels().start_label,
+            ),
+            (
+                theme.labels().backspace_key.to_owned(),
+                theme.labels().erase_label,
+            ),
+            (
+                theme.labels().escape_key.to_owned(),
+                theme.labels().menu_back_label,
+            ),
         ],
         theme,
     )
@@ -683,9 +702,15 @@ fn seed_help(theme: &Theme) -> Line<'static> {
 fn confirmation_help(theme: &Theme) -> Line<'static> {
     key_help(
         vec![
-            (up_down(theme), messages::CHOOSE_LABEL),
-            (messages::CONFIRM_KEY.to_owned(), messages::CONFIRM_LABEL),
-            (messages::CANCEL_KEY.to_owned(), messages::KEEP_LABEL),
+            (up_down(theme), theme.labels().choose_label),
+            (
+                theme.labels().enter_key.to_owned(),
+                theme.labels().confirm_label,
+            ),
+            (
+                theme.labels().escape_key.to_owned(),
+                theme.labels().keep_label,
+            ),
         ],
         theme,
     )
@@ -803,11 +828,14 @@ mod tests {
 
             assert_eq!(daily, seed.map(|seed| seed + 1), "{listed:?}");
         }
-        assert_eq!(TitleItem::Daily.label(), "Daily");
+        assert_eq!(TitleItem::Daily.label(&messages::ENGLISH), "Daily");
+        assert_eq!(TitleItem::Daily.label(&messages::FRENCH), "Donjon du jour");
     }
 
     #[test]
     fn every_notice_about_the_save_fits_the_notice_rows_with_its_file_name() {
+        use crate::language::Language;
+        use crate::messages::FileNotice;
         use crate::theme::{ColorMode, GlyphSet};
         use crate::ui::log::tests::{paths, reasons, refusals};
 
@@ -816,17 +844,29 @@ mod tests {
         let set_aside = refusals().into_iter().flat_map(|reason| {
             paths()
                 .into_iter()
-                .map(move |path| messages::save_set_aside_notice(&reason, &path))
+                .map(move |moved_to| FileNotice::SaveSetAside {
+                    reason: reason.clone(),
+                    moved_to,
+                })
         });
-        let not_deleted = reasons().into_iter().flat_map(|reason| {
+        let not_deleted = reasons().into_iter().flat_map(|cause| {
             paths().into_iter().flat_map(move |path| {
                 [
-                    messages::save_not_deleted_notice(&path, &reason),
-                    messages::finished_save_not_deleted_notice(&path, &reason),
+                    FileNotice::SaveNotDeleted {
+                        path: path.clone(),
+                        cause: cause.clone(),
+                    },
+                    FileNotice::FinishedSaveNotDeleted {
+                        path,
+                        cause: cause.clone(),
+                    },
                 ]
             })
         });
-        for notice in set_aside.chain(not_deleted) {
+        let notices = set_aside.chain(not_deleted).flat_map(|notice| {
+            Language::ALL.map(|language| messages::file_notice(language, &notice))
+        });
+        for notice in notices {
             let wrapped = wrap(&notice, NOTICE_WIDTH);
             assert!(wrapped.len() <= NOTICE_ROWS, "{wrapped:#?}");
             let rows = notice_rows(std::slice::from_ref(&notice), &theme);

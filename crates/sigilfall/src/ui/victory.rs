@@ -6,7 +6,7 @@
 //! line for line, so the two end screens read as a pair: the title "T H E S E
 //! A L B R E A K S" in `text_title` where the death screen has "T H E D E S C
 //! E N T E N D S", a line chosen from the seed among
-//! `messages::VICTORY_LINES` in `text_muted` where it has an epitaph, and
+//! `theme.labels().victory_lines` in `text_muted` where it has an epitaph, and
 //! "You broke the seal at depth 10, on turn 4120." in `text` where it has the
 //! cause of death. Everything below (the counts, the seed in its frame, the
 //! replay command, the line to share, which says "victory", and the key help)
@@ -38,11 +38,14 @@ use crate::theme::Theme;
 /// and an area too small for the text is clipped without panicking.
 pub fn render(frame: &mut Frame, area: Rect, game: &Game, content: &Content, theme: &Theme) {
     let head = vec![
-        Line::styled(messages::VICTORY_TITLE, theme.text_title),
-        Line::styled(messages::victory_line(game.seed()), theme.text_muted),
+        Line::styled(theme.labels().victory_title, theme.text_title),
+        Line::styled(
+            messages::victory_line(theme.language, game.seed()),
+            theme.text_muted,
+        ),
         Line::default(),
         Line::styled(
-            messages::victory_outcome(game.depth(), game.player_turns()),
+            messages::victory_outcome(theme.language, game.depth(), game.player_turns()),
             theme.text,
         ),
         Line::default(),

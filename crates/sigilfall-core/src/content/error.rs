@@ -242,6 +242,16 @@ pub enum FieldProblem {
         /// Most characters accepted.
         max: usize,
     },
+    /// A French name does not start with a definite article that suits its
+    /// gender (see `content::FrenchNoun`).
+    #[error(
+        "`{name}` must start with its definite article: `le ` for a Masculine \
+         noun, `la ` for a Feminine one, or `l'` before a vowel or a mute h"
+    )]
+    BadFrenchArticle {
+        /// The name found in the file.
+        name: String,
+    },
     /// The list of nodes is not a pattern the player can draw exactly as
     /// written.
     #[error("{0}")]

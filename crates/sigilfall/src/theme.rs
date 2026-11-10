@@ -1,11 +1,13 @@
-//! The visual theme: every colour, emphasis and glyph the screens draw with.
+//! The visual theme: every colour, emphasis and glyph the screens draw with,
+//! and the language they write in.
 //!
 //! Exposes [`Theme`], whose fields are the semantic colour tokens (one
-//! [`Style`] each) plus the [`Glyphs`] to draw with, the four rendering modes
+//! [`Style`] each) plus the [`Glyphs`] to draw with and the [`Language`] of
+//! every text (`messages` holds the texts), the four rendering modes
 //! ([`ColorMode`]), terminal colour detection ([`ColorSupport::detect`]) and
 //! the player's preferences that feed it ([`Appearance`], [`GlyphSet`],
-//! [`ColorChoice`], gathered in the [`Options`] the options screen edits),
-//! resolved into a theme by [`Settings`]. This module is the only place where
+//! [`ColorChoice`] and the language, gathered in the [`Options`] the options
+//! screen edits), resolved into a theme by [`Settings`]. This module is the only place where
 //! a colour or a glyph is written down: screens ask for a token by name and
 //! never pick a colour themselves. Reading and writing the options is left to
 //! `persist`.
@@ -24,6 +26,8 @@ use serde::{Deserialize, Serialize};
 use sigilfall_core::content::Family;
 
 pub use self::glyphs::{GlyphSet, Glyphs};
+use crate::language::Language;
+use crate::messages::{self, Labels};
 
 /// How much colour the terminal can show, as detected at start-up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,6 +155,10 @@ pub struct Options {
     pub colors: ColorChoice,
     /// Dark or light theme.
     pub appearance: Appearance,
+    /// Language of every text. Its default is English, but the options of a
+    /// player who chose none follow the system's language
+    /// (`persist::LoadedOptions::options`).
+    pub language: Language,
 }
 
 /// Everything that decides the theme of a session: the player's
@@ -165,6 +173,9 @@ pub struct Settings {
     pub detected: ColorSupport,
     /// Whether `--ascii` was given: ASCII glyphs whatever the option says.
     pub forced_ascii: bool,
+    /// The language `--lang` gave, if any: it wins over the language option
+    /// for the session.
+    pub forced_language: Option<Language>,
 }
 
 impl Settings {
@@ -186,9 +197,15 @@ impl Settings {
         ColorMode::for_terminal(support, self.options.appearance)
     }
 
+    /// Returns the language to write in: the one of `--lang` when given,
+    /// the option's otherwise.
+    pub fn language(&self) -> Language {
+        self.forced_language.unwrap_or(self.options.language)
+    }
+
     /// Builds the theme these settings call for.
     pub fn theme(&self) -> Theme {
-        Theme::new(self.color_mode(), self.glyph_set())
+        Theme::new(self.color_mode(), self.glyph_set()).in_language(self.language())
     }
 }
 
@@ -323,11 +340,25 @@ pub struct Theme {
     pub log_sigil: Style,
     /// Characters to draw the map and the interface with.
     pub glyphs: Glyphs,
+    /// Language of every text the screens write.
+    pub language: Language,
 }
 
 impl Theme {
+    /// Returns this theme writing in `language`.
+    #[must_use]
+    pub const fn in_language(mut self, language: Language) -> Self {
+        self.language = language;
+        self
+    }
+
+    /// Returns the fixed texts of the theme's language.
+    pub const fn labels(&self) -> &'static Labels {
+        messages::labels(self.language)
+    }
+
     /// Builds the theme for the given rendering `mode`, drawn with the
-    /// given `glyph_set`.
+    /// given `glyph_set`, writing in English (see [`Theme::in_language`]).
     pub fn new(mode: ColorMode, glyph_set: GlyphSet) -> Self {
         let glyphs = Glyphs::new(glyph_set);
         match mode {
@@ -393,6 +424,7 @@ impl Theme {
             log_danger: fg(0xF07D63),
             log_sigil: fg(0x5ED6B8),
             glyphs,
+            language: Language::English,
         }
     }
 
@@ -435,6 +467,7 @@ impl Theme {
             log_danger: fg(0xA82C1A),
             log_sigil: fg(0x0B6E58),
             glyphs,
+            language: Language::English,
         }
     }
 
@@ -481,6 +514,7 @@ impl Theme {
             log_danger: named(Color::LightRed),
             log_sigil: named(Color::LightCyan),
             glyphs,
+            language: Language::English,
         }
     }
 
@@ -536,6 +570,7 @@ impl Theme {
             log_danger: plain,
             log_sigil: plain,
             glyphs,
+            language: Language::English,
         }
     }
 }

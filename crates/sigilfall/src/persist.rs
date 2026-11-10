@@ -32,9 +32,11 @@
 //! the game: the default options are used, the reason is reported, and the
 //! file is replaced the next time an option changes.
 //!
-//! The text of a save and its checks belong to `sigilfall_core::save`, and
-//! the words of a refusal to `messages`; when to save, resume or delete, and
-//! when to write the options, is decided by the `app` module.
+//! The text of a save and its checks belong to `sigilfall_core::save`.
+//! Why a file could not be read is reported as facts ([`SaveRefusal`],
+//! [`OptionsProblem`]), which `messages` words in the player's language;
+//! when to save, resume or delete, and when to write the options, is
+//! decided by the `app` module.
 
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
@@ -46,9 +48,9 @@ use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use sigilfall_core::content::Content;
 use sigilfall_core::game::Game;
-use sigilfall_core::save;
+use sigilfall_core::save::{self, SaveError};
 
-use crate::messages;
+use crate::language::Language;
 use crate::theme::{Appearance, ColorChoice, GlyphSet, Options};
 
 /// Environment variable that replaces the operating system's data folder,
@@ -110,11 +112,26 @@ pub enum Loaded {
     /// The save could not be read back and was renamed so it is never read
     /// again; a new game is to start.
     SetAside {
-        /// Why it could not be read, in a sentence a player can act on.
-        reason: String,
+        /// Why it could not be read (`messages::save_refusal` words it).
+        reason: SaveRefusal,
         /// Where the unreadable save now is.
         moved_to: PathBuf,
     },
+}
+
+/// Why a save could not be read back, as facts the player is told in
+/// their language (`messages::save_refusal`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SaveRefusal {
+    /// The file is not UTF-8 text.
+    NotText,
+    /// The file is larger than `limit` bytes, and was not read.
+    TooLarge {
+        /// The largest file read, [`MAX_FILE_BYTES`].
+        limit: u64,
+    },
+    /// The save reader refused the text.
+    Refused(SaveError),
 }
 
 impl SaveFile {
@@ -170,9 +187,8 @@ impl SaveFile {
     /// Only `save.ron` is read, never a leftover `save.ron.tmp`. A save
     /// larger than [`MAX_FILE_BYTES`], not UTF-8 text, or refused by
     /// `save::from_str` is renamed `save.ron.bad`, replacing an older one of
-    /// that name, and reported as [`Loaded::SetAside`] with the reason of
-    /// `messages::save_refusal`; the save itself is otherwise left as it
-    /// is.
+    /// that name, and reported as [`Loaded::SetAside`] with the reason, a
+    /// [`SaveRefusal`]; the save itself is otherwise left as it is.
     ///
     /// # Errors
     ///
@@ -183,16 +199,16 @@ impl SaveFile {
     pub fn load(&self, content: &Content) -> anyhow::Result<Loaded> {
         let reason = match read_bounded(&self.path) {
             Ok(bytes) => match String::from_utf8(bytes) {
-                Err(_) => messages::SAVE_NOT_TEXT.to_owned(),
+                Err(_) => SaveRefusal::NotText,
                 Ok(text) => match save::from_str(&text, content) {
                     Ok(game) => return Ok(Loaded::Game(Box::new(game))),
-                    Err(error) => messages::save_refusal(&error),
+                    Err(error) => SaveRefusal::Refused(error),
                 },
             },
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Loaded::Missing),
-            Err(error) if error.kind() == io::ErrorKind::FileTooLarge => {
-                messages::save_too_large(MAX_FILE_BYTES)
-            }
+            Err(error) if error.kind() == io::ErrorKind::FileTooLarge => SaveRefusal::TooLarge {
+                limit: MAX_FILE_BYTES,
+            },
             Err(error) => {
                 return Err(error).with_context(|| {
                     format!(
@@ -205,9 +221,10 @@ impl SaveFile {
         let moved_to = self.set_aside_path();
         fs::rename(&self.path, &moved_to).with_context(|| {
             format!(
-                "cannot set aside the unreadable save {} ({reason}): move or \
+                "cannot set aside the unreadable save {} ({}): move or \
                  delete it, then start the game again",
-                self.path.display()
+                self.path.display(),
+                crate::messages::save_refusal(Language::English, &reason)
             )
         })?;
         Ok(Loaded::SetAside { reason, moved_to })
@@ -285,24 +302,153 @@ pub enum LoadedOptions {
     /// The file could not be read back: the defaults apply until an
     /// option changes, which rewrites the file.
     Unreadable {
-        /// Why, in a short sentence a player can act on.
-        reason: String,
+        /// Why (`messages::options_problem` words it).
+        reason: OptionsProblem,
     },
 }
 
 impl LoadedOptions {
-    /// Returns the options to play with: those found, or the defaults.
-    pub fn options(&self) -> Options {
+    /// Returns the options to play with: those found, or the defaults with
+    /// the language `system`, the one of the operating system.
+    pub fn options(&self, system: Language) -> Options {
         match self {
             Self::Found(options) => *options,
-            Self::Missing | Self::Unreadable { .. } => Options::default(),
+            Self::Missing | Self::Unreadable { .. } => Options {
+                language: system,
+                ..Options::default()
+            },
         }
     }
 }
 
+/// Why the options file could not be read back, as facts the player is
+/// told in their language (`messages::options_problem`): the system's
+/// error, the size, the format version, or what is wrong on which line, in
+/// the file's own words. Lines and columns are counted from 1.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OptionsProblem {
+    /// The system could not read the file; its error, as it gives it.
+    System(String),
+    /// The file is larger than `limit` bytes.
+    TooLarge {
+        /// The largest file read, [`MAX_FILE_BYTES`].
+        limit: u64,
+    },
+    /// The file is not UTF-8 text.
+    NotText,
+    /// The file is empty or blank.
+    Empty,
+    /// The file has another format version than
+    /// [`OPTIONS_FORMAT_VERSION`].
+    OtherVersion {
+        /// The version written in the file.
+        found: u32,
+    },
+    /// A value names no value of its setting.
+    UnknownValue {
+        /// Line of the value.
+        line: usize,
+        /// The value found.
+        found: String,
+        /// The setting's key and its accepted values, when known.
+        setting: Option<(&'static str, Vec<String>)>,
+    },
+    /// The format version is missing.
+    MissingVersion,
+    /// A setting is missing.
+    MissingSetting {
+        /// Its key in the file.
+        key: String,
+    },
+    /// The format version is written twice.
+    RepeatedVersion {
+        /// Line of the second one.
+        line: usize,
+    },
+    /// A setting is written twice.
+    RepeatedSetting {
+        /// Line of the second one.
+        line: usize,
+        /// Its key in the file.
+        key: String,
+    },
+    /// The format version is not a whole number.
+    VersionNotWhole {
+        /// Line of the version.
+        line: usize,
+    },
+    /// A value is of the wrong kind, such as a number for a setting.
+    WrongKind {
+        /// Line of the value.
+        line: usize,
+        /// Column of the value.
+        column: usize,
+        /// The key of its setting, when known.
+        key: Option<&'static str>,
+    },
+    /// The settings are not inside parentheses.
+    NotInParentheses {
+        /// Line where reading stopped.
+        line: usize,
+    },
+    /// The file ends before its closing parenthesis.
+    EndsEarly {
+        /// Last line read.
+        line: usize,
+    },
+    /// A comma is missing between two settings.
+    CommaMissing {
+        /// Line where it is missing.
+        line: usize,
+        /// Column where it is missing.
+        column: usize,
+    },
+    /// A colon is missing after a key.
+    ColonMissing {
+        /// Line where it is missing.
+        line: usize,
+        /// Column where it is missing.
+        column: usize,
+    },
+    /// The closing parenthesis is missing.
+    ClosingMissing {
+        /// Line where it is missing.
+        line: usize,
+        /// Column where it is missing.
+        column: usize,
+    },
+    /// Text follows the closing parenthesis.
+    TextAfterEnd {
+        /// Line of that text.
+        line: usize,
+        /// Column of that text.
+        column: usize,
+    },
+    /// A character has no place where it is.
+    UnexpectedCharacter {
+        /// Its line.
+        line: usize,
+        /// Its column.
+        column: usize,
+        /// The character.
+        character: char,
+    },
+    /// Any other error of the reader: the text is not RON.
+    NotRon {
+        /// Line where reading stopped.
+        line: usize,
+        /// Column where reading stopped.
+        column: usize,
+    },
+}
+
 /// The options file as written on disk: the format version first, then
 /// one field per option, such as
-/// `(format_version: 1, glyphs: Unicode, colors: Auto, theme: Dark)`.
+/// `(format_version: 1, glyphs: Unicode, colors: Auto, theme: Dark,
+/// language: French)`.
+///
+/// `language` came after the first files were written: a file without it
+/// is still of version 1, and its language is the system's.
 #[derive(Debug, Serialize, Deserialize)]
 struct OptionsRecord {
     /// [`OPTIONS_FORMAT_VERSION`] when the file was written.
@@ -313,6 +459,35 @@ struct OptionsRecord {
     colors: ColorChoice,
     /// Dark or light theme.
     theme: Appearance,
+    /// Language of the game's text; `None` in a file written before the
+    /// option existed.
+    #[serde(
+        default,
+        deserialize_with = "read_language",
+        serialize_with = "write_language",
+        skip_serializing_if = "Option::is_none"
+    )]
+    language: Option<Language>,
+}
+
+/// Reads the `language` setting, written bare (`French`) rather than as
+/// RON's `Some(French)`.
+fn read_language<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Language>, D::Error> {
+    Language::deserialize(deserializer).map(Some)
+}
+
+/// Writes the `language` setting bare, as [`read_language`] reads it; only
+/// called with a language, the field being skipped otherwise.
+fn write_language<S: serde::Serializer>(
+    language: &Option<Language>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    match language {
+        Some(language) => language.serialize(serializer),
+        None => serializer.serialize_none(),
+    }
 }
 
 /// The first field of any options file, read alone so that a file of
@@ -340,34 +515,33 @@ impl OptionsFile {
     }
 
     /// Returns the path of the options file, `options.ron`.
-    #[cfg(test)]
     pub fn path(&self) -> &Path {
         &self.path
     }
 
-    /// Reads the player's options back.
+    /// Reads the player's options back; a file written before the language
+    /// option existed gives the language `system`, the operating system's.
     ///
     /// Never fails: a missing file gives [`LoadedOptions::Missing`], and a
     /// file that cannot be read (permissions, larger than
     /// [`MAX_FILE_BYTES`], not text, not RON, another format version, an
     /// unknown value) gives [`LoadedOptions::Unreadable`] with the reason.
     /// The file itself is left as it is.
-    pub fn load(&self) -> LoadedOptions {
+    pub fn load(&self, system: Language) -> LoadedOptions {
         let bytes = match read_bounded(&self.path) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return LoadedOptions::Missing,
             Err(error) if error.kind() == io::ErrorKind::FileTooLarge => {
-                return unreadable(&format!(
-                    "it is larger than {}",
-                    messages::file_size(MAX_FILE_BYTES)
-                ));
+                return unreadable(OptionsProblem::TooLarge {
+                    limit: MAX_FILE_BYTES,
+                });
             }
-            Err(error) => return unreadable(&error.to_string()),
+            Err(error) => return unreadable(OptionsProblem::System(error.to_string())),
         };
         let Ok(text) = String::from_utf8(bytes) else {
-            return unreadable("it is not text");
+            return unreadable(OptionsProblem::NotText);
         };
-        match parse_options(&text) {
+        match parse_options(&text, system) {
             Ok(options) => LoadedOptions::Found(options),
             Err(reason) => LoadedOptions::Unreadable { reason },
         }
@@ -388,6 +562,7 @@ impl OptionsFile {
             glyphs: options.glyphs,
             colors: options.colors,
             theme: options.appearance,
+            language: Some(options.language),
         };
         let text = ron::ser::to_string_pretty(&record, ron::ser::PrettyConfig::default())
             .context("cannot write the options as text")?;
@@ -402,27 +577,24 @@ impl OptionsFile {
 }
 
 /// A [`LoadedOptions::Unreadable`] whose reason is `reason`.
-fn unreadable(reason: &str) -> LoadedOptions {
-    LoadedOptions::Unreadable {
-        reason: reason.to_owned(),
-    }
+const fn unreadable(reason: OptionsProblem) -> LoadedOptions {
+    LoadedOptions::Unreadable { reason }
 }
 
-/// Reads the text of an options file, or returns why it cannot be, in
-/// the words of the file rather than of the program: it is empty, it has
-/// another format version, or what is wrong and on which line (see
+/// Reads the text of an options file, `system` being the language of a
+/// file that names none, or returns why it cannot be read: it is empty, it
+/// has another format version, or what is wrong and on which line (see
 /// [`describe_parse_error`]).
-fn parse_options(text: &str) -> Result<Options, String> {
+fn parse_options(text: &str, system: Language) -> Result<Options, OptionsProblem> {
     if text.trim().is_empty() {
-        return Err("it is empty".to_owned());
+        return Err(OptionsProblem::Empty);
     }
     let version: OptionsVersion =
         ron::from_str(text).map_err(|error| describe_parse_error(text, &error))?;
     if version.format_version != OPTIONS_FORMAT_VERSION {
-        return Err(format!(
-            "it has format version {}, but this game reads version {OPTIONS_FORMAT_VERSION}",
-            version.format_version
-        ));
+        return Err(OptionsProblem::OtherVersion {
+            found: version.format_version,
+        });
     }
     let record: OptionsRecord =
         ron::from_str(text).map_err(|error| describe_parse_error(text, &error))?;
@@ -430,6 +602,7 @@ fn parse_options(text: &str) -> Result<Options, String> {
         glyphs: record.glyphs,
         colors: record.colors,
         appearance: record.theme,
+        language: record.language.unwrap_or(system),
     })
 }
 
@@ -439,75 +612,81 @@ fn parse_options(text: &str) -> Result<Options, String> {
 /// The parser reports an unknown value with the type's name (`GlyphSet`),
 /// which means nothing to a player; the key (`glyphs`) is what they read in
 /// the file.
-const SETTING_KEYS: [(&str, &str); 3] = [
+const SETTING_KEYS: [(&str, &str); 4] = [
     ("GlyphSet", "glyphs"),
     ("ColorChoice", "colors"),
     ("Appearance", "theme"),
+    ("Language", "language"),
 ];
 
 /// Key of the format version in the options file.
 const VERSION_KEY: &str = "format_version";
 
 /// Describes why the options file `text` could not be parsed, as `error`
-/// says, in a short reason that names the line and, when it can, the
+/// says, as an [`OptionsProblem`] that names the line and, when it can, the
 /// setting at fault in the file's own words, such as "line 1: unknown
 /// value `Braille` for glyphs (Unicode or Ascii)".
 ///
-/// The parser's own messages are never shown: they name the program's
+/// The parser's own messages are never kept: they name the program's
 /// types ("enum `GlyphSet`", "struct `OptionsVersion`"). An error the
-/// function does not recognise gives "this is not valid RON" with its line
-/// and column.
-fn describe_parse_error(text: &str, error: &ron::error::SpannedError) -> String {
+/// function does not recognise gives [`OptionsProblem::NotRon`] with its
+/// line and column.
+fn describe_parse_error(text: &str, error: &ron::error::SpannedError) -> OptionsProblem {
     use ron::error::Error;
 
     let at = error.span.start;
-    let line = format!("line {}", at.line);
-    let place = format!("line {}, column {}", at.line, at.col);
+    let (line, column) = (at.line, at.col);
     match &error.code {
         Error::NoSuchEnumVariant {
             expected,
             found,
             outer,
-        } => {
-            let key = outer.as_deref().and_then(setting_key);
-            match key {
-                Some(key) => format!(
-                    "{line}: unknown value `{found}` for {key} ({})",
-                    one_of(expected)
-                ),
-                None => format!("{line}: unknown value `{found}`"),
-            }
+        } => OptionsProblem::UnknownValue {
+            line,
+            found: found.clone(),
+            setting: outer.as_deref().and_then(setting_key).map(|key| {
+                let values = expected.iter().map(|value| (*value).to_owned()).collect();
+                (key, values)
+            }),
+        },
+        Error::MissingStructField { field, .. } if *field == VERSION_KEY => {
+            OptionsProblem::MissingVersion
         }
-        Error::MissingStructField { field, .. } => {
-            format!("{} is missing", setting_name(field))
+        Error::MissingStructField { field, .. } => OptionsProblem::MissingSetting {
+            key: (*field).to_owned(),
+        },
+        Error::DuplicateStructField { field, .. } if *field == VERSION_KEY => {
+            OptionsProblem::RepeatedVersion { line }
         }
-        Error::DuplicateStructField { field, .. } => {
-            format!("{line}: {} is given twice", setting_name(field))
-        }
+        Error::DuplicateStructField { field, .. } => OptionsProblem::RepeatedSetting {
+            line,
+            key: (*field).to_owned(),
+        },
         // The format version is the only number of the file.
         Error::ExpectedInteger | Error::IntegerOutOfBounds | Error::InvalidIntegerDigit { .. } => {
-            format!("{line}: the format version must be a whole number")
+            OptionsProblem::VersionNotWhole { line }
         }
         Error::ExpectedIdentifier
         | Error::SuggestRawIdentifier(_)
-        | Error::InvalidValueForType { .. } => match key_before(text, at) {
-            Some(key) => format!("{line}: wrong kind of value for {key}"),
-            None => format!("{place}: wrong kind of value"),
+        | Error::InvalidValueForType { .. } => OptionsProblem::WrongKind {
+            line,
+            column,
+            key: key_before(text, at),
         },
         Error::ExpectedNamedStructLike(_)
         | Error::ExpectedStructLike
-        | Error::ExpectedDifferentStructName { .. } => {
-            format!("{line}: the settings must be inside ( and )")
-        }
-        Error::Eof => format!("{line}: the file ends too early"),
-        Error::ExpectedComma => format!("{place}: a comma is missing"),
-        Error::ExpectedMapColon => format!("{place}: a colon is missing"),
-        Error::ExpectedStructLikeEnd => format!("{place}: a closing ) is missing"),
-        Error::TrailingCharacters => format!("{place}: unexpected text after the closing )"),
-        Error::UnexpectedChar(character) => {
-            format!("{place}: unexpected character `{character}`")
-        }
-        _ => format!("{place}: this is not valid RON"),
+        | Error::ExpectedDifferentStructName { .. } => OptionsProblem::NotInParentheses { line },
+        Error::Eof => OptionsProblem::EndsEarly { line },
+        Error::ExpectedComma => OptionsProblem::CommaMissing { line, column },
+        Error::ExpectedMapColon => OptionsProblem::ColonMissing { line, column },
+        Error::ExpectedStructLikeEnd => OptionsProblem::ClosingMissing { line, column },
+        Error::TrailingCharacters => OptionsProblem::TextAfterEnd { line, column },
+        Error::UnexpectedChar(character) => OptionsProblem::UnexpectedCharacter {
+            line,
+            column,
+            character: *character,
+        },
+        _ => OptionsProblem::NotRon { line, column },
     }
 }
 
@@ -518,26 +697,6 @@ fn setting_key(type_name: &str) -> Option<&'static str> {
         .iter()
         .find(|(name, _)| *name == type_name)
         .map(|(_, key)| *key)
-}
-
-/// How a reason names the field `field` of the file: "the format version"
-/// for [`VERSION_KEY`], "the `glyphs` setting" for a setting.
-fn setting_name(field: &str) -> String {
-    if field == VERSION_KEY {
-        "the format version".to_owned()
-    } else {
-        format!("the `{field}` setting")
-    }
-}
-
-/// The accepted values `values` as a reason lists them: "Unicode or Ascii",
-/// "Auto, Ansi16 or Monochrome".
-fn one_of(values: &[&str]) -> String {
-    match values {
-        [] => String::new(),
-        [only] => (*only).to_owned(),
-        [first @ .., last] => format!("{} or {last}", first.join(", ")),
-    }
 }
 
 /// The key of the setting whose value starts at `at` in `text`, as in
@@ -760,6 +919,7 @@ mod tests {
     use sigilfall_core::rng::Seed;
 
     use super::*;
+    use crate::messages;
 
     /// The game's shipped content.
     fn content() -> Content {
@@ -914,6 +1074,7 @@ mod tests {
             let Loaded::SetAside { reason, moved_to } = save.load(&content()).unwrap() else {
                 panic!("{label}: the save is set aside");
             };
+            let reason = messages::save_refusal(Language::English, &reason);
 
             assert!(!reason.is_empty(), "{label}");
             assert_eq!(moved_to, save.set_aside_path(), "{label}");
@@ -936,6 +1097,7 @@ mod tests {
         let Loaded::SetAside { reason, moved_to } = save.load(&content()).unwrap() else {
             panic!("the save is set aside");
         };
+        let reason = messages::save_refusal(Language::English, &reason);
 
         assert!(reason.contains(&format!("version {other}")), "{reason}");
         assert_eq!(fs::read_to_string(moved_to).unwrap(), text);
@@ -951,6 +1113,7 @@ mod tests {
         let Loaded::SetAside { reason, moved_to } = save.load(&content()).unwrap() else {
             panic!("the save is set aside");
         };
+        let reason = messages::save_refusal(Language::English, &reason);
 
         assert_eq!(reason, "the save is larger than 4 MiB");
         assert_eq!(fs::metadata(moved_to).unwrap().len(), size, "kept whole");
@@ -968,6 +1131,7 @@ mod tests {
         let Loaded::SetAside { reason, .. } = save.load(&content()).unwrap() else {
             panic!("the save is set aside");
         };
+        let reason = messages::save_refusal(Language::English, &reason);
 
         assert!(!reason.contains("larger"), "{reason}");
     }
@@ -988,6 +1152,7 @@ mod tests {
         let Loaded::SetAside { reason, .. } = save.load(&content()).unwrap() else {
             panic!("the save is set aside");
         };
+        let reason = messages::save_refusal(Language::English, &reason);
 
         assert!(!reason.chars().any(char::is_control), "{reason:?}");
         assert!(reason.contains("?]0;owned??[2J"), "{reason:?}");
@@ -1154,11 +1319,12 @@ mod tests {
                         glyphs,
                         colors,
                         appearance,
+                        language: Language::French,
                     };
 
                     file.write(&options).unwrap();
 
-                    assert_eq!(file.load(), LoadedOptions::Found(options));
+                    assert_eq!(file.load(Language::English), LoadedOptions::Found(options));
                     assert!(!with_suffix(file.path(), TEMPORARY_SUFFIX).exists());
                 }
             }
@@ -1173,6 +1339,7 @@ mod tests {
             glyphs: GlyphSet::Ascii,
             colors: ColorChoice::Ansi16,
             appearance: Appearance::Light,
+            language: Language::English,
         };
 
         file.write(&options).unwrap();
@@ -1191,17 +1358,17 @@ mod tests {
             "(theme: Light, colors: Ansi16, glyphs: Ascii, format_version: 1)",
         )
         .unwrap();
-        assert_eq!(file.load(), LoadedOptions::Found(options));
+        assert_eq!(file.load(Language::English), LoadedOptions::Found(options));
     }
 
     #[test]
     fn no_options_file_reads_as_missing_with_the_defaults() {
         let folder = ScratchFolder::new("options-missing");
 
-        let loaded = folder.options_file().load();
+        let loaded = folder.options_file().load(Language::English);
 
         assert_eq!(loaded, LoadedOptions::Missing);
-        assert_eq!(loaded.options(), Options::default());
+        assert_eq!(loaded.options(Language::English), Options::default());
     }
 
     #[test]
@@ -1224,13 +1391,23 @@ mod tests {
             let file = folder.options_file();
             fs::write(file.path(), &bytes).unwrap();
 
-            let loaded = file.load();
+            let loaded = file.load(Language::English);
 
             let LoadedOptions::Unreadable { reason } = &loaded else {
                 panic!("{label}: {loaded:?}");
             };
-            assert!(!reason.is_empty(), "{label}");
-            assert_eq!(loaded.options(), Options::default(), "{label}");
+            assert!(
+                !messages::options_problem(Language::English, reason).is_empty(),
+                "{label}"
+            );
+            assert_eq!(
+                loaded.options(Language::French),
+                Options {
+                    language: Language::French,
+                    ..Options::default()
+                },
+                "{label}: the defaults, in the system's language"
+            );
             assert_eq!(fs::read(file.path()).unwrap(), bytes, "{label}: left as is");
         }
     }
@@ -1245,19 +1422,21 @@ mod tests {
         )
         .unwrap();
 
-        let LoadedOptions::Unreadable { reason } = file.load() else {
+        let LoadedOptions::Unreadable { reason } = file.load(Language::English) else {
             panic!("a version 2 file is not read");
         };
 
         assert_eq!(
-            reason,
+            messages::options_problem(Language::English, &reason),
             "it has format version 2, but this game reads version 1"
         );
     }
 
-    /// The reason given for an options file whose text is `text`.
+    /// The reason given for an options file whose text is `text`, in
+    /// English.
     fn reason_for(text: &str) -> String {
-        parse_options(text).expect_err(text)
+        let problem = parse_options(text, Language::English).expect_err(text);
+        messages::options_problem(Language::English, &problem)
     }
 
     #[test]
@@ -1435,9 +1614,11 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            file.load(),
+            file.load(Language::English),
             LoadedOptions::Unreadable {
-                reason: "it is larger than 4 MiB".to_owned()
+                reason: OptionsProblem::TooLarge {
+                    limit: MAX_FILE_BYTES
+                }
             }
         );
     }
@@ -1448,7 +1629,10 @@ mod tests {
         let file = folder.options_file();
         fs::create_dir(file.path()).unwrap();
 
-        assert!(matches!(file.load(), LoadedOptions::Unreadable { .. }));
+        assert!(matches!(
+            file.load(Language::English),
+            LoadedOptions::Unreadable { .. }
+        ));
     }
 
     #[test]
@@ -1470,7 +1654,10 @@ mod tests {
             message.contains(&file.path().display().to_string()),
             "{message}"
         );
-        assert_eq!(file.load(), LoadedOptions::Found(Options::default()));
+        assert_eq!(
+            file.load(Language::English),
+            LoadedOptions::Found(Options::default())
+        );
     }
 
     #[test]
@@ -1480,6 +1667,9 @@ mod tests {
 
         file.write(&Options::default()).unwrap();
 
-        assert_eq!(file.load(), LoadedOptions::Found(Options::default()));
+        assert_eq!(
+            file.load(Language::English),
+            LoadedOptions::Found(Options::default())
+        );
     }
 }

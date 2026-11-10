@@ -12,6 +12,7 @@
 use crate::app::{App, State};
 use crate::cli::Cli;
 use crate::clock::ManualClock;
+use crate::language::Language;
 use crate::persist::ScratchFolder;
 use crate::theme::ColorSupport;
 use crate::ui::options::OptionRow;
@@ -55,6 +56,7 @@ pub(super) fn launch_with_terminal(
 ) -> anyhow::Result<App> {
     App::launch_with_clock(
         support,
+        Language::English,
         &command_line(arguments),
         &shipped(),
         folder.save_file(),

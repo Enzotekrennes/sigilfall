@@ -48,11 +48,11 @@ const GAIN_PER_TICK: i32 = 100;
 /// a biter that strikes hard and dies in a few blows and a pest that barely
 /// scratches.
 const TEST_MONSTERS: &str = r#"[
-    Monster(id: "gnat", name: "cave gnat", family: Vermin, elite: false,
+    Monster(id: "gnat", name: "cave gnat", name_fr: Masculine("le monstre"), plural: "cave gnats", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 100, hp: 999, attack: 0, defense: 0, min_depth: 1),
-    Monster(id: "biter", name: "biter", family: Vermin, elite: false,
+    Monster(id: "biter", name: "biter", name_fr: Masculine("le monstre"), plural: "biters", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 100, hp: 5, attack: 6, defense: 0, min_depth: 1),
-    Monster(id: "pest", name: "pest", family: Vermin, elite: false,
+    Monster(id: "pest", name: "pest", name_fr: Masculine("le monstre"), plural: "pests", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 100, hp: 1, attack: 2, defense: 0, min_depth: 1),
 ]"#;
 

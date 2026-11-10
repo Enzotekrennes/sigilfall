@@ -16,6 +16,8 @@ use sigilfall_core::content::{Content, ContentError};
 const ENTRY: &str = "    Monster(
         id: \"{id}\",
         name: \"test creature\",
+        name_fr: Feminine(\"la créature\"),
+        plural: \"test creatures\", plural_fr: \"monstres\",
         family: Vermin,
         elite: false,
         speed: {speed},

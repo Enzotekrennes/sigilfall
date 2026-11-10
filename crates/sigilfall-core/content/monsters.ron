@@ -3,7 +3,17 @@
 //
 // - id:        stable key used by saves and spawn tables; lower-case letters,
 //              digits and underscores, starting with a letter. Never rename.
-// - name:      name shown to the player.
+// - name:      name shown to the player, in English.
+// - name_fr:   French name: the noun with its definite article, wrapped in
+//              its gender, such as Masculine("le rat d'ossuaire"),
+//              Feminine("la fiole") or Feminine("l'ombre"). The article is
+//              `le ` for a masculine noun, `la ` for a feminine one, `l'`
+//              before a vowel or a mute h; the sentences of the game are
+//              built from it ("l'ombre est brûlée", "un hiérophante").
+//              At most 24 characters without the article.
+// - plural:    name of several such creatures, in English, as the end
+//              screens count them ("2 ossuary rats").
+// - plural_fr: the same in French, without an article ("rats d'ossuaire").
 // - family:    Vermin, Acolyte, Homunculus, Eye or Spectre; gives the letter
 //              drawn on the map (lower case; upper case for the elite).
 // - elite:     true for the strong form of the family (upper-case letter).
@@ -33,6 +43,9 @@
     Monster(
         id: "ossuary_rat",
         name: "ossuary rat",
+        name_fr: Masculine("le rat d'ossuaire"),
+        plural: "ossuary rats",
+        plural_fr: "rats d'ossuaire",
         family: Vermin,
         elite: false,
         speed: 150,
@@ -44,6 +57,9 @@
     Monster(
         id: "wax_beetle",
         name: "wax beetle",
+        name_fr: Masculine("le scarabée de cire"),
+        plural: "wax beetles",
+        plural_fr: "scarabées de cire",
         family: Vermin,
         elite: false,
         speed: 75,
@@ -55,6 +71,9 @@
     Monster(
         id: "acolyte",
         name: "acolyte",
+        name_fr: Masculine("l'acolyte"),
+        plural: "acolytes",
+        plural_fr: "acolytes",
         family: Acolyte,
         elite: false,
         speed: 100,
@@ -66,6 +85,9 @@
     Monster(
         id: "homunculus",
         name: "homunculus",
+        name_fr: Masculine("l'homoncule"),
+        plural: "homunculi",
+        plural_fr: "homoncules",
         family: Homunculus,
         elite: false,
         speed: 100,
@@ -77,6 +99,9 @@
     Monster(
         id: "vigil_eye",
         name: "vigil eye",
+        name_fr: Masculine("l'œil veilleur"),
+        plural: "vigil eyes",
+        plural_fr: "yeux veilleurs",
         family: Eye,
         elite: false,
         speed: 50,
@@ -88,6 +113,9 @@
     Monster(
         id: "shade",
         name: "shade",
+        name_fr: Feminine("l'ombre"),
+        plural: "shades",
+        plural_fr: "ombres",
         family: Spectre,
         elite: false,
         speed: 125,
@@ -99,6 +127,9 @@
     Monster(
         id: "hierophant",
         name: "hierophant",
+        name_fr: Masculine("le hiérophante"),
+        plural: "hierophants",
+        plural_fr: "hiérophantes",
         family: Acolyte,
         elite: true,
         speed: 100,
@@ -110,6 +141,9 @@
     Monster(
         id: "lead_homunculus",
         name: "lead homunculus",
+        name_fr: Masculine("l'homoncule plombé"),
+        plural: "lead homunculi",
+        plural_fr: "homoncules plombés",
         family: Homunculus,
         elite: true,
         speed: 75,

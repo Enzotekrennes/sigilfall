@@ -20,8 +20,10 @@ use super::sigil::{Effect, Targeting};
 pub(super) struct SigilEntry {
     /// Stable identifier, not yet checked.
     pub(super) id: Option<String>,
-    /// Name shown to the player.
+    /// Name shown to the player, in English.
     pub(super) name: Option<String>,
+    /// French name.
+    pub(super) name_fr: Option<String>,
     /// Digits of the nodes to link, in order, not yet checked.
     pub(super) pattern: Option<Vec<u8>>,
     /// What the sigil does.
@@ -40,6 +42,7 @@ pub(super) struct SigilEntry {
 const FIELDS: &[&str] = &[
     "id",
     "name",
+    "name_fr",
     "pattern",
     "effect",
     "power",
@@ -56,6 +59,8 @@ pub(super) enum Field {
     Id,
     /// `name`
     Name,
+    /// `name_fr`
+    NameFr,
     /// `pattern`
     Pattern,
     /// `effect`
@@ -101,6 +106,7 @@ impl RawEntry for SigilEntry {
         match field {
             Field::Id => fill(&mut self.id, map.next_value()?, name),
             Field::Name => fill(&mut self.name, map.next_value()?, name),
+            Field::NameFr => fill(&mut self.name_fr, map.next_value()?, name),
             Field::Pattern => fill(&mut self.pattern, map.next_value()?, name),
             Field::Effect => fill(&mut self.effect, map.next_value()?, name),
             Field::Power => fill(&mut self.power, map.next_value()?, name),

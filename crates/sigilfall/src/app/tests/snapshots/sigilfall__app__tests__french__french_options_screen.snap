@@ -1,0 +1,29 @@
+---
+source: crates/sigilfall/src/app/tests/french.rs
+assertion_line: 510
+expression: screen(&app)
+---
+
+
+
+
+                                 O P T I O N S
+
+                       Glyphes      Unicode
+                       Couleurs     Auto · vraies couleurs
+                       Thème        Sombre
+                     › Langue       Français
+                       Retour
+
+                       Aperçu       @ v s ¡ § ▼ ▒▒▒···
+
+               Tous les textes du jeu, en anglais ou en français.
+
+
+
+
+
+
+
+
+ ↑↓ choisir   ←→ changer   Échap retour

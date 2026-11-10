@@ -29,6 +29,7 @@ const fn command_line(seed: Option<Seed>, ascii: bool) -> Cli {
         seed,
         daily: false,
         ascii,
+        lang: None,
     }
 }
 
@@ -37,6 +38,7 @@ const fn command_line(seed: Option<Seed>, ascii: bool) -> Cli {
 fn launch_with(folder: &ScratchFolder, cli: &Cli) -> App {
     App::launch_with_clock(
         ColorSupport::TrueColor,
+        Language::English,
         cli,
         &shipped_content(),
         folder.save_file(),
@@ -71,7 +73,12 @@ fn screen_rows(app: &App) -> Vec<String> {
 
 /// What the title screen writes beside "Continue" for `game`.
 fn saved_detail(game: &Game) -> String {
-    messages::saved_run(game.depth(), game.player_turns() + 1, '·')
+    messages::saved_run(
+        Language::English,
+        game.depth(),
+        game.player_turns() + 1,
+        '·',
+    )
 }
 
 /// Presses each key of `codes`, in order.
@@ -201,7 +208,10 @@ fn continue_resumes_the_saved_game_exactly() {
 
     assert_eq!(app.state(), State::Playing);
     assert_eq!(state_of(app.game()), state_of(&saved));
-    assert_eq!(log_lines(&app), vec![messages::welcome_back()]);
+    assert_eq!(
+        log_lines(&app),
+        vec![messages::welcome_back(Language::English)]
+    );
     assert!(!app.has_saved_game(), "resumed, not offered twice");
 }
 
@@ -217,7 +227,10 @@ fn new_game_without_a_save_starts_at_once_on_a_random_seed() {
 
     assert_eq!(first.state(), State::Playing);
     assert_eq!(first.game().player_turns(), 0);
-    assert_eq!(log_lines(&first), vec![messages::welcome()]);
+    assert_eq!(
+        log_lines(&first),
+        vec![messages::welcome(Language::English)]
+    );
     // Two draws of 64 random bits are equal once in 2^64 runs.
     assert_ne!(first.game().seed(), second.game().seed());
 }
@@ -273,7 +286,7 @@ fn new_game_with_a_save_asks_first_and_keeps_the_save_unless_told_otherwise() {
     assert!(!app.has_saved_game());
     assert_eq!(app.game().player_turns(), 0);
     assert_ne!(app.game().seed(), saved.seed());
-    assert_eq!(log_lines(&app), vec![messages::welcome()]);
+    assert_eq!(log_lines(&app), vec![messages::welcome(Language::English)]);
 }
 
 #[test]
@@ -529,6 +542,7 @@ fn title_in(options: Options, detected: ColorSupport, label: &str) -> (App, Buff
     folder.options_file().write(&options).unwrap();
     let app = App::launch_with_clock(
         detected,
+        Language::English,
         &command_line(None, false),
         &shipped_content(),
         folder.save_file(),
@@ -649,6 +663,7 @@ fn every_title_step_keeps_the_terminal_colours_in_monochrome() {
     let (folder, _) = folder_with_a_save("title-monochrome");
     let mut app = App::launch_with_clock(
         ColorSupport::None,
+        Language::English,
         &command_line(None, false),
         &shipped_content(),
         folder.save_file(),

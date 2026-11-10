@@ -44,7 +44,7 @@ const LAST_SECOND_OF_NOV_8: u64 = ManualClock::START + 12 * 3600 - 1;
 
 /// A monster that kills the player in one blow.
 const EXECUTIONER: &str = r#"[
-    Monster(id: "executioner", name: "executioner", family: Acolyte, elite: true,
+    Monster(id: "executioner", name: "executioner", name_fr: Masculine("le monstre"), plural: "executioners", plural_fr: "monstres", family: Acolyte, elite: true,
         speed: 100, hp: 999, attack: 99, defense: 0, min_depth: 1),
 ]"#;
 
@@ -64,6 +64,7 @@ const fn command_line(daily: bool) -> Cli {
         seed: None,
         daily,
         ascii: false,
+        lang: None,
     }
 }
 
@@ -72,6 +73,7 @@ const fn command_line(daily: bool) -> Cli {
 fn launch_at(folder: &ScratchFolder, daily: bool, clock: &ManualClock) -> anyhow::Result<App> {
     App::launch_with_clock(
         ColorSupport::TrueColor,
+        Language::English,
         &command_line(daily),
         &shipped_content(),
         folder.save_file(),
@@ -89,7 +91,7 @@ fn screen_rows(app: &App) -> Vec<String> {
 fn daily_row(app: &App) -> String {
     screen_rows(app)
         .into_iter()
-        .find(|row| row.contains(messages::DAILY_ITEM))
+        .find(|row| row.contains(messages::ENGLISH.daily_item))
         .expect("a Daily line")
 }
 
@@ -1007,9 +1009,11 @@ fn the_line_is_plain_ascii_in_every_mode_and_with_the_ascii_option() {
                 glyphs,
                 colors,
                 appearance,
+                language: Language::English,
             },
             detected: ColorSupport::TrueColor,
             forced_ascii: false,
+            forced_language: None,
         };
         let mut shown = App::with_game(settings.theme(), game.clone(), content.clone());
         shown.handle_key(press(KeyCode::Char('.')));

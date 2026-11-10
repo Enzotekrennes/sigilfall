@@ -157,7 +157,7 @@ mod tests {
             .iter()
             .map(|(id, pattern)| {
                 format!(
-                    "Sigil(id: \"{id}\", name: \"{id}\", pattern: {pattern}, effect: Damage, \
+                    "Sigil(id: \"{id}\", name: \"{id}\", name_fr: \"{id}\", pattern: {pattern}, effect: Damage, \
                      power: 1, targeting: NearestEnemy, min_depth: 1, known_at_start: false)"
                 )
             })

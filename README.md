@@ -18,7 +18,9 @@ more often, and the tenth floor is always one. There are no stairs on the
 tenth floor but a seal, `◎` on the map (`0` in ASCII): break it to win the
 run. Each run is generated from a seed you can share, so a friend can play
 the same dungeon, and every day brings a daily dungeon, the same for every
-player of the same version of the game on that UTC date.
+player of the same version of the game on that UTC date. The whole game is
+written in English and in French: it speaks the language of your system
+until you choose one in the options.
 
 ## Install
 
@@ -65,6 +67,7 @@ saved and resumed, even on a later day.
 | `--seed <SEED>` | Start a game of this seed at once, without the title screen. The seed is a number such as `42`, or the form the game shows, such as `7F3A-91C2-0B5E-D4A8`. Refused while a game is saved, so that game is never lost: continue it, or abandon it from the title screen, first. |
 | `--daily` | Start the daily dungeon at once, without the title screen: the same dungeon for every player of the same version of the game on the same UTC date, a new one each day at midnight UTC. Cannot be combined with `--seed`. Refused while a game is saved, as `--seed` is. |
 | `--ascii` | Draw with plain ASCII characters instead of Unicode glyphs, for this session only, whatever the Glyphs option says. |
+| `--lang <LANG>` | Play in `en` (English) or `fr` (French) for this session only, whatever the Language option says. |
 | `--help`, `--version` | Print the help or the version. |
 
 ### Keys
@@ -142,10 +145,14 @@ of a turn for each node linked, and the monsters keep moving meanwhile.
 
 ### Options
 
-**Glyphs** (Unicode or ASCII), **Colours** (Auto, 16 colours or Monochrome)
-and **Theme** (dark, or light for 24-bit colour terminals) apply at once and
-are kept for the next sessions. Auto follows the terminal and `NO_COLOR`;
-16 colours and Monochrome apply whatever they say.
+**Glyphs** (Unicode or ASCII), **Colours** (Auto, 16 colours or Monochrome),
+**Theme** (dark, or light for 24-bit colour terminals) and **Language**
+(English or Français) apply at once and are kept for the next sessions. Auto
+follows the terminal and `NO_COLOR`; 16 colours and Monochrome apply
+whatever they say. Until you choose a language, the game speaks French on a
+system set to French and English otherwise. The line to share on the end
+screens stays in English, so two players' lines compare whatever their
+language; `--help` is in English, as for most command-line tools.
 
 ## Files
 

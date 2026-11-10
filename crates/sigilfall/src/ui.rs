@@ -228,6 +228,7 @@ pub(crate) fn draw_centred_rows(
 /// centred in `area` and wrapped to its width, in the theme's text style.
 fn render_too_small(frame: &mut Frame, area: Rect, theme: &Theme) {
     let message = messages::enlarge_terminal(
+        theme.language,
         (MIN_WIDTH, MIN_HEIGHT),
         (area.width, area.height),
         theme.glyphs.dimension,

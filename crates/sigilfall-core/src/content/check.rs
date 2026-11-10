@@ -10,8 +10,12 @@ use std::collections::HashMap;
 
 use super::entry_file::EntryKind;
 use super::error::{ContentError, FieldProblem};
+use super::french::{FrenchNoun, FrenchNounEntry, NounProblem, parse_noun};
 use super::{MAX_DEPTH, MAX_NAME_LENGTH};
 use crate::generation::FIRST_DEPTH;
+
+/// Name of the field that holds the French name of an entry.
+pub(super) const FRENCH_NAME_FIELD: &str = "name_fr";
 
 /// Checks the fields of one entry, building errors that name it.
 pub(super) struct EntryCheck {
@@ -67,18 +71,67 @@ impl EntryCheck {
     /// refusing a missing or blank one, or one longer than
     /// [`MAX_NAME_LENGTH`] characters.
     pub(super) fn name(&self, value: Option<String>) -> Result<String, ContentError> {
-        let name = self.text(value, "name")?;
+        self.name_in(value, "name")
+    }
+
+    /// Returns the French name of a sigil in `value`, the field `name_fr`,
+    /// under the rules of [`EntryCheck::name`].
+    pub(super) fn french_name(&self, value: Option<String>) -> Result<String, ContentError> {
+        self.name_in(value, FRENCH_NAME_FIELD)
+    }
+
+    /// Returns the French name of a monster or an item in `value`, the
+    /// field `name_fr`, refusing a missing one, one whose article is
+    /// missing or does not suit its gender, a blank noun, or a noun longer
+    /// than [`MAX_NAME_LENGTH`] characters (the article apart).
+    pub(super) fn french_noun(
+        &self,
+        value: Option<FrenchNounEntry>,
+    ) -> Result<FrenchNoun, ContentError> {
+        let entry = self.required(value, FRENCH_NAME_FIELD)?;
+        let written = match &entry {
+            FrenchNounEntry::Masculine(text) | FrenchNounEntry::Feminine(text) => text.clone(),
+        };
+        let noun = parse_noun(entry).map_err(|problem| {
+            self.fail(
+                FRENCH_NAME_FIELD,
+                match problem {
+                    NounProblem::BadArticle => FieldProblem::BadFrenchArticle { name: written },
+                    NounProblem::Empty => FieldProblem::Empty,
+                },
+            )
+        })?;
+        self.bounded_name(noun.noun(), FRENCH_NAME_FIELD)?;
+        Ok(noun)
+    }
+
+    /// Returns the name in `value`, the field `field` shown to the player,
+    /// refusing a missing or blank one, or one longer than
+    /// [`MAX_NAME_LENGTH`] characters.
+    pub(super) fn name_in(
+        &self,
+        value: Option<String>,
+        field: &'static str,
+    ) -> Result<String, ContentError> {
+        let name = self.text(value, field)?;
+        self.bounded_name(&name, field)?;
+        Ok(name)
+    }
+
+    /// Refuses `name`, the value of `field`, when it is longer than
+    /// [`MAX_NAME_LENGTH`] characters.
+    fn bounded_name(&self, name: &str, field: &'static str) -> Result<(), ContentError> {
         let length = name.chars().count();
         if length > MAX_NAME_LENGTH {
             return Err(self.fail(
-                "name",
+                field,
                 FieldProblem::TooLong {
                     length,
                     max: MAX_NAME_LENGTH,
                 },
             ));
         }
-        Ok(name)
+        Ok(())
     }
 
     /// Returns the identifier in `value`, refusing a missing one or one that

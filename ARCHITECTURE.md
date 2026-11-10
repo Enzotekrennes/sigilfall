@@ -17,7 +17,9 @@ library, and the terminal application in a binary that depends on it.
   rules never draw or read a key, and every rule is tested without a
   terminal.
 - **The core produces no text.** `Game::submit` returns `Event`s, plain
-  data; the binary turns them into English sentences (`messages`).
+  data; the binary turns them into English or French sentences
+  (`messages`). The only words the core holds are the names of the content,
+  in both languages, with the gender and article French needs.
 - Dependencies point from the binary to the core, never the other way.
 - The binary decides nothing about the game: it maps keys to `Action`s,
   submits them, and draws the state it reads back.
@@ -32,7 +34,8 @@ library, and the terminal application in a binary that depends on it.
 | `actor` | `Actor` and `ActorId`: the player and the monsters, their position, speed, energy, hit points, essence and held turns. |
 | `ai` | `choose_action`: a monster chases the player it sees by A*, goes to where it last saw it, then waits. |
 | `combat` | The player's starting values and the damage formula of a blow. |
-| `content` | `Content`: the monster, sigil and item definitions, the spawn tables and the floor kinds, parsed from the RON files embedded in the crate and validated, with errors naming the file, entry, field and line. |
+| `content` | `Content`: the monster, sigil and item definitions, the spawn tables and the floor kinds, parsed from the RON files embedded in the crate and validated, with errors naming the file, entry, field and line. Every entry is named in English and in French (`name`, `name_fr`; a creature also in the plural, `plural`, `plural_fr`): a name missing in either language is a loading error. |
+| `content::french` | `FrenchNoun` and `Gender`: the French name of a creature or an item, written with its definite article (`Masculine("le hiérophante")`, `Feminine("l'ombre")`), so the elision is the content's choice, never guessed from spelling. |
 | `content::check` | Field checks shared by every kind of entry. |
 | `content::entry_file` | Reads a content file's RON text into raw entries, keeping their line numbers. |
 | `content::error` | `ContentError`, every way a content file can be wrong. |
@@ -79,16 +82,19 @@ library, and the terminal application in a binary that depends on it.
 | Module | Responsibility |
 |---|---|
 | `main` | Reads the command line, prepares and restores the terminal (also on a panic), runs the application and saves the game on leaving. |
-| `cli` | `Cli`: the `--seed`, `--daily` and `--ascii` options, parsed by clap. |
+| `cli` | `Cli`: the `--seed`, `--daily`, `--ascii` and `--lang` options, parsed by clap; the help is in English, as for most command-line tools. |
+| `language` | `Language` (English or French), its default read from the system's locale (`sys-locale`, `Language::from_locale`), and the order the options screen goes through. |
 | `app` | `App`: the screen state machine (title, seed entry, confirmation, options, game, sigil overlay, inventory, end screen), the handling of each key, and the event loop. |
 | `app::exploring` | The walk of automatic exploration (`x`): when it stops, its step limit and the pause between steps. |
 | `input` | The keymaps: one function per kind of screen, from a key press to a command. Only presses count, not releases. |
 | `clock` | Where the application reads the wall-clock time, for the end screen's short grace period only; tests replace it with a manual clock. Game time never depends on it. |
 | `casting` | The sigil overlay's own state: the trace being drawn, the direction prompt, the verdict of a cast. |
-| `messages` | Every English sentence and label the player reads, including the description of each `Event`. |
+| `messages` | The catalogue: every sentence and label the player reads, in English and in French, including the description of each `Event` and the notices about files (`FileNotice`, worded when shown). |
+| `messages::labels` | `Labels`, the fixed texts of every screen, with an `ENGLISH` and a `FRENCH` value the compiler requires to be complete. |
+| `messages::grammar` | Articles, elision and agreement: how a sentence names a creature or an item in each language. |
 | `message_log` | The message log: lines with a tone, oldest first, with a bounded history. |
-| `persist` | The data folder (`SIGILFALL_DATA_DIR` or the system's), `save.ron` and `options.ron`, written atomically. |
-| `theme` | The colour tokens (see [Visual identity](#visual-identity)), the four colour modes and the light theme, colour detection, and the player's options. |
+| `persist` | The data folder (`SIGILFALL_DATA_DIR` or the system's), `save.ron` and `options.ron`, written atomically; why a file could not be read, as facts (`SaveRefusal`, `OptionsProblem`) that `messages` words. |
+| `theme` | The colour tokens (see [Visual identity](#visual-identity)), the four colour modes and the light theme, colour detection, the player's options, and the language the theme's screens write in. |
 | `theme::glyphs` | Every character the screens draw with, in Unicode and in ASCII. |
 | `ui` | Drawing with ratatui from read-only state: picks the screen for the terminal's size (a resize message under 80 × 24). |
 | `ui::camera` | Which part of the 80 × 40 floor the map area shows, centred on the player. |
@@ -101,7 +107,7 @@ library, and the terminal application in a binary that depends on it.
 | `ui::death` | The death summary: cause, depth, kills, sigils cast, the seed to replay; and the summary it shares with the victory screen. |
 | `ui::victory` | The victory screen, once the seal is broken: the same summary as a death, under its own title and line. |
 | `ui::title` | The title screen, its menu, the seed entry and the confirmation before a saved game is abandoned. |
-| `ui::options` | The options screen. |
+| `ui::options` | The options screen: glyphs, colours, theme and language, each language named in itself. |
 
 ## Flows
 
@@ -192,7 +198,7 @@ Each line gives the choice, then the alternative set aside.
 | D7 | Sigils traced on a 3 × 3 keypad grid, validated by Enter, cancelled by Escape, with a time cost per stroke and patterns learnt from carved glyphs. | Spells chosen from a menu, or single-use scrolls. |
 | D8 | Content embedded in the binary and validated at start-up. | A data folder read at run time, which `cargo install` would not copy. |
 | D9 | `unsafe` forbidden, documentation required on every item, clippy and rustdoc warnings as errors. | The default lints. |
-| D10 | Game text in English, centralised in `messages`. | French, or two languages from the start. |
+| D10 | Game text in English, centralised in `messages` (French joined it later, see D27). | French, or two languages from the start. |
 | D11 | An 80 × 40 floor, larger than the screen, seen through a camera. | A floor the size of the screen, with about 18 rows of map at 80 × 24. |
 | D12 | `▒` walls, verdigris magic with a gold player, the grimoire visible while tracing. | `█` or `═ ║` walls, amethyst magic, tracing from memory. |
 | D13 | GitHub repository created at the end of the build, private then public. | A private repository from the first week. |
@@ -209,6 +215,7 @@ Each line gives the choice, then the alternative set aside.
 | D24 | Healing at depth: the healing draughts weigh 6 instead of 3 from floor 5, in `spawns.ron` only (1.8 draughts per floor instead of 1.3). Draughts alone left the careful bot's median at floor 5, so the elites of floors 5 to 7 were weakened in data too (lead homunculus 28/6/4 → 16/5/2 in hit points, attack and defense, hierophant 20/5/2 → 14/4/1), deep elite weights capped at 2, and the beetle and the rat left out of the deepest floors: median floor 7 and 3 victories in 80 runs, a target of floor 6-7 and 2-10 % victories that `balance.rs` holds. A tuning of data, not a new rule. | More items on every floor; passive healing. |
 | D25 | The "IN VIEW" block gives each monster's current and maximum hit points (for a kind seen several times, the most wounded one), so the player chooses a target and the moment to flee on information they can read. | Hit points in the message log only. |
 | D26 | Unlimited rest: waiting regenerates essence at no cost, so Recall heals without limit out of a fight. Monsters never come back and the challenge lies in the fights, where time is short; a common choice of the genre, with no new rule to balance. | Hunger, wandering monsters, or essence regained only by exploring. |
+| D27 | Two languages, English and French, for every text the player reads: a catalogue in `messages`, one function per sentence with both wordings side by side in a `match`, and the fixed texts in a `Labels` struct whose two values the compiler requires to be complete; content names in the RON files, both languages required at loading, French written with its article and gender (and a plural for creatures). The language follows the system's locale until the player picks one in the options, which keeps it; `--lang en|fr` sets it for a session; the theme carries it to every screen. French follows French typography (no-break space before `: ; ! ?`, which the wrapping never breaks). The line to share and the seed stay the same in both languages, so players compare runs as text; `--help` and the errors written on the error output by the system stay in English. A test renders every screen in French and fails on any word of an English witness list. | A translation framework (Fluent, gettext) and files read at run time; names of the content in a table of the binary, away from the entries they name; a translated line to share. |
 
 ## Visual identity
 
@@ -251,6 +258,9 @@ its own. The rules below are the ones those values follow.
   shows only its landmarks (walls, stairs, the seal, carved glyphs), dimmer;
   a cell never seen stays empty. Creatures and items are drawn only in view,
   the player over everything.
+- **Two languages.** Every screen fits 80 × 24 in English and in French;
+  French labels were chosen to fit the same places, the game's key help
+  included.
 - **Layout at 80 × 24.** The status line on the first row; the map, 58 × 16,
   with the side panel (21 columns and a border) on its right; the log, five
   lines under a separator into which the panel's border comes down; the key

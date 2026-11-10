@@ -246,13 +246,13 @@ fn the_ascii_status_line_and_help_stay_plain_ascii() {
 /// Creatures that never get to act (speed 1) and die in one blow, in four
 /// tiers that [`TIER_RULES`] keeps on disjoint bands of floors.
 const MOTES: &str = r#"
-    Monster(id: "mote_one", name: "mote one", family: Vermin, elite: false,
+    Monster(id: "mote_one", name: "mote one", name_fr: Masculine("le monstre"), plural: "mote ones", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 1, hp: 1, attack: 0, defense: 0, min_depth: 1),
-    Monster(id: "mote_two", name: "mote two", family: Vermin, elite: false,
+    Monster(id: "mote_two", name: "mote two", name_fr: Masculine("le monstre"), plural: "mote twos", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 1, hp: 1, attack: 0, defense: 0, min_depth: 2),
-    Monster(id: "mote_three", name: "mote three", family: Vermin, elite: false,
+    Monster(id: "mote_three", name: "mote three", name_fr: Masculine("le monstre"), plural: "mote threes", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 1, hp: 1, attack: 0, defense: 0, min_depth: 4),
-    Monster(id: "mote_four", name: "mote four", family: Vermin, elite: false,
+    Monster(id: "mote_four", name: "mote four", name_fr: Masculine("le monstre"), plural: "mote fours", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 1, hp: 1, attack: 0, defense: 0, min_depth: 7),
 "#;
 
@@ -260,7 +260,7 @@ const MOTES: &str = r#"
 /// by hand and only has a rule for floor 10, which the tests that use it
 /// never reach.
 const BITER: &str = r#"
-    Monster(id: "biter", name: "biter", family: Vermin, elite: false,
+    Monster(id: "biter", name: "biter", name_fr: Masculine("le monstre"), plural: "biters", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 100, hp: 5, attack: 6, defense: 0, min_depth: 1),
 "#;
 

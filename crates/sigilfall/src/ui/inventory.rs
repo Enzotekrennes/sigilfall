@@ -26,6 +26,7 @@ use sigilfall_core::item::{Item, ItemId, ItemRefusal};
 
 use super::log::wrap;
 use super::sigil::{draw_frame, draw_lines, overlay_area};
+use crate::language::Language;
 use crate::messages;
 use crate::theme::Theme;
 
@@ -167,7 +168,7 @@ pub fn render(
         return;
     }
     let items: Vec<(ItemId, &Item)> = game.inventory().collect();
-    draw_frame(buffer, area, frame, messages::INVENTORY_TITLE, theme);
+    draw_frame(buffer, area, frame, theme.labels().inventory_title, theme);
     draw_capacity(buffer, frame, items.len(), theme);
     let inner = Rect {
         x: frame.x + 1,
@@ -177,7 +178,7 @@ pub fn render(
     };
     let list = list_area(inner);
     if items.is_empty() {
-        let lines = messages::empty_inventory()
+        let lines = messages::empty_inventory(theme.language)
             .iter()
             .map(|text| empty_state_line(text, theme))
             .collect();
@@ -198,7 +199,7 @@ pub fn render(
         }
     }
     if let Some((item, reason)) = screen.refusal() {
-        let text = messages::item_refusal(game, item, reason);
+        let text = messages::item_refusal(theme.language, game, item, reason);
         draw_notice(buffer, list, &text, theme);
     }
 }
@@ -281,7 +282,7 @@ fn item_lines(
     let glyphs = &theme.glyphs;
     let name_width = items
         .iter()
-        .map(|(_, item)| item.definition().name().chars().count())
+        .map(|(_, item)| item_name(item, theme).chars().count())
         .max()
         .unwrap_or(0);
     items
@@ -298,7 +299,7 @@ fn item_lines(
             } else {
                 ' '
             };
-            let name = definition.name();
+            let name = item_name(item, theme);
             let padding = name_width - name.chars().count() + NAME_GAP;
             Line::from(vec![
                 Span::styled(format!("{marker} "), theme.text),
@@ -306,12 +307,20 @@ fn item_lines(
                 Span::styled(format!(" {}", glyphs.item(definition.family())), theme.item),
                 Span::styled(format!(" {name}{}", " ".repeat(padding)), theme.text),
                 Span::styled(
-                    messages::item_summary(definition, known, glyphs.separator),
+                    messages::item_summary(theme.language, definition, known, glyphs.separator),
                     theme.text_muted,
                 ),
             ])
         })
         .collect()
+}
+
+/// The name of `item` in the language of `theme`, without an article.
+fn item_name<'item>(item: &'item Item, theme: &Theme) -> &'item str {
+    match theme.language {
+        Language::English => item.definition().name(),
+        Language::French => item.definition().french_name().noun(),
+    }
 }
 
 /// One line of the empty state, in `text_muted`, with the `{glyph}` mark

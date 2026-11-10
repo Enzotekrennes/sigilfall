@@ -10,6 +10,7 @@ use serde::de::MapAccess;
 
 use super::MONSTERS_FILE;
 use super::entry_file::{EntryKind, RawEntry, fill};
+use super::french::FrenchNounEntry;
 use super::monster::Family;
 
 /// One entry of the monster file as written, before validation.
@@ -20,8 +21,14 @@ use super::monster::Family;
 pub(super) struct MonsterEntry {
     /// Stable identifier, not yet checked.
     pub(super) id: Option<String>,
-    /// Name shown to the player.
+    /// Name shown to the player, in English.
     pub(super) name: Option<String>,
+    /// French name, with its article and gender.
+    pub(super) name_fr: Option<FrenchNounEntry>,
+    /// Name of several, in English.
+    pub(super) plural: Option<String>,
+    /// Name of several, in French, without an article.
+    pub(super) plural_fr: Option<String>,
     /// Family of the creature.
     pub(super) family: Option<Family>,
     /// Whether this is the elite form of its family.
@@ -42,6 +49,9 @@ pub(super) struct MonsterEntry {
 const FIELDS: &[&str] = &[
     "id",
     "name",
+    "name_fr",
+    "plural",
+    "plural_fr",
     "family",
     "elite",
     "speed",
@@ -59,6 +69,12 @@ pub(super) enum Field {
     Id,
     /// `name`
     Name,
+    /// `name_fr`
+    NameFr,
+    /// `plural`
+    Plural,
+    /// `plural_fr`
+    PluralFr,
     /// `family`
     Family,
     /// `elite`
@@ -106,6 +122,9 @@ impl RawEntry for MonsterEntry {
         match field {
             Field::Id => fill(&mut self.id, map.next_value()?, name),
             Field::Name => fill(&mut self.name, map.next_value()?, name),
+            Field::NameFr => fill(&mut self.name_fr, map.next_value()?, name),
+            Field::Plural => fill(&mut self.plural, map.next_value()?, name),
+            Field::PluralFr => fill(&mut self.plural_fr, map.next_value()?, name),
             Field::Family => fill(&mut self.family, map.next_value()?, name),
             Field::Elite => fill(&mut self.elite, map.next_value()?, name),
             Field::Speed => fill(&mut self.speed, map.next_value()?, name),

@@ -217,9 +217,9 @@ fn health_block(game: &Game, width: u16, theme: &Theme) -> Vec<Line<'static>> {
         format!("{hp}/{max_hp}")
     };
     let gap = usize::from(width)
-        .saturating_sub(messages::HP_LABEL.chars().count() + value.chars().count());
+        .saturating_sub(theme.labels().hp_label.chars().count() + value.chars().count());
     let figures = Line::from(vec![
-        Span::styled(messages::HP_LABEL, theme.text_muted),
+        Span::styled(theme.labels().hp_label, theme.text_muted),
         Span::raw(" ".repeat(gap)),
         Span::styled(value, style),
     ]);
@@ -273,7 +273,7 @@ fn essence_line(game: &Game, width: u16, theme: &Theme) -> Line<'static> {
     } else {
         (format!("{essence}/{max}"), theme.sigil_stroke)
     };
-    label_and_value(messages::ESSENCE_LABEL, value, style, width, theme)
+    label_and_value(theme.labels().essence_label, value, style, width, theme)
 }
 
 /// Returns how many rows the sigil names take, out of the `shared` rows
@@ -306,7 +306,7 @@ fn sigils_block(
     let known = game.grimoire().sigils();
     let count = format!("{}/{}", known.len(), content.sigils().len());
     let mut lines = vec![label_and_value(
-        messages::SIGILS_TITLE,
+        theme.labels().sigils_title,
         count,
         theme.text,
         width,
@@ -316,20 +316,20 @@ fn sigils_block(
         return lines;
     }
     if known.is_empty() {
-        lines.push(Line::styled(messages::NO_SIGIL_YET, theme.text_muted));
+        lines.push(Line::styled(theme.labels().no_sigil_yet, theme.text_muted));
         return lines;
     }
     let overflows = known.len() > rows;
     let shown = if overflows { rows - 1 } else { known.len() };
-    lines.extend(
-        known
-            .iter()
-            .take(shown)
-            .map(|sigil| Line::styled(sigil.name().to_owned(), theme.text)),
-    );
+    lines.extend(known.iter().take(shown).map(|sigil| {
+        Line::styled(
+            messages::sigil_def_name(theme.language, sigil).to_owned(),
+            theme.text,
+        )
+    }));
     if overflows {
         lines.push(Line::styled(
-            messages::more_in_view(known.len() - shown),
+            messages::more_in_view(theme.language, known.len() - shown),
             theme.text_muted,
         ));
     }
@@ -418,7 +418,7 @@ fn in_view_entries(game: &Game, content: &Content, theme: &Theme) -> Vec<Entry> 
     let mut entries = vec![Entry {
         glyph: theme.glyphs.player,
         glyph_style: theme.player,
-        name: messages::PLAYER_IN_VIEW.to_owned(),
+        name: theme.labels().player_in_view.to_owned(),
         count: 1,
         health: None,
     }];
@@ -452,7 +452,7 @@ fn in_view_entries(game: &Game, content: &Content, theme: &Theme) -> Vec<Entry> 
         Entry {
             glyph: kind.glyph,
             glyph_style: kind.style,
-            name: messages::monster_name(content, kind.definition).to_owned(),
+            name: messages::monster_name(theme.language, content, kind.definition).to_owned(),
             count: kind.count,
             health: Some((format!("{}/{}", kind.hp, kind.max_hp), level.style(theme))),
         }
@@ -468,7 +468,7 @@ fn in_view_entries(game: &Game, content: &Content, theme: &Theme) -> Vec<Entry> 
     entries.extend(items.into_iter().map(|(definition, glyph, count)| Entry {
         glyph,
         glyph_style: theme.item,
-        name: messages::item_name(content, definition).to_owned(),
+        name: messages::item_name(theme.language, content, definition).to_owned(),
         count,
         health: None,
     }));
@@ -482,13 +482,13 @@ fn in_view_entries(game: &Game, content: &Content, theme: &Theme) -> Vec<Entry> 
             unread.len(),
             theme.glyphs.engraving_unread,
             theme.engraving_unread,
-            messages::UNREAD_GLYPH_IN_VIEW,
+            theme.labels().unread_glyph_in_view,
         ),
         (
             read.len(),
             theme.glyphs.engraving_read,
             theme.engraving_read,
-            messages::READ_GLYPH_IN_VIEW,
+            theme.labels().read_glyph_in_view,
         ),
     ];
     entries.extend(glyphs.into_iter().filter(|(count, ..)| *count > 0).map(
@@ -505,13 +505,13 @@ fn in_view_entries(game: &Game, content: &Content, theme: &Theme) -> Vec<Entry> 
             Tile::StairsDown,
             theme.glyphs.stairs,
             theme.stairs,
-            messages::STAIRS_IN_VIEW,
+            theme.labels().stairs_in_view,
         ),
         (
             Tile::Seal,
             theme.glyphs.seal,
             theme.seal,
-            messages::SEAL_IN_VIEW,
+            theme.labels().seal_in_view,
         ),
     ];
     for (tile, glyph, glyph_style, name) in ways_down {
@@ -557,7 +557,7 @@ fn in_view_lines(
     if rows == 0 {
         return Vec::new();
     }
-    let mut lines = vec![Line::styled(messages::IN_VIEW_TITLE, theme.text_muted)];
+    let mut lines = vec![Line::styled(theme.labels().in_view_title, theme.text_muted)];
     // Rows under the title; when the entries overflow them, the last one
     // tells how many entries it replaces.
     let room = rows - 1;
@@ -581,7 +581,7 @@ fn in_view_lines(
     }
     if overflows && room > 0 {
         lines.push(Line::styled(
-            messages::more_in_view(total - shown),
+            messages::more_in_view(theme.language, total - shown),
             theme.text_muted,
         ));
     }
@@ -727,11 +727,11 @@ mod tests {
 
     /// Three kinds of monsters, for the "in view" list.
     const THREE_KINDS: &str = r#"[
-        Monster(id: "rat", name: "rat", family: Vermin, elite: false,
+        Monster(id: "rat", name: "rat", name_fr: Masculine("le monstre"), plural: "rats", plural_fr: "monstres", family: Vermin, elite: false,
             speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
-        Monster(id: "eye", name: "eye", family: Eye, elite: false,
+        Monster(id: "eye", name: "eye", name_fr: Masculine("le monstre"), plural: "eyes", plural_fr: "monstres", family: Eye, elite: false,
             speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
-        Monster(id: "shade", name: "shade", family: Spectre, elite: false,
+        Monster(id: "shade", name: "shade", name_fr: Masculine("le monstre"), plural: "shades", plural_fr: "monstres", family: Spectre, elite: false,
             speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
     ]"#;
 
@@ -845,11 +845,11 @@ mod tests {
     /// to move or strike more than once in a few turns. A long-named kind
     /// and a shade complete the list.
     const STURDY_KINDS: &str = r#"[
-        Monster(id: "rat", name: "rat", family: Vermin, elite: false,
+        Monster(id: "rat", name: "rat", name_fr: Masculine("le monstre"), plural: "rats", plural_fr: "monstres", family: Vermin, elite: false,
             speed: 1, hp: 8, attack: 0, defense: 4, min_depth: 1),
-        Monster(id: "lead", name: "lead homunculus", family: Homunculus,
+        Monster(id: "lead", name: "lead homunculus", name_fr: Masculine("le monstre"), plural: "lead homunculuss", plural_fr: "monstres", family: Homunculus,
             elite: true, speed: 1, hp: 28, attack: 0, defense: 4, min_depth: 1),
-        Monster(id: "shade", name: "shade", family: Spectre, elite: false,
+        Monster(id: "shade", name: "shade", name_fr: Masculine("le monstre"), plural: "shades", plural_fr: "monstres", family: Spectre, elite: false,
             speed: 1, hp: 7, attack: 0, defense: 4, min_depth: 1),
     ]"#;
 
@@ -1128,11 +1128,11 @@ mod sharing_tests {
     fn learned_room(monsters: &[(&str, i32)]) -> (Game, Content) {
         let content = Content::parse(
             r#"[
-            Monster(id: "rat", name: "rat", family: Vermin, elite: false,
+            Monster(id: "rat", name: "rat", name_fr: Masculine("le monstre"), plural: "rats", plural_fr: "monstres", family: Vermin, elite: false,
                 speed: 1, hp: 1, attack: 0, defense: 0, min_depth: 1),
-            Monster(id: "eye", name: "eye", family: Eye, elite: false,
+            Monster(id: "eye", name: "eye", name_fr: Masculine("le monstre"), plural: "eyes", plural_fr: "monstres", family: Eye, elite: false,
                 speed: 1, hp: 1, attack: 0, defense: 0, min_depth: 1),
-            Monster(id: "shade", name: "shade", family: Spectre, elite: false,
+            Monster(id: "shade", name: "shade", name_fr: Masculine("le monstre"), plural: "shades", plural_fr: "monstres", family: Spectre, elite: false,
                 speed: 1, hp: 1, attack: 0, defense: 0, min_depth: 1),
         ]"#,
         )

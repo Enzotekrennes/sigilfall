@@ -1,5 +1,6 @@
 ---
 source: crates/sigilfall/src/app/tests/death_summary.rs
+assertion_line: 483
 expression: text
 ---
                                                                                 
@@ -10,7 +11,7 @@ expression: text
                                                                                 
                       Depth reached ....... 1                                   
                       Turns ............... 8                                   
-                      Creatures slain ..... 6   2 ash wisp                      
+                      Creatures slain ..... 6   2 ash wisps                     
                                                 1 cave gnat                     
                                                 1 dust mite                     
                                                 and 2 more                      

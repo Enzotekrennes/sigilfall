@@ -1,5 +1,6 @@
 ---
 source: crates/sigilfall/src/app/tests/death_summary.rs
+assertion_line: 279
 expression: "rows.join(\"\\n\")"
 ---
                                                                                 
@@ -10,9 +11,9 @@ expression: "rows.join(\"\\n\")"
                                                                                 
                      Depth reached ....... 1                                    
                      Turns ............... 14                                   
-                     Creatures slain ..... 12   4 ash wisp                      
-                                                3 cave gnat                     
-                                                2 wax moth                      
+                     Creatures slain ..... 12   4 ash wisps                     
+                                                3 cave gnats                    
+                                                2 wax moths                     
                                                 and 3 more                      
                      Glyphs learnt ....... 0                                    
                      Sigils cast ......... 0                                    

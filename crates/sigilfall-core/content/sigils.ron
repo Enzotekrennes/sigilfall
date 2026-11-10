@@ -4,7 +4,9 @@
 //
 // - id:        stable key used by saves and the grimoire; lower-case letters,
 //              digits and underscores, starting with a letter. Never rename.
-// - name:      name shown to the player.
+// - name:      name shown to the player, in English.
+// - name_fr:   name shown to the player in French, a proper noun written
+//              without an article.
 // - pattern:   the nodes to link, in order, numbered like a numeric keypad
 //              (7 8 9 on top, 1 2 3 at the bottom). At least 3 nodes, none
 //              twice, and every node the player links must be listed: a
@@ -33,6 +35,7 @@
     Sigil(
         id: "ember",
         name: "Ember",
+        name_fr: "Braise",
         pattern: [7, 5, 3],
         effect: Damage,
         power: 6,
@@ -43,6 +46,7 @@
     Sigil(
         id: "recall",
         name: "Recall",
+        name_fr: "Rappel",
         pattern: [8, 5, 2, 1],
         effect: Heal,
         power: 8,
@@ -53,6 +57,7 @@
     Sigil(
         id: "veil",
         name: "Veil",
+        name_fr: "Voile",
         pattern: [4, 7, 8, 9, 6],
         effect: Hold,
         power: 2,
@@ -63,6 +68,7 @@
     Sigil(
         id: "passage",
         name: "Passage",
+        name_fr: "Passage",
         pattern: [7, 4, 1, 2, 3],
         effect: Blink,
         power: 4,
@@ -73,6 +79,7 @@
     Sigil(
         id: "lance",
         name: "Lance",
+        name_fr: "Lance",
         pattern: [1, 5, 9, 6],
         effect: Damage,
         power: 9,

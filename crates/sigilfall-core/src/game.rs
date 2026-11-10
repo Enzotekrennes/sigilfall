@@ -998,7 +998,7 @@ mod tests {
     /// tests of fights.
     fn fighter(speed: i32, hp: i32, attack: i32, defense: i32) -> MonsterDef {
         let source = format!(
-            "[Monster(id: \"test_creature\", name: \"test creature\", family: Vermin, \
+            "[Monster(id: \"test_creature\", name: \"test creature\", name_fr: Masculine(\"le monstre\"), plural: \"test creatures\", plural_fr: \"monstres\", family: Vermin, \
              elite: false, speed: {speed}, hp: {hp}, attack: {attack}, defense: {defense}, \
              min_depth: 1)]"
         );

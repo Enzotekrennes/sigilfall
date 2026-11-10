@@ -19,19 +19,19 @@ use crate::ui::death::MAX_KILL_ROWS;
 /// player without hurting it much, and the executioner, whose blow kills
 /// the player's 30 hit points at once.
 const ARENA_MONSTERS: &str = r#"[
-    Monster(id: "moth", name: "wax moth", family: Vermin, elite: false,
+    Monster(id: "moth", name: "wax moth", name_fr: Masculine("le monstre"), plural: "wax moths", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
-    Monster(id: "mite", name: "dust mite", family: Vermin, elite: false,
+    Monster(id: "mite", name: "dust mite", name_fr: Masculine("le monstre"), plural: "dust mites", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
-    Monster(id: "gnat", name: "cave gnat", family: Vermin, elite: false,
+    Monster(id: "gnat", name: "cave gnat", name_fr: Masculine("le monstre"), plural: "cave gnats", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
-    Monster(id: "tick", name: "bone tick", family: Vermin, elite: false,
+    Monster(id: "tick", name: "bone tick", name_fr: Masculine("le monstre"), plural: "bone ticks", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
-    Monster(id: "wisp", name: "ash wisp", family: Spectre, elite: false,
+    Monster(id: "wisp", name: "ash wisp", name_fr: Masculine("le monstre"), plural: "ash wisps", plural_fr: "monstres", family: Spectre, elite: false,
         speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
-    Monster(id: "imp", name: "ink imp", family: Homunculus, elite: false,
+    Monster(id: "imp", name: "ink imp", name_fr: Masculine("le monstre"), plural: "ink imps", plural_fr: "monstres", family: Homunculus, elite: false,
         speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
-    Monster(id: "executioner", name: "executioner", family: Acolyte, elite: true,
+    Monster(id: "executioner", name: "executioner", name_fr: Masculine("le monstre"), plural: "executioners", plural_fr: "monstres", family: Acolyte, elite: true,
         speed: 100, hp: 999, attack: 99, defense: 0, min_depth: 1),
 ]"#;
 
@@ -83,11 +83,11 @@ pub(super) fn count(rows: &[String], label: &str) -> (String, String) {
 fn continuation_rows(rows: &[String]) -> Vec<String> {
     let first = rows
         .iter()
-        .position(|row| row.contains(messages::KILLS_LABEL))
+        .position(|row| row.contains(messages::ENGLISH.kills_label))
         .expect("a creatures row");
     rows[first + 1..]
         .iter()
-        .take_while(|row| !row.contains(messages::GLYPHS_LABEL))
+        .take_while(|row| !row.contains(messages::ENGLISH.glyphs_label))
         .map(|row| row.trim().to_owned())
         .collect()
 }
@@ -202,16 +202,16 @@ fn after_a_real_death_every_count_shown_is_the_one_the_game_kept() {
         let text = rows.join("\n");
 
         assert_eq!(
-            count(&rows, messages::DEPTH_REACHED_LABEL).0,
+            count(&rows, messages::ENGLISH.depth_reached_label).0,
             stats.deepest().to_string(),
             "{text}"
         );
         assert_eq!(stats.deepest(), app.game().depth());
         assert_eq!(
-            count(&rows, messages::TURNS_LABEL).0,
+            count(&rows, messages::ENGLISH.turns_label).0,
             stats.turns().to_string()
         );
-        let (kills, first_kind) = count(&rows, messages::KILLS_LABEL);
+        let (kills, first_kind) = count(&rows, messages::ENGLISH.kills_label);
         assert_eq!(kills, stats.total_kills().to_string(), "{text}");
         // The first kind listed is one of the most slain, with its count.
         let most = stats.kills().map(|(_, count)| count).max().unwrap_or(0);
@@ -220,25 +220,30 @@ fn after_a_real_death_every_count_shown_is_the_one_the_game_kept() {
         assert_eq!(shown_count, most.to_string(), "{text}");
         assert!(
             stats.kills().any(|(id, count)| count == most
-                && messages::monster_name(&shipped_content(), id) == shown_name),
+                && messages::monster_count_name(Language::English, &shipped_content(), id, count)
+                    == shown_name),
             "the most slain kind comes first: {first_kind}\n{text}"
         );
         assert_eq!(
-            count(&rows, messages::GLYPHS_LABEL).0,
+            count(&rows, messages::ENGLISH.glyphs_label).0,
             stats.glyphs_learnt().to_string()
         );
-        let (casts, breakdown) = count(&rows, messages::CASTS_LABEL);
+        let (casts, breakdown) = count(&rows, messages::ENGLISH.casts_label);
         assert_eq!(casts, stats.casts().total().to_string(), "{text}");
         assert!(stats.casts().total() > 0, "seed {seed}: casts were made");
-        assert_eq!(breakdown, messages::cast_breakdown(stats.casts(), '·'));
         assert_eq!(
-            count(&rows, messages::ITEMS_USED_LABEL).0,
+            breakdown,
+            messages::cast_breakdown(Language::English, stats.casts(), '·')
+        );
+        assert_eq!(
+            count(&rows, messages::ENGLISH.items_used_label).0,
             stats.items_used().to_string()
         );
         let Status::GameOver { killed_by } = app.game().status() else {
             panic!("the game is over");
         };
         let cause = messages::cause_of_death(
+            Language::English,
             killed_by,
             app.game().depth(),
             app.game().player_turns(),
@@ -263,12 +268,12 @@ fn the_creatures_slain_are_listed_most_first_and_capped() {
     ]);
     let rows = screen_rows(&app, 80, 24);
 
-    let (total, first) = count(&rows, messages::KILLS_LABEL);
+    let (total, first) = count(&rows, messages::ENGLISH.kills_label);
     assert_eq!(total, "12");
-    assert_eq!(first, "4 ash wisp");
+    assert_eq!(first, "4 ash wisps");
     assert_eq!(
         continuation_rows(&rows),
-        ["3 cave gnat", "2 wax moth", "and 3 more"]
+        ["3 cave gnats", "2 wax moths", "and 3 more"]
     );
     assert_eq!(1 + continuation_rows(&rows).len(), MAX_KILL_ROWS);
     assert_snapshot!(rows.join("\n"));
@@ -279,7 +284,10 @@ fn up_to_four_kinds_are_listed_whole_ties_by_name() {
     let app = slain(&[("moth", 1), ("mite", 1), ("gnat", 12), ("tick", 1)]);
     let rows = screen_rows(&app, 80, 24);
 
-    assert_eq!(count(&rows, messages::KILLS_LABEL).1, "12 cave gnat");
+    assert_eq!(
+        count(&rows, messages::ENGLISH.kills_label).1,
+        "12 cave gnats"
+    );
     assert_eq!(
         continuation_rows(&rows),
         [" 1 bone tick", " 1 dust mite", " 1 wax moth"].map(str::trim)
@@ -288,7 +296,7 @@ fn up_to_four_kinds_are_listed_whole_ties_by_name() {
     assert!(!text.contains("more"), "{text}");
     // The counts are right-aligned: the units line up under "12".
     let column = |row: &str, needle: &str| row.find(needle).unwrap();
-    let kills_row = rows.iter().find(|r| r.contains("12 cave gnat")).unwrap();
+    let kills_row = rows.iter().find(|r| r.contains("12 cave gnats")).unwrap();
     let tick_row = rows.iter().find(|r| r.contains("1 bone tick")).unwrap();
     assert_eq!(column(kills_row, "2 cave"), column(tick_row, "1 bone"));
 }
@@ -299,15 +307,15 @@ fn a_run_without_kills_or_casts_shows_zeros_and_no_detail() {
     let rows = screen_rows(&app, 80, 24);
 
     assert_eq!(
-        count(&rows, messages::KILLS_LABEL),
+        count(&rows, messages::ENGLISH.kills_label),
         ("0".to_owned(), String::new())
     );
     assert!(continuation_rows(&rows).is_empty());
     assert_eq!(
-        count(&rows, messages::CASTS_LABEL),
+        count(&rows, messages::ENGLISH.casts_label),
         ("0".to_owned(), String::new())
     );
-    assert_eq!(count(&rows, messages::DEPTH_REACHED_LABEL).0, "1");
+    assert_eq!(count(&rows, messages::ENGLISH.depth_reached_label).0, "1");
 }
 
 #[test]
@@ -340,7 +348,10 @@ fn the_seed_shown_is_the_run_seed_and_replays_it() {
         "the same first floor"
     );
     // The seed also picks the epitaph, the same on every replay.
-    assert!(text.contains(messages::epitaph(SEED)), "{text}");
+    assert!(
+        text.contains(messages::epitaph(Language::English, SEED)),
+        "{text}"
+    );
 }
 
 #[test]
@@ -355,9 +366,9 @@ fn the_summary_fits_80_by_24_and_centres_on_larger_screens() {
     let small = screen_rows(&app, 80, 24);
     let small_text = small.join("\n");
     for needle in [
-        messages::DEATH_TITLE,
+        messages::ENGLISH.death_title,
         "Killed by an executioner at depth 1, on turn ",
-        messages::ITEMS_USED_LABEL,
+        messages::ENGLISH.items_used_label,
         "SEED   7F3A-91C2-0B5E-D4A8",
         "Replay this seed: sigilfall --seed 7F3A-91C2-0B5E-D4A8",
     ] {
@@ -374,7 +385,7 @@ fn the_summary_fits_80_by_24_and_centres_on_larger_screens() {
     let large_text = large.join("\n");
     let title_row = large
         .iter()
-        .position(|row| row.contains(messages::DEATH_TITLE))
+        .position(|row| row.contains(messages::ENGLISH.death_title))
         .unwrap();
     let replay_row = large
         .iter()

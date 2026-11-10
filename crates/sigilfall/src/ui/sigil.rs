@@ -129,12 +129,14 @@ pub fn render(buffer: &mut Buffer, area: Rect, casting: &Casting, game: &Game, t
         return;
     }
     let title = match casting {
-        Casting::Drawing(_) => messages::TRACE_TITLE.to_owned(),
-        Casting::Aiming { sigil, .. } => messages::aim_title(sigil_name(game, *sigil)),
-        Casting::Verdict(verdict) if verdict.quality == CastQuality::Fizzled => {
-            messages::FAILED_TITLE.to_owned()
+        Casting::Drawing(_) => theme.labels().trace_title.to_owned(),
+        Casting::Aiming { sigil, .. } => {
+            messages::aim_title(theme.language, sigil_name(game, *sigil, theme))
         }
-        Casting::Verdict(_) => messages::UNSTABLE_TITLE.to_owned(),
+        Casting::Verdict(verdict) if verdict.quality == CastQuality::Fizzled => {
+            theme.labels().failed_title.to_owned()
+        }
+        Casting::Verdict(_) => theme.labels().unstable_title.to_owned(),
     };
     draw_frame(buffer, area, frame, &title, theme);
     let inner = Rect {
@@ -149,7 +151,7 @@ pub fn render(buffer: &mut Buffer, area: Rect, casting: &Casting, game: &Game, t
             draw_tracing(buffer, inner, game, &drawing.trace(), notice, theme);
         }
         Casting::Aiming { trace, sigil } => {
-            let prompt = messages::aim_prompt(sigil_name(game, *sigil));
+            let prompt = messages::aim_prompt(theme.language, sigil_name(game, *sigil, theme));
             let notice = Line::styled(prompt, theme.text);
             draw_tracing(buffer, inner, game, trace, Some(notice), theme);
         }
@@ -179,11 +181,11 @@ fn known_sigil(game: &Game, index: usize) -> Option<&SigilDef> {
         .find(|sigil| sigil.index() == index)
 }
 
-/// Returns the name of the sigil at position `index` of the sigil file, or
-/// an empty name if the player does not know it (which the application
-/// never asks).
-fn sigil_name(game: &Game, index: usize) -> &str {
-    known_sigil(game, index).map_or("", SigilDef::name)
+/// Returns the name in `theme`'s language of the sigil at position `index`
+/// of the sigil file, or an empty name if the player does not know it
+/// (which the application never asks).
+fn sigil_name<'game>(game: &'game Game, index: usize, theme: &Theme) -> &'game str {
+    known_sigil(game, index).map_or("", |sigil| messages::sigil_def_name(theme.language, sigil))
 }
 
 /// Blanks to the screen background (`bg`) the cells of the map `area` that
@@ -293,7 +295,7 @@ fn draw_tracing(
     let essence = player.essence();
     let mut info = vec![
         labelled(
-            messages::TRACE_LABEL,
+            theme.labels().trace_label,
             LABEL_WIDTH,
             Span::styled(
                 messages::pattern_text(trace.nodes(), separator),
@@ -302,14 +304,17 @@ fn draw_tracing(
             theme,
         ),
         labelled(
-            messages::TIME_LABEL,
+            theme.labels().time_label,
             LABEL_WIDTH,
-            Span::styled(messages::cast_time(trace.len(), separator), theme.text),
+            Span::styled(
+                messages::cast_time(theme.language, trace.len(), separator),
+                theme.text,
+            ),
             theme,
         ),
         Line::from(vec![
             Span::styled(
-                format!("{:LABEL_WIDTH$}", messages::ESSENCE_LABEL),
+                format!("{:LABEL_WIDTH$}", theme.labels().essence_label),
                 theme.text_muted,
             ),
             Span::styled(
@@ -317,7 +322,7 @@ fn draw_tracing(
                 theme.sigil_stroke,
             ),
             Span::styled(
-                format!(" {separator} {ESSENCE_COST} a cast"),
+                messages::essence_per_cast(theme.language, ESSENCE_COST, separator),
                 theme.text_muted,
             ),
         ]),
@@ -332,9 +337,11 @@ fn draw_tracing(
 fn drawing_notice(notice: Option<Notice>, game: &Game, theme: &Theme) -> Option<Line<'static>> {
     let essence = game.player_actor().essence();
     let text = match notice {
-        Some(Notice::Refused(node)) => messages::node_refused(node),
-        Some(Notice::Empty) => messages::EMPTY_TRACE.to_owned(),
-        None if essence < ESSENCE_COST => messages::essence_too_low(essence, ESSENCE_COST),
+        Some(Notice::Refused(node)) => messages::node_refused(theme.language, node),
+        Some(Notice::Empty) => theme.labels().empty_trace.to_owned(),
+        None if essence < ESSENCE_COST => {
+            messages::essence_too_low(theme.language, essence, ESSENCE_COST)
+        }
         None => return None,
     };
     Some(Line::styled(
@@ -366,7 +373,7 @@ fn draw_verdict(buffer: &mut Buffer, inner: Rect, game: &Game, verdict: &Verdict
 
     let separator = theme.glyphs.separator;
     let traced = labelled(
-        messages::TRACED_LABEL,
+        theme.labels().traced_label,
         VERDICT_LABEL_WIDTH,
         Span::styled(
             messages::pattern_text(verdict.trace.nodes(), separator),
@@ -376,17 +383,17 @@ fn draw_verdict(buffer: &mut Buffer, inner: Rect, game: &Game, verdict: &Verdict
     );
     let mut lines = Vec::new();
     if unstable {
-        let name = sigil.map_or("", SigilDef::name);
+        let name = sigil.map_or("", |sigil| messages::sigil_def_name(theme.language, sigil));
         let expected = sigil.map_or_else(String::new, |sigil| {
             messages::pattern_text(sigil.pattern().nodes(), separator)
         });
-        lines.push(Line::styled(messages::UNSTABLE_WORD, style));
+        lines.push(Line::styled(theme.labels().unstable_word, style));
         lines.push(Line::styled(
-            format!("{name}, {}", messages::ONE_NODE_OFF),
+            format!("{name}, {}", theme.labels().one_node_off),
             theme.text,
         ));
         lines.push(labelled(
-            messages::EXPECTED_LABEL,
+            theme.labels().expected_label,
             VERDICT_LABEL_WIDTH,
             Span::styled(expected, theme.sigil_stroke),
             theme,
@@ -394,18 +401,18 @@ fn draw_verdict(buffer: &mut Buffer, inner: Rect, game: &Game, verdict: &Verdict
         lines.push(traced);
     } else {
         let why = if verdict.unknown {
-            messages::NOT_IN_GRIMOIRE
+            theme.labels().not_in_grimoire
         } else {
-            messages::NO_KNOWN_PATTERN
+            theme.labels().no_known_pattern
         };
-        lines.push(Line::styled(messages::FAILED_WORD, style));
+        lines.push(Line::styled(theme.labels().failed_word, style));
         lines.push(Line::styled(why, theme.text_muted));
         lines.push(traced);
     }
     let outcome = if unstable {
-        messages::UNSTABLE_OUTCOME
+        theme.labels().unstable_outcome
     } else {
-        messages::FAILED_OUTCOME
+        theme.labels().failed_outcome
     };
     // The outcome sits level with the grid's bottom row, beside it.
     let bottom_row = usize::from(GRID_HEIGHT - 1);
@@ -415,7 +422,9 @@ fn draw_verdict(buffer: &mut Buffer, inner: Rect, game: &Game, verdict: &Verdict
         // Under the grid, how a pattern gets into the grimoire.
         lines.push(Line::default());
         lines.extend(
-            messages::LEARN_FROM_GLYPHS
+            theme
+                .labels()
+                .learn_from_glyphs
                 .iter()
                 .map(|text| grimoire::empty_state_line(text, theme)),
         );

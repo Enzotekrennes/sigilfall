@@ -468,12 +468,11 @@ fn the_files_the_readme_points_to_exist_and_the_placeholders_are_the_known_ones(
         "Cargo.toml names the same repository"
     );
     assert!(!manifest.contains("OWNER"), "no placeholder in Cargo.toml");
-    // The demo is recorded by CI from demo.tape before the first release:
-    // until then the README points to a file that does not exist yet.
+    // The demo recorded from demo.tape is committed: the README shows it.
     assert!(README.contains("assets/demo.gif"));
     assert!(
-        !root.join("assets/demo.gif").exists(),
-        "assets/demo.gif is still to be recorded by CI: when it exists, delete this check"
+        root.join("assets/demo.gif").is_file(),
+        "assets/demo.gif is committed"
     );
     let toolchain = fs::read_to_string(root.join("rust-toolchain.toml")).unwrap();
     assert!(

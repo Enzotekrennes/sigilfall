@@ -37,13 +37,13 @@ const GAIN_PER_TICK: i32 = 100;
 
 /// Creatures whose behaviour is known in advance.
 const TEST_MONSTERS: &str = r#"[
-    Monster(id: "gnat", name: "cave gnat", family: Vermin, elite: false,
+    Monster(id: "gnat", name: "cave gnat", name_fr: Masculine("le monstre"), plural: "cave gnats", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 100, hp: 999, attack: 0, defense: 0, min_depth: 1),
-    Monster(id: "moth", name: "wax moth", family: Vermin, elite: false,
+    Monster(id: "moth", name: "wax moth", name_fr: Masculine("le monstre"), plural: "wax moths", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
-    Monster(id: "sloth", name: "sloth", family: Vermin, elite: false,
+    Monster(id: "sloth", name: "sloth", name_fr: Masculine("le monstre"), plural: "sloths", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 1, hp: 999, attack: 0, defense: 0, min_depth: 1),
-    Monster(id: "dart", name: "dart", family: Vermin, elite: false,
+    Monster(id: "dart", name: "dart", name_fr: Masculine("le monstre"), plural: "darts", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 200, hp: 999, attack: 0, defense: 0, min_depth: 1),
 ]"#;
 

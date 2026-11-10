@@ -30,15 +30,15 @@ const PLAYER_DEFENSE: i32 = 1;
 
 /// Creatures whose fights are known in advance.
 const TEST_MONSTERS: &str = r#"[
-    Monster(id: "brute", name: "brute", family: Acolyte, elite: false,
+    Monster(id: "brute", name: "brute", name_fr: Masculine("le monstre"), plural: "brutes", plural_fr: "monstres", family: Acolyte, elite: false,
         speed: 100, hp: 40, attack: 0, defense: 2, min_depth: 1),
-    Monster(id: "gnat", name: "cave gnat", family: Vermin, elite: false,
+    Monster(id: "gnat", name: "cave gnat", name_fr: Masculine("le monstre"), plural: "cave gnats", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 100, hp: 999, attack: 0, defense: 0, min_depth: 1),
-    Monster(id: "moth", name: "wax moth", family: Vermin, elite: false,
+    Monster(id: "moth", name: "wax moth", name_fr: Masculine("le monstre"), plural: "wax moths", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
-    Monster(id: "executioner", name: "executioner", family: Acolyte, elite: true,
+    Monster(id: "executioner", name: "executioner", name_fr: Masculine("le monstre"), plural: "executioners", plural_fr: "monstres", family: Acolyte, elite: true,
         speed: 100, hp: 999, attack: 99, defense: 0, min_depth: 1),
-    Monster(id: "stinger", name: "stinger", family: Vermin, elite: false,
+    Monster(id: "stinger", name: "stinger", name_fr: Masculine("le monstre"), plural: "stingers", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 400, hp: 999, attack: 29, defense: 0, min_depth: 1),
 ]"#;
 
@@ -348,7 +348,7 @@ fn a_monster_is_removed_exactly_when_a_blow_leaves_it_at_zero() {
     // is not reported dead.
     for hp in 1..=12 {
         let text = format!(
-            r#"[Monster(id: "dummy", name: "dummy", family: Vermin, elite: false,
+            r#"[Monster(id: "dummy", name: "dummy", name_fr: Masculine("le monstre"), plural: "dummys", plural_fr: "monstres", family: Vermin, elite: false,
                 speed: 100, hp: {hp}, attack: 0, defense: 0, min_depth: 1)]"#
         );
         let content = Content::parse(&text).expect("valid");

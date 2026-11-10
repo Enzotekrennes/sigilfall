@@ -13,6 +13,7 @@
 use super::check::{EntryCheck, UniqueIds};
 use super::entry_file::RawEntry;
 use super::error::{ContentError, FieldProblem};
+use super::french::FrenchNoun;
 use super::item_file::{EffectEntry, ItemEntry};
 use super::{MAX_POWER, SIGILS_FILE, SigilDef};
 use crate::sigil::{MAX_ESSENCE, MAX_STEADY_CASTS};
@@ -80,8 +81,10 @@ pub enum ItemFamily {
 pub struct ItemDef {
     /// Stable key used by saves.
     id: String,
-    /// Name shown to the player.
+    /// Name shown to the player, in English.
     name: String,
+    /// Name shown to the player, in French.
+    name_fr: FrenchNoun,
     /// What using the item does.
     effect: ItemEffect,
     /// Shallowest floor the item can be found on.
@@ -99,6 +102,12 @@ impl ItemDef {
     /// `content::MAX_NAME_LENGTH` characters.
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Returns the name shown to the player in French: the noun, its gender
+    /// and its article (see [`FrenchNoun`]).
+    pub const fn french_name(&self) -> &FrenchNoun {
+        &self.name_fr
     }
 
     /// Returns what using the item does.
@@ -135,6 +144,7 @@ impl ItemDef {
         Self {
             id: String::new(),
             name: String::new(),
+            name_fr: FrenchNoun::stand_in(),
             effect: ItemEffect::Heal(1),
             min_depth: crate::generation::FIRST_DEPTH,
         }
@@ -184,6 +194,7 @@ fn validate_entry(
     let id = EntryCheck::new(&kind, position, None).identifier(entry.id)?;
     let check = EntryCheck::new(&kind, position, Some(&id));
     let name = check.name(entry.name)?;
+    let name_fr = check.french_noun(entry.name_fr)?;
     let effect = effect(&check, entry.effect, sigils)?;
     let min_depth = check.depth(entry.min_depth, "min_depth")?;
     if let ItemEffect::Teach(sigil) = &effect
@@ -201,6 +212,7 @@ fn validate_entry(
     Ok(ItemDef {
         id,
         name,
+        name_fr,
         effect,
         min_depth,
     })
@@ -271,6 +283,7 @@ mod tests {
             ("name", "\"test item\"".to_owned()),
             ("effect", effect.to_owned()),
             ("min_depth", "1".to_owned()),
+            ("name_fr", "Masculine(\"l'objet\")".to_owned()),
         ]
         .into()
     }
@@ -450,7 +463,7 @@ mod tests {
 
     #[test]
     fn the_shipped_items_are_refused_without_the_sigils_they_teach() {
-        let lone_sigil = "[Sigil(id: \"spark\", name: \"Spark\", pattern: [7, 5, 3], \
+        let lone_sigil = "[Sigil(id: \"spark\", name: \"Spark\", name_fr: \"Etincelle\", pattern: [7, 5, 3], \
                           effect: Damage, power: 1, targeting: NearestEnemy, min_depth: 1, \
                           known_at_start: false)]";
         let shipped_items = include_str!("../../content/items.ron");
@@ -552,6 +565,15 @@ mod tests {
         let (_, message) = refused(&file(&[write_entry(&fields)]));
         assert_names(&message, "item `empty` (entry 1)", "effect");
         assert!(message.contains("missing"), "{message}");
+
+        let mut unnamed = self::fields("unnamed", "Heal(1)");
+        unnamed.retain(|(name, _)| *name != "name_fr");
+        let (_, message) = refused(&file(&[write_entry(&unnamed)]));
+        assert_names(&message, "item `unnamed` (entry 1)", "name_fr");
+        assert!(message.contains("missing"), "{message}");
+
+        let (_, message) = refused(&file(&[with("odd", "name_fr", "Feminine(\"le Philtre\")")]));
+        assert_names(&message, "item `odd` (entry 1)", "name_fr");
 
         let long = format!("\"{}\"", "x".repeat(MAX_NAME_LENGTH + 1));
         let (_, message) = refused(&file(&[with("wordy", "name", &long)]));

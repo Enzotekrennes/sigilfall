@@ -352,7 +352,7 @@ mod tests {
     /// 7-5-3, for effects and targetings the shipped file does not pair.
     fn single_sigil(effect: &str, targeting: &str, power: i32) -> SigilDef {
         let source = format!(
-            "[Sigil(id: \"test_sigil\", name: \"test sigil\", pattern: [7, 5, 3], \
+            "[Sigil(id: \"test_sigil\", name: \"test sigil\", name_fr: \"sigille\", pattern: [7, 5, 3], \
              effect: {effect}, power: {power}, targeting: {targeting}, min_depth: 1, \
              known_at_start: false)]"
         );
@@ -364,7 +364,7 @@ mod tests {
     /// kill the player in a test: attack 1, no defense.
     fn creature(speed: i32, hp: i32) -> MonsterDef {
         let source = format!(
-            "[Monster(id: \"test_creature\", name: \"test creature\", family: Vermin, \
+            "[Monster(id: \"test_creature\", name: \"test creature\", name_fr: Masculine(\"le monstre\"), plural: \"test creatures\", plural_fr: \"monstres\", family: Vermin, \
              elite: false, speed: {speed}, hp: {hp}, attack: 1, defense: 0, min_depth: 1)]"
         );
         let content = Content::parse(&source).expect("valid test monster");

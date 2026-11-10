@@ -15,14 +15,17 @@
 //! daily dungeon of today's UTC date (`Game::daily`), "Options" and "Quit". A
 //! new game that would replace a saved one asks first ([`State::Confirm`]),
 //! and deletes the save once the player agrees. The options screen
-//! ([`State::Options`], `ui::options`) changes the glyphs, the colours and
-//! the theme: each change is applied to the screen at once and written to the
-//! options file (`persist::OptionsFile`); `--ascii` keeps ASCII glyphs for
-//! the session whatever the option says.
+//! ([`State::Options`], `ui::options`) changes the glyphs, the colours, the
+//! theme and the language: each change is applied to the screen at once and
+//! written to the options file (`persist::OptionsFile`); `--ascii` keeps
+//! ASCII glyphs and `--lang` a language for the session whatever the
+//! options say. Until the player chooses one, the language is the system's.
 //!
 //! The application keeps the message log of the game in progress: the
-//! events of each action are turned into English lines by the `messages`
-//! module and appended to it. Once the game is over, its end screen
+//! events of each action are turned into lines of the language in use by
+//! the `messages` module and appended to it. The problems met with the
+//! save and options files are kept as facts ([`FileNotice`]) and worded
+//! when a screen shows them, so they follow a change of language. Once the game is over, its end screen
 //! replaces it: the death summary (`ui::death`) once the player has died,
 //! the victory screen (`ui::victory`) once it has broken the seal of the
 //! bottom floor; both are [`State::GameOver`], and Enter goes back to the
@@ -105,8 +108,9 @@ use crate::input::{
     self, AimCommand, Command, EndCommand, ExploringCommand, InventoryCommand, MenuCommand,
     OptionsCommand, SeedCommand, TraceCommand, VerdictCommand,
 };
-use crate::message_log::{Message, MessageLog, Tone};
-use crate::messages;
+use crate::language::Language;
+use crate::message_log::{Message, MessageLog};
+use crate::messages::{self, FileNotice, LaunchWanted};
 use crate::persist::{Loaded, LoadedOptions, OptionsFile, SaveFile};
 #[cfg(test)]
 use crate::theme::Options;
@@ -207,18 +211,20 @@ pub struct App {
     /// The saved game "Continue" resumes, read at launch; `None` when no
     /// game is saved, or once it has been resumed or abandoned.
     saved: Option<Game>,
-    /// Messages that open the next new game, such as why the save was set
-    /// aside at launch; emptied by that game.
-    opening: Vec<Message>,
-    /// Why the options file could not be read at launch, shown on the title
-    /// screen until the options are written again.
-    options_unreadable: Option<String>,
+    /// Problems that open the log of the next new game, such as why the
+    /// save was set aside at launch; emptied by that game.
+    opening: Vec<FileNotice>,
+    /// Why the options file could not be read at launch
+    /// ([`FileNotice::OptionsUnreadable`]), shown on the title screen until
+    /// the options are written again.
+    options_unreadable: Option<FileNotice>,
     /// A problem with the save to show on the title screen: set aside at
     /// launch, or not deleted. Cleared once a game starts.
-    save_notice: Option<String>,
-    /// Why the options could not be written, shown on the options screen
-    /// until they are written again.
-    options_not_saved: Option<String>,
+    save_notice: Option<FileNotice>,
+    /// Why the options could not be written
+    /// ([`FileNotice::OptionsNotSaved`]), shown on the options screen until
+    /// they are written again.
+    options_not_saved: Option<FileNotice>,
     /// Where the time of the end screen's grace period and today's date
     /// for the daily dungeon are read: the system's clock, or a test's.
     clock: Box<dyn Clock>,
@@ -234,11 +240,15 @@ impl App {
     /// Starts the application of a run of the program, tied to the player's
     /// `save` file and to the options file beside it
     /// (`OptionsFile::beside`), for a terminal `detected` to support that
-    /// much colour, with the monsters, items and sigils of `content`.
+    /// much colour and a system whose language is `system_language`, with
+    /// the monsters, items and sigils of `content`.
     ///
     /// The theme comes from the saved options, with ASCII glyphs whatever
-    /// they say when `cli` has `--ascii`. An options file that cannot be
-    /// read gives the default options and a notice, never an error.
+    /// they say when `cli` has `--ascii`, and the language of `--lang` when
+    /// given. Without a language option (no options file, or one written
+    /// before the option existed), the game speaks `system_language`. An
+    /// options file that cannot be read gives the default options and a
+    /// notice, never an error.
     ///
     /// Without `--seed`, the title screen opens, its menu on its first
     /// entry:
@@ -271,11 +281,19 @@ impl App {
     /// is never overwritten by a launch.
     pub fn launch(
         detected: ColorSupport,
+        system_language: Language,
         cli: &Cli,
         content: &Content,
         save: SaveFile,
     ) -> anyhow::Result<Self> {
-        Self::launch_with_clock(detected, cli, content, save, Box::new(SystemClock))
+        Self::launch_with_clock(
+            detected,
+            system_language,
+            cli,
+            content,
+            save,
+            Box::new(SystemClock),
+        )
     }
 
     /// [`App::launch`], reading the time and today's UTC date from `clock`
@@ -287,17 +305,19 @@ impl App {
     /// The errors of [`App::launch`].
     pub fn launch_with_clock(
         detected: ColorSupport,
+        system_language: Language,
         cli: &Cli,
         content: &Content,
         save: SaveFile,
         clock: Box<dyn Clock>,
     ) -> anyhow::Result<Self> {
         let options_file = OptionsFile::beside(&save);
-        let loaded_options = options_file.load();
+        let loaded_options = options_file.load(system_language);
         let settings = Settings {
-            options: loaded_options.options(),
+            options: loaded_options.options(system_language),
             detected,
             forced_ascii: cli.ascii,
+            forced_language: cli.lang,
         };
         let mut app = Self::empty(settings.theme(), settings, content.clone(), clock);
         let requested = if cli.daily {
@@ -306,35 +326,36 @@ impl App {
             cli.seed.map(NewRun::Seed)
         };
         if let LoadedOptions::Unreadable { reason } = loaded_options {
-            app.options_unreadable = Some(messages::options_unreadable(&reason));
+            app.options_unreadable = Some(FileNotice::OptionsUnreadable(reason));
         }
         match save.load(content)? {
             Loaded::Game(game) if game.is_over() => save.delete()?,
             Loaded::Game(game) => {
-                if let Some(run) = requested {
-                    let (option, wanted) = match run {
-                        NewRun::Daily(date) => ("--daily", format!("the daily dungeon of {date}")),
-                        NewRun::Seed(seed) => ("--seed", format!("the seed {seed}")),
-                        // The command line never asks for a random seed;
-                        // kept so the match stays whole.
-                        NewRun::Random => ("an option", "a new game".to_owned()),
-                    };
-                    anyhow::bail!(
-                        "a game in progress is saved in {}: start the game without \
-                         {option} to continue it, or to abandon it with New game, \
-                         Seed or Daily on the title screen; you can also delete \
-                         that file to abandon it and play {wanted}",
-                        save.path().display()
-                    );
+                // The command line never asks for a random seed: only
+                // `--daily` and `--seed` start a game at once.
+                let refused = match requested {
+                    Some(NewRun::Daily(date)) => Some(("--daily", LaunchWanted::Daily(date))),
+                    Some(NewRun::Seed(seed)) => Some(("--seed", LaunchWanted::Seed(seed))),
+                    Some(NewRun::Random) | None => None,
+                };
+                if let Some((option, wanted)) = refused {
+                    anyhow::bail!(messages::launch_refused(
+                        app.language(),
+                        &save.path().display().to_string(),
+                        option,
+                        &wanted,
+                    ));
                 }
                 app.saved = Some(*game);
             }
             Loaded::Missing => {}
             Loaded::SetAside { reason, moved_to } => {
-                let moved_to = moved_to.display().to_string();
-                app.opening
-                    .push(messages::save_set_aside(&reason, &moved_to));
-                app.save_notice = Some(messages::save_set_aside_notice(&reason, &moved_to));
+                let notice = FileNotice::SaveSetAside {
+                    reason,
+                    moved_to: moved_to.display().to_string(),
+                };
+                app.opening.push(notice.clone());
+                app.save_notice = Some(notice);
             }
         }
         app.save = Some(save);
@@ -342,7 +363,7 @@ impl App {
         match requested {
             Some(run) => {
                 if let Some(problem) = app.options_unreadable.clone() {
-                    app.opening.insert(0, Message::new(Tone::Danger, problem));
+                    app.opening.insert(0, problem);
                 }
                 app.start_new_game(run);
             }
@@ -371,12 +392,17 @@ impl App {
     #[cfg(test)]
     pub fn with_game(theme: Theme, game: Game, content: Content) -> Self {
         let settings = Settings {
-            options: Options::default(),
+            options: Options {
+                language: theme.language,
+                ..Options::default()
+            },
             detected: ColorSupport::TrueColor,
             forced_ascii: false,
+            forced_language: None,
         };
+        let welcome = messages::welcome(theme.language);
         let mut app = Self::empty(theme, settings, content, Box::new(ManualClock::new()));
-        app.begin(game, vec![messages::welcome()]);
+        app.begin(game, vec![welcome]);
         app
     }
 
@@ -459,13 +485,22 @@ impl App {
             .is_some_and(|ended_at| self.clock.now().duration_since(ended_at) < END_SCREEN_GRACE)
     }
 
-    /// Starts the new game `run`, its log opening with the messages
-    /// waiting in `opening`, then the welcome message: a game on a seed
-    /// drawn now (`cli::random_seed`), on the seed given, or the daily
-    /// dungeon of the date given (`Game::daily`).
+    /// Returns the language every text is written in, the theme's.
+    const fn language(&self) -> Language {
+        self.theme.language
+    }
+
+    /// Starts the new game `run`, its log opening with the problems
+    /// waiting in `opening`, then the welcome message, in the language in
+    /// use: a game on a seed drawn now (`cli::random_seed`), on the seed
+    /// given, or the daily dungeon of the date given (`Game::daily`).
     fn start_new_game(&mut self, run: NewRun) {
-        let mut opening = std::mem::take(&mut self.opening);
-        opening.push(messages::welcome());
+        let language = self.language();
+        let mut opening: Vec<Message> = std::mem::take(&mut self.opening)
+            .iter()
+            .map(|notice| messages::opening(language, notice))
+            .collect();
+        opening.push(messages::welcome(language));
         let game = match run {
             NewRun::Random => Game::new(cli::random_seed(), &self.content),
             NewRun::Seed(seed) => Game::new(seed, &self.content),
@@ -592,7 +627,7 @@ impl App {
         match item {
             TitleItem::Continue => {
                 if let Some(game) = self.saved.take() {
-                    self.begin(game, vec![messages::welcome_back()]);
+                    self.begin(game, vec![messages::welcome_back(self.language())]);
                 }
             }
             TitleItem::NewGame => self.ask_new_game(NewRun::Random),
@@ -677,10 +712,10 @@ impl App {
         if let Some(save) = &self.save
             && let Err(error) = save.delete()
         {
-            self.save_notice = Some(messages::save_not_deleted_notice(
-                &save.path().display().to_string(),
-                &error.root_cause().to_string(),
-            ));
+            self.save_notice = Some(FileNotice::SaveNotDeleted {
+                path: save.path().display().to_string(),
+                cause: error.root_cause().to_string(),
+            });
             self.back_to_menu(confirmation.asked_from());
             return;
         }
@@ -754,7 +789,10 @@ impl App {
                 self.options_unreadable = None;
             }
             Err(error) => {
-                self.options_not_saved = Some(messages::options_not_saved(&format!("{error:#}")));
+                self.options_not_saved = Some(FileNotice::OptionsNotSaved {
+                    path: file.path().display().to_string(),
+                    cause: error.root_cause().to_string(),
+                });
             }
         }
     }
@@ -853,8 +891,11 @@ impl App {
     fn halt_exploration(&mut self, halt: &Halt) {
         self.exploration = None;
         if let Some(run) = &mut self.run {
-            run.log
-                .extend(messages::exploration_halted(halt, &self.content));
+            run.log.extend(messages::exploration_halted(
+                self.theme.language,
+                halt,
+                &self.content,
+            ));
         }
     }
 
@@ -885,10 +926,10 @@ impl App {
         if let Some(save) = &self.save
             && let Err(error) = save.delete()
         {
-            self.save_notice = Some(messages::finished_save_not_deleted_notice(
-                &save.path().display().to_string(),
-                &error.root_cause().to_string(),
-            ));
+            self.save_notice = Some(FileNotice::FinishedSaveNotDeleted {
+                path: save.path().display().to_string(),
+                cause: error.root_cause().to_string(),
+            });
         }
         self.run = None;
         self.saved = None;
@@ -1107,8 +1148,12 @@ impl App {
             return Vec::new();
         };
         let events = run.game.submit(action);
-        run.log
-            .extend(messages::describe(&events, &run.game, &self.content));
+        run.log.extend(messages::describe(
+            self.theme.language,
+            &events,
+            &run.game,
+            &self.content,
+        ));
         if run.game.is_over() {
             self.show_end_screen();
             self.delete_save();
@@ -1129,7 +1174,8 @@ impl App {
         if save.delete().is_err()
             && let Some(run) = &mut self.run
         {
-            run.log.push(messages::save_not_deleted());
+            run.log
+                .push(messages::save_not_deleted(self.theme.language));
         }
     }
 
@@ -1175,10 +1221,14 @@ impl App {
             State::SeedEntry(entry) => Some(TitleStep::Seed(entry)),
             State::Confirm(confirmation) => Some(TitleStep::Confirm(confirmation)),
             State::Options(menu) => {
+                let notice = self
+                    .options_not_saved
+                    .as_ref()
+                    .map(|notice| messages::file_notice(self.language(), notice));
                 let screen = MenuScreen::Options {
                     menu,
                     settings: &self.settings,
-                    notice: self.options_not_saved.as_deref(),
+                    notice: notice.as_deref(),
                 };
                 return ui::render_menu(frame, screen, &self.theme);
             }
@@ -1209,17 +1259,16 @@ impl App {
 
     /// Draws the title screen at `step`, with the saved game beside
     /// "Continue", today's UTC date (read from the clock) beside "Daily",
-    /// and the notices about the files.
+    /// and the notices about the files, in the language in use.
     fn render_title(&self, frame: &mut Frame, step: TitleStep<'_>) {
-        let separator = self.theme.glyphs.separator;
-        let saved = self
-            .saved
-            .as_ref()
-            .map(|game| messages::saved_run(game.depth(), game.player_turns() + 1, separator));
+        let (separator, language) = (self.theme.glyphs.separator, self.language());
+        let saved = self.saved.as_ref().map(|game| {
+            messages::saved_run(language, game.depth(), game.player_turns() + 1, separator)
+        });
         let notices: Vec<String> = [&self.save_notice, &self.options_unreadable]
             .into_iter()
             .flatten()
-            .cloned()
+            .map(|notice| messages::file_notice(language, notice))
             .collect();
         let screen = MenuScreen::Title {
             step,

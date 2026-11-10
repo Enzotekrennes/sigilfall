@@ -15,7 +15,7 @@ use super::*;
 use crate::app::{App, State};
 use crate::cli::Cli;
 use crate::clock::ManualClock;
-use crate::persist::{LoadedOptions, OptionsFile, ScratchFolder};
+use crate::persist::{LoadedOptions, OptionsFile, SaveFile, ScratchFolder};
 use crate::theme::{Appearance, ColorChoice, ColorSupport, GlyphSet, Options, Settings};
 use crate::ui::options::{OptionRow, OptionsMenu};
 use crate::ui::title::{TitleItem, TitleMenu};
@@ -31,10 +31,12 @@ use std::path::PathBuf;
 fn launch(folder: &ScratchFolder, detected: ColorSupport, ascii: bool) -> App {
     App::launch_with_clock(
         detected,
+        Language::English,
         &Cli {
             seed: None,
             daily: false,
             ascii,
+            lang: None,
         },
         &shipped_content(),
         folder.save_file(),
@@ -60,7 +62,7 @@ fn screen_text(app: &App) -> String {
 
 /// The options saved in `folder`, which must be readable.
 fn saved_options(folder: &ScratchFolder) -> Options {
-    match folder.options_file().load() {
+    match folder.options_file().load(Language::English) {
         LoadedOptions::Found(options) => options,
         other => panic!("the options are saved: {other:?}"),
     }
@@ -129,6 +131,7 @@ fn each_option_applies_at_once_and_is_kept_after_a_relaunch() {
         glyphs: GlyphSet::Ascii,
         colors: ColorChoice::Ansi16,
         appearance: Appearance::Light,
+        language: Language::English,
     };
     assert_eq!(saved_options(&folder), expected);
 
@@ -240,10 +243,12 @@ fn the_options_also_apply_to_a_game_started_with_seed() {
 
     let app = App::launch_with_clock(
         ColorSupport::TrueColor,
+        Language::English,
         &Cli {
             seed: Some(SEED),
             daily: false,
             ascii: false,
+            lang: None,
         },
         &shipped_content(),
         folder.save_file(),
@@ -328,6 +333,55 @@ fn changing_an_option_replaces_a_corrupt_file_and_clears_the_notice() {
 }
 
 #[test]
+fn in_a_long_data_folder_the_notice_still_says_the_options_apply_until_quitting() {
+    // As long as the temporary folders of some systems or macOS's
+    // `~/Library/Application Support/Sigilfall`, and longer than a line.
+    let folder = ScratchFolder::new("options-long-folder");
+    let deep = folder
+        .path()
+        .join("RUNNER~1-AppData-Local-Temp-of-a-continuous-integration-runner")
+        .join("var-folders-zz-zyxvpxvq6csfxvn_n0000000000000-T")
+        .join("Library")
+        .join("Application Support")
+        .join("Sigilfall");
+    fs::create_dir_all(deep.join("options.ron.tmp")).unwrap();
+    assert!(deep.display().to_string().chars().count() > 160);
+    for (language, explanation) in [
+        (Language::English, "The options apply until you quit"),
+        (
+            Language::French,
+            "Elles s'appliquent jusqu'à ce que vous quittiez",
+        ),
+    ] {
+        let mut app = App::launch_with_clock(
+            ColorSupport::TrueColor,
+            language,
+            &Cli {
+                seed: None,
+                daily: false,
+                ascii: false,
+                lang: None,
+            },
+            &shipped_content(),
+            SaveFile::in_folder(&deep),
+            Box::new(ManualClock::new()),
+        )
+        .expect("the launch succeeds");
+        press_all(&mut app, &[KeyCode::End, KeyCode::Up, KeyCode::Enter]);
+        press_all(&mut app, &[KeyCode::Right]);
+
+        let text = screen_text(&app);
+        let words: Vec<&str> = text
+            .split(|c: char| c.is_whitespace() || c == '"')
+            .filter(|word| !word.is_empty())
+            .collect();
+        let words = words.join(" ");
+        assert!(words.contains(explanation), "{language:?}: {text}");
+        assert!(words.contains("options.ron"), "{language:?}: {text}");
+    }
+}
+
+#[test]
 fn options_that_cannot_be_written_still_apply_and_the_screen_says_why() {
     let folder = ScratchFolder::new("options-unwritable");
     // A folder named like the temporary file makes every write fail.
@@ -339,10 +393,20 @@ fn options_that_cannot_be_written_still_apply_and_the_screen_says_why() {
     assert_eq!(app.options().glyphs, GlyphSet::Ascii, "applied anyway");
     let text = screen_text(&app);
     assert!(
-        text.contains("! the options could not be saved to"),
+        text.contains("! the options could not be saved ("),
         "{text}"
     );
-    assert!(text.contains("The options apply until you quit."), "{text}");
+    // The notice wraps: its words are read whole across rows.
+    let words: Vec<&str> = text
+        .split(|c: char| c.is_whitespace() || c == '"')
+        .filter(|word| !word.is_empty())
+        .collect();
+    assert!(
+        words
+            .join(" ")
+            .contains("The options apply until you quit;"),
+        "{text}"
+    );
     assert!(!folder.options_file().path().exists());
 }
 
@@ -665,6 +729,7 @@ fn every_screen(support: ColorSupport, options: Options) -> Vec<(&'static str, A
         options,
         detected: support,
         forced_ascii: false,
+        forced_language: None,
     };
     let folder = ScratchFolder::new("screens");
     save_game(&folder, 7, 3);
@@ -750,6 +815,7 @@ fn the_explicit_ascii_and_monochrome_choices_hold_on_every_screen() {
         glyphs: GlyphSet::Ascii,
         colors: ColorChoice::Monochrome,
         appearance: Appearance::Dark,
+        language: Language::English,
     };
     for (name, app) in every_screen(ColorSupport::TrueColor, options) {
         let painted = paint(&buffer(&app, 80, 24));
@@ -929,7 +995,7 @@ fn an_options_file_that_cannot_be_read_gives_the_defaults_a_notice_and_is_replac
             "{name}: the notice is gone once the file is rewritten"
         );
         assert!(matches!(
-            OptionsFile::in_folder(folder.path()).load(),
+            OptionsFile::in_folder(folder.path()).load(Language::English),
             LoadedOptions::Found(_)
         ));
         let next = launch_with_arguments(&folder, &[]).unwrap();

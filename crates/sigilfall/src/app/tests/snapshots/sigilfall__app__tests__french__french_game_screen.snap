@@ -1,0 +1,29 @@
+---
+source: crates/sigilfall/src/app/tests/french.rs
+assertion_line: 520
+expression: screen(&app)
+---
+ Profondeur 1 · Tour 3                               Graine 7F3A-91C2-0B5E-D4A8
+                                                          │ PV            30/30
+                                                          │ ██████████████████
+                                                          │ Essence         6/6
+                                                          │
+                                                          │ SIGILLES        1/5
+                    ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒                      │ Braise
+                    ▒··············▒                      │
+                    ▒······¡·······▒                      │ EN VUE
+                    ▒········@·····▒                      │ @ vous
+                    ▒··············▒                      │ ¡ Fiole d'essence
+                    ▒▒▒▒▒▒▒▒▒▒▒·▒▒▒▒                      │
+                                ▒                         │
+                                ▒                         │
+                                                          │
+                                                          │
+                                                          │
+─ Journal ────────────────────────────────────────────────┴─────────────────────
+   Vous entrez dans le donjon.
+   Il n'y a rien à ramasser ici.
+   Il n'y a pas d'escalier ici.
+
+
+ ←↑→↓/1-9 aller   . repos   t tracer   g saisir   i sac   > descente   q quitter

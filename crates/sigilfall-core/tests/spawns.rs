@@ -584,7 +584,7 @@ fn validation_refuses_a_creature_or_an_item_that_no_rule_places() {
 #[test]
 fn validation_refuses_a_table_that_leaves_a_floor_without_monster() {
     let monsters = r#"[
-        Monster(id: "mote", name: "mote", family: Vermin, elite: false,
+        Monster(id: "mote", name: "mote", name_fr: Masculine("le monstre"), plural: "motes", plural_fr: "monstres", family: Vermin, elite: false,
             speed: 100, hp: 1, attack: 1, defense: 0, min_depth: 1),
     ]"#;
     let rules = |to: u32| {

@@ -15,7 +15,6 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Widget as _;
 
 use crate::message_log::{Message, MessageLog, Tone};
-use crate::messages;
 use crate::theme::Theme;
 
 /// Columns a message's text is wrapped to.
@@ -71,7 +70,7 @@ pub fn render(
 /// frame.
 fn separator(width: u16, left: u16, junction: Option<u16>, theme: &Theme) -> Line<'static> {
     let glyphs = &theme.glyphs;
-    let title = format!(" {} ", messages::LOG_TITLE);
+    let title = format!(" {} ", theme.labels().log_title);
     let title_end = 1 + title.chars().count();
     let junction = junction.map(|x| usize::from(x.saturating_sub(left)));
     let rule: String = (title_end..usize::from(width))
@@ -143,13 +142,17 @@ const fn tone_look(tone: Tone, theme: &Theme) -> (char, Style) {
 
 /// Splits `text` into lines of at most `width` characters, breaking
 /// between words; a word longer than `width` is cut. Runs of spaces count
-/// as one break. Returns one empty line for an empty text, and no line is
-/// ever empty otherwise. The inventory wraps its notices with it too.
+/// as one break; a no-break space (`\u{a0}`, before a French colon) never
+/// breaks, so the mark after it stays on the line of the word before.
+/// Returns one empty line for an empty text, and no line is ever empty
+/// otherwise. The inventory, the title and the options screens wrap their
+/// notices with it too.
 pub(super) fn wrap(text: &str, width: usize) -> Vec<String> {
     let width = width.max(1);
     let mut lines = Vec::new();
     let mut current = String::new();
-    for word in text.split_whitespace() {
+    let breaks = |character: char| character.is_whitespace() && character != '\u{a0}';
+    for word in text.split(breaks).filter(|word| !word.is_empty()) {
         let mut word: Vec<char> = word.chars().collect();
         while word.len() > width {
             if !current.is_empty() {
@@ -181,7 +184,18 @@ pub(super) fn wrap(text: &str, width: usize) -> Vec<String> {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
+    use crate::language::Language;
+    use crate::messages;
+    use crate::persist::{MAX_FILE_BYTES, SaveRefusal};
     use crate::theme::{ColorMode, GlyphSet};
+
+    #[test]
+    fn a_no_break_space_never_breaks_a_line() {
+        assert_eq!(
+            wrap("Votre sac est plein\u{a0}: la fiole reste", 20),
+            ["Votre sac est", "plein\u{a0}: la fiole", "reste"]
+        );
+    }
 
     #[test]
     fn wrapping_breaks_between_words_within_the_width() {
@@ -224,11 +238,11 @@ pub(super) mod tests {
             .collect()
     }
 
-    /// Reasons a refused save may be given ([`messages::save_refusal`]): the
-    /// longest sentences of the save reader, with values as large as their
-    /// fields allow and quotes of 20 kB, as one long word and as many short
-    /// ones.
-    pub(in crate::ui) fn refusals() -> Vec<String> {
+    /// Reasons a save may be refused for ([`messages::save_refusal`] words
+    /// them): the longest sentences of the save reader, with values as
+    /// large as their fields allow and quotes of 20 kB, as one long word and
+    /// as many short ones, a file that is not text and one too large.
+    pub(in crate::ui) fn refusals() -> Vec<SaveRefusal> {
         use sigilfall_core::save::{Reference, SaveError};
 
         let long_word = "x".repeat(20_000);
@@ -263,9 +277,11 @@ pub(super) mod tests {
                 id: quote.clone(),
             });
         }
-        let mut refusals: Vec<String> = errors.iter().map(messages::save_refusal).collect();
-        refusals.push(messages::SAVE_NOT_TEXT.to_owned());
-        refusals.push(messages::save_too_large(crate::persist::MAX_FILE_BYTES));
+        let mut refusals: Vec<SaveRefusal> = errors.into_iter().map(SaveRefusal::Refused).collect();
+        refusals.push(SaveRefusal::NotText);
+        refusals.push(SaveRefusal::TooLarge {
+            limit: MAX_FILE_BYTES,
+        });
         refusals
     }
 
@@ -294,33 +310,45 @@ pub(super) mod tests {
         // The rows of the log on an 80 x 24 screen: `game::LOG_HEIGHT` less
         // the separator.
         const ROWS: usize = 5;
-        let theme = Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode);
-        for reason in refusals() {
-            for path in paths() {
-                let set_aside = messages::save_set_aside(&reason, &path);
-                let mut log = MessageLog::default();
-                log.extend([set_aside.clone(), messages::welcome()]);
+        for (language, start) in [
+            (Language::English, " ! Your saved game could not be read"),
+            (Language::French, " ! Sauvegarde illisible"),
+        ] {
+            let theme =
+                Theme::new(ColorMode::TrueColorDark, GlyphSet::Unicode).in_language(language);
+            let welcome = messages::welcome(language);
+            for reason in refusals() {
+                for path in paths() {
+                    let set_aside = messages::save_set_aside(language, &reason, &path);
+                    let mut log = MessageLog::default();
+                    log.extend([set_aside.clone(), welcome.clone()]);
+                    let lines: Vec<String> = visible_lines(&log, ROWS, &theme)
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect();
 
-                let lines: Vec<String> = visible_lines(&log, ROWS, &theme)
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect();
-
-                let wrapped = wrap(&set_aside.text, TEXT_WIDTH);
-                assert!(wrapped.len() < ROWS, "{} lines: {wrapped:?}", wrapped.len());
-                assert!(lines[0].starts_with(" ! Your saved game could not be read"));
-                assert_eq!(lines.len(), wrapped.len() + 1, "{lines:?}");
-                assert!(lines.last().unwrap().contains("You enter the dungeon."));
-                let text = lines.join(" ");
-                assert!(text.contains("save.ron.bad."), "{text}");
-                let normal = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
-                if path.chars().count() < TEXT_WIDTH {
-                    let whole = format!("{}.", normal(&path));
-                    assert!(normal(&text).contains(&whole), "{path} in {text}");
-                } else {
-                    assert!(text.contains(messages::ELLIPSIS), "{text}");
+                    let wrapped = wrap(&set_aside.text, TEXT_WIDTH);
+                    assert!(wrapped.len() < ROWS, "{} lines: {wrapped:?}", wrapped.len());
+                    assert!(lines[0].starts_with(start), "{lines:?}");
+                    assert_eq!(lines.len(), wrapped.len() + 1, "{lines:?}");
+                    assert!(lines.last().unwrap().contains(&welcome.text));
+                    shows_the_path(&lines, &path);
                 }
             }
+        }
+    }
+
+    /// Asserts that the log `lines` show `path` whole, or its end after an
+    /// ellipsis when it is wider than a line, followed by a full stop.
+    fn shows_the_path(lines: &[String], path: &str) {
+        let text = lines.join(" ");
+        assert!(text.contains("save.ron.bad."), "{text}");
+        let normal = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+        if path.chars().count() < TEXT_WIDTH {
+            let whole = format!("{}.", normal(path));
+            assert!(normal(&text).contains(&whole), "{path} in {text}");
+        } else {
+            assert!(text.contains(messages::ELLIPSIS), "{text}");
         }
     }
 }

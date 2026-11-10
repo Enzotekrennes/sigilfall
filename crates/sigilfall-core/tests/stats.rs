@@ -28,9 +28,9 @@ use sigilfall_core::stats::CastCounts;
 /// Creatures that die from any blow of the player and never hurt it much:
 /// two kinds, so kills are counted apart.
 const TEST_MONSTERS: &str = r#"[
-    Monster(id: "moth", name: "wax moth", family: Vermin, elite: false,
+    Monster(id: "moth", name: "wax moth", name_fr: Masculine("le monstre"), plural: "wax moths", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
-    Monster(id: "mite", name: "dust mite", family: Vermin, elite: false,
+    Monster(id: "mite", name: "dust mite", name_fr: Masculine("le monstre"), plural: "dust mites", plural_fr: "monstres", family: Vermin, elite: false,
         speed: 100, hp: 1, attack: 0, defense: 0, min_depth: 1),
 ]"#;
 

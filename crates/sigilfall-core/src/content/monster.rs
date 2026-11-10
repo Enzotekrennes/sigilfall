@@ -13,6 +13,7 @@ use super::MONSTERS_FILE;
 use super::check::{EntryCheck, UniqueIds};
 use super::entry_file::RawEntry;
 use super::error::ContentError;
+use super::french::FrenchNoun;
 use super::monster_file::MonsterEntry;
 use crate::generation::FIRST_DEPTH;
 use crate::schedule::NORMAL_SPEED;
@@ -67,8 +68,14 @@ pub enum Family {
 pub struct MonsterDef {
     /// Stable key used by saves and spawn tables.
     id: String,
-    /// Name shown to the player.
+    /// Name shown to the player, in English.
     name: String,
+    /// Name shown to the player, in French.
+    name_fr: FrenchNoun,
+    /// Name of several, in English: "ossuary rats".
+    plural: String,
+    /// Name of several, in French, without an article: "rats d'ossuaire".
+    plural_fr: String,
     /// Family, which gives the letter drawn on the map.
     family: Family,
     /// Whether this is the strong form of its family.
@@ -95,6 +102,25 @@ impl MonsterDef {
     /// Returns the name shown to the player, in English.
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Returns the name shown to the player in French: the noun, its gender
+    /// and its article (see [`FrenchNoun`]).
+    pub const fn french_name(&self) -> &FrenchNoun {
+        &self.name_fr
+    }
+
+    /// Returns the name of several such creatures shown to the player, in
+    /// English, such as "ossuary rats" or "lead homunculi".
+    pub fn plural(&self) -> &str {
+        &self.plural
+    }
+
+    /// Returns the name of several such creatures shown to the player, in
+    /// French and without an article, such as "rats d'ossuaire" or "yeux
+    /// veilleurs".
+    pub fn french_plural(&self) -> &str {
+        &self.plural_fr
     }
 
     /// Returns the creature's family.
@@ -177,6 +203,9 @@ fn validate_entry(position: usize, entry: MonsterEntry) -> Result<MonsterDef, Co
     let check = EntryCheck::new(&kind, position, Some(&id));
     Ok(MonsterDef {
         name: check.name(entry.name)?,
+        name_fr: check.french_noun(entry.name_fr)?,
+        plural: check.name_in(entry.plural, "plural")?,
+        plural_fr: check.name_in(entry.plural_fr, "plural_fr")?,
         family: check.required(entry.family, "family")?,
         elite: check.required(entry.elite, "elite")?,
         speed: check.in_range(entry.speed, "speed", 1, MAX_SPEED)?,

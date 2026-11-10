@@ -1,6 +1,6 @@
-//! The options screen, opened from the title menu: glyphs, colours and
-//! theme, each changed in place and shown at once in the screen's own
-//! colours and glyphs.
+//! The options screen, opened from the title menu: glyphs, colours, theme
+//! and language, each changed in place and shown at once in the screen's
+//! own colours, glyphs and words.
 //!
 //! Exposes [`OptionRow`], the entries of the screen; [`OptionsMenu`], the
 //! screen's own state (which entry is chosen); [`change`], which gives an
@@ -10,8 +10,10 @@
 //! sample line draws a few map glyphs in their tokens, so the effect of a
 //! change is seen on the screen itself, then what the chosen entry does,
 //! the notes that explain why the screen may differ from the options
-//! (`--ascii` given, the light theme without true colour) and the notice of
-//! a failed write.
+//! (`--ascii` or `--lang` given, the light theme without true colour) and
+//! the notice of a failed write. A language is always named in itself
+//! ("English", "Français"), so a player who cannot read the language in use
+//! still finds their own.
 //!
 //! Nothing here writes a file: the application applies and saves the
 //! options. Every word comes from `messages`.
@@ -23,7 +25,7 @@ use ratatui::widgets::Widget as _;
 
 use super::log::wrap;
 use super::{draw_centred_rows, key_help, up_down};
-use crate::messages;
+use crate::messages::{self, Labels};
 use crate::theme::{Appearance, ColorChoice, ColorSupport, GlyphSet, Options, Settings, Theme};
 
 /// An entry of the options screen, top to bottom.
@@ -35,20 +37,23 @@ pub enum OptionRow {
     Colors,
     /// Dark or light theme.
     Theme,
+    /// English or French.
+    Language,
     /// Back to the title menu.
     Back,
 }
 
 /// The entries, top to bottom.
-const ROWS: [OptionRow; 4] = [
+const ROWS: [OptionRow; 5] = [
     OptionRow::Glyphs,
     OptionRow::Colors,
     OptionRow::Theme,
+    OptionRow::Language,
     OptionRow::Back,
 ];
 
 /// Columns of a line taken by an option's label, before its value: the
-/// longest label, "Colours", and six blank columns.
+/// longest label, "Language" (or "Couleurs"), and five blank columns.
 const LABEL_WIDTH: usize = 13;
 
 /// Columns the notice of a failed write is wrapped to: the 80 columns of
@@ -57,9 +62,9 @@ const LABEL_WIDTH: usize = 13;
 /// left edge once centred.
 const NOTICE_WIDTH: usize = 76;
 
-/// Most notes the screen shows under the description: `--ascii` given, and
-/// the light theme drawn in monochrome (see [`notes`]).
-const NOTES: usize = 2;
+/// Most notes the screen shows under the description: `--ascii` given,
+/// `--lang` given, and the light theme drawn in monochrome (see [`notes`]).
+const NOTES: usize = 3;
 
 /// The options screen's own state: which entry is chosen, as a position
 /// in [`ROWS`]. It opens on the first option.
@@ -107,8 +112,8 @@ impl OptionsMenu {
 
 /// Returns `options` with the option of `row` given its next value
 /// (`forward` true) or its previous one, wrapping around: Unicode and
-/// ASCII; Auto, 16 colours and monochrome; dark and light. "Back" changes
-/// nothing.
+/// ASCII; Auto, 16 colours and monochrome; dark and light; English and
+/// French. "Back" changes nothing.
 pub const fn change(options: Options, row: OptionRow, forward: bool) -> Options {
     match row {
         OptionRow::Glyphs => Options {
@@ -133,6 +138,14 @@ pub const fn change(options: Options, row: OptionRow, forward: bool) -> Options 
             },
             ..options
         },
+        OptionRow::Language => Options {
+            language: if forward {
+                options.language.next()
+            } else {
+                options.language.previous()
+            },
+            ..options
+        },
         OptionRow::Back => options,
     }
 }
@@ -140,8 +153,9 @@ pub const fn change(options: Options, row: OptionRow, forward: bool) -> Options 
 /// Draws the options screen in the state `menu` over `area` of `buffer`,
 /// for `settings`, with `theme` (the theme of those settings, so a change
 /// shows at once): the title, one line per entry with its value, the
-/// sample line, what the chosen entry does, the notes on `--ascii` and on
-/// the light theme without true colour when they apply, and `notice`, the
+/// sample line, what the chosen entry does, the notes on `--ascii`, on
+/// `--lang` and on the light theme without true colour when they apply,
+/// and `notice`, the
 /// reason the options could not be written, if any; the key help on the
 /// last row.
 ///
@@ -157,7 +171,7 @@ pub fn render(
 ) {
     let mut rows = vec![
         (
-            Line::styled(messages::OPTIONS_TITLE, theme.text_title),
+            Line::styled(theme.labels().options_title, theme.text_title),
             false,
         ),
         (Line::default(), false),
@@ -168,13 +182,13 @@ pub fn render(
     rows.push((sample_line(width, theme), false));
     rows.push((Line::default(), false));
     rows.push((
-        Line::styled(help_of(menu.chosen()), theme.text_muted),
+        Line::styled(help_of(menu.chosen(), theme.labels()), theme.text_muted),
         false,
     ));
     // Centred as if both notes were shown, so the list does not move when
     // one appears.
     let steady_rows = rows.len() + NOTES;
-    for note in notes(settings) {
+    for note in notes(settings, theme) {
         rows.push((Line::styled(note, theme.text_muted), false));
     }
     if let Some(notice) = notice {
@@ -202,12 +216,15 @@ pub fn render(
 
     let help = key_help(
         vec![
-            (up_down(theme), messages::CHOOSE_LABEL),
+            (up_down(theme), theme.labels().choose_label),
             (
                 format!("{}{}", theme.glyphs.arrow_left, theme.glyphs.arrow_right),
-                messages::CHANGE_LABEL,
+                theme.labels().change_label,
             ),
-            (messages::CANCEL_KEY.to_owned(), messages::MENU_BACK_LABEL),
+            (
+                theme.labels().escape_key.to_owned(),
+                theme.labels().menu_back_label,
+            ),
         ],
         theme,
     );
@@ -229,23 +246,27 @@ fn entry_lines(
     settings: &Settings,
     theme: &Theme,
 ) -> (Vec<(Line<'static>, bool)>, usize) {
-    let separator = theme.glyphs.separator;
+    let (separator, labels) = (theme.glyphs.separator, theme.labels());
     let entries: Vec<(&str, String)> = ROWS
         .iter()
         .map(|&row| match row {
             OptionRow::Glyphs => (
-                messages::GLYPHS_OPTION,
-                glyphs_value(settings.options.glyphs),
+                labels.glyphs_option,
+                glyphs_value(settings.options.glyphs, labels),
             ),
             OptionRow::Colors => (
-                messages::COLORS_OPTION,
-                colors_value(settings.options.colors, settings.detected, separator),
+                labels.colors_option,
+                colors_value(settings.options.colors, settings.detected, separator, theme),
             ),
             OptionRow::Theme => (
-                messages::THEME_OPTION,
-                theme_value(settings.options.appearance),
+                labels.theme_option,
+                theme_value(settings.options.appearance, labels),
             ),
-            OptionRow::Back => (messages::BACK_ITEM, String::new()),
+            OptionRow::Language => (
+                labels.language_option,
+                settings.options.language.endonym().to_owned(),
+            ),
+            OptionRow::Back => (labels.back_item, String::new()),
         })
         .collect();
     let width = entries
@@ -276,57 +297,70 @@ fn entry_lines(
     (lines, width)
 }
 
-/// The value of the glyph option, as the screen shows it.
-fn glyphs_value(glyphs: GlyphSet) -> String {
+/// The value of the glyph option, as the screen shows it in the words of
+/// `labels`.
+fn glyphs_value(glyphs: GlyphSet, labels: &Labels) -> String {
     match glyphs {
-        GlyphSet::Unicode => messages::UNICODE_VALUE,
-        GlyphSet::Ascii => messages::ASCII_VALUE,
+        GlyphSet::Unicode => labels.unicode_value,
+        GlyphSet::Ascii => labels.ascii_value,
     }
     .to_owned()
 }
 
-/// The value of the colour option, as the screen shows it; "Auto" says
-/// what was `detected`.
-fn colors_value(colors: ColorChoice, detected: ColorSupport, separator: char) -> String {
+/// The value of the colour option, as the screen shows it in the language
+/// of `theme`; "Auto" says what was `detected`.
+fn colors_value(
+    colors: ColorChoice,
+    detected: ColorSupport,
+    separator: char,
+    theme: &Theme,
+) -> String {
     match colors {
-        ColorChoice::Auto => messages::auto_colors(detected, separator),
-        ColorChoice::Ansi16 => messages::ANSI16_VALUE.to_owned(),
-        ColorChoice::Monochrome => messages::MONOCHROME_VALUE.to_owned(),
+        ColorChoice::Auto => messages::auto_colors(theme.language, detected, separator),
+        ColorChoice::Ansi16 => theme.labels().ansi16_value.to_owned(),
+        ColorChoice::Monochrome => theme.labels().monochrome_value.to_owned(),
     }
 }
 
-/// The value of the theme option, as the screen shows it.
-fn theme_value(appearance: Appearance) -> String {
+/// The value of the theme option, as the screen shows it in the words of
+/// `labels`.
+fn theme_value(appearance: Appearance, labels: &Labels) -> String {
     match appearance {
-        Appearance::Dark => messages::DARK_VALUE,
-        Appearance::Light => messages::LIGHT_VALUE,
+        Appearance::Dark => labels.dark_value,
+        Appearance::Light => labels.light_value,
     }
     .to_owned()
 }
 
-/// What the entry `row` does, shown under the list while it is chosen.
-const fn help_of(row: OptionRow) -> &'static str {
+/// What the entry `row` does, in the words of `labels`, shown under the
+/// list while it is chosen.
+const fn help_of(row: OptionRow, labels: &'static Labels) -> &'static str {
     let index = match row {
         OptionRow::Glyphs => 0,
         OptionRow::Colors => 1,
         OptionRow::Theme => 2,
-        OptionRow::Back => 3,
+        OptionRow::Language => 3,
+        OptionRow::Back => 4,
     };
-    messages::OPTION_HELP[index]
+    labels.option_help[index]
 }
 
-/// The notes that explain why the screen differs from the options: ASCII
-/// glyphs forced by `--ascii`, and the light theme drawn in monochrome
-/// because the colours are not 24-bit.
-fn notes(settings: &Settings) -> Vec<&'static str> {
+/// The notes that explain why the screen differs from the options, in the
+/// language of `theme`: ASCII glyphs forced by `--ascii`, the language
+/// forced by `--lang`, and the light theme drawn in monochrome because the
+/// colours are not 24-bit.
+fn notes(settings: &Settings, theme: &Theme) -> Vec<String> {
     let mut notes = Vec::new();
     if settings.forced_ascii {
-        notes.push(messages::ASCII_FORCED);
+        notes.push(theme.labels().ascii_forced.to_owned());
+    }
+    if let Some(forced) = settings.forced_language {
+        notes.push(messages::language_forced(theme.language, forced));
     }
     let light_in_monochrome = settings.options.appearance == Appearance::Light
         && settings.options.colors.support(settings.detected) == ColorSupport::Ansi16;
     if light_in_monochrome {
-        notes.push(messages::LIGHT_IN_MONOCHROME);
+        notes.push(theme.labels().light_in_monochrome.to_owned());
     }
     notes
 }
@@ -341,7 +375,7 @@ fn sample_line(width: usize, theme: &Theme) -> Line<'static> {
     let floor: String = std::iter::repeat_n(glyphs.floor, 3).collect();
     let mut line = Line::from(vec![
         Span::styled(
-            format!("  {:<LABEL_WIDTH$}", messages::SAMPLE_LABEL),
+            format!("  {:<LABEL_WIDTH$}", theme.labels().sample_label),
             theme.text_muted,
         ),
         Span::styled(glyphs.player.to_string(), theme.player),

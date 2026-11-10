@@ -7,7 +7,8 @@
 //! [`Content::parse_with_floors`] for any text,
 //! [`MonsterDef`] and [`Family`], [`SigilDef`], [`Effect`] and
 //! [`Targeting`], [`ItemDef`], [`ItemEffect`] and [`ItemFamily`],
-//! [`FloorKind`], the bounds
+//! [`FloorKind`], the French names of monsters and items ([`FrenchNoun`],
+//! [`Gender`]; every entry is named in English and in French), the bounds
 //! of a definition ([`MAX_DEPTH`] for every floor number, [`MAX_WEIGHT`]),
 //! and the errors [`ContentError`] and [`FieldProblem`]. The files are
 //! embedded in the binary at compile time (`include_str!`), so an installed
@@ -27,6 +28,7 @@ mod entry_file;
 mod error;
 mod floor;
 mod floor_file;
+mod french;
 mod item;
 mod item_file;
 mod monster;
@@ -38,6 +40,7 @@ mod spawn_file;
 
 pub use error::{ContentError, FieldProblem};
 pub use floor::FloorKind;
+pub use french::{FrenchNoun, Gender};
 pub use item::{ItemDef, ItemEffect, ItemFamily};
 pub use monster::{Family, MAX_ATTACK, MAX_DEFENSE, MAX_HP, MAX_SPEED, MonsterDef};
 pub use sigil::{Effect, MAX_POWER, SigilDef, Targeting};
@@ -56,7 +59,8 @@ use spawn::SpawnTable;
 /// itself has no bottom: floors deeper than this one use its spawn weights.
 pub const MAX_DEPTH: u32 = 10;
 
-/// Most characters in the name of a monster, a sigil or an item.
+/// Most characters in the name of a monster, a sigil or an item, in either
+/// language (a French noun counted without its article).
 ///
 /// Names are written whole in sentences: a log line is 76 columns wide and
 /// "The NAME kills you (99)." with a name of 24 characters takes 44, so even
@@ -412,6 +416,9 @@ mod tests {
             ("attack", "1".to_owned()),
             ("defense", "0".to_owned()),
             ("min_depth", "1".to_owned()),
+            ("name_fr", "Feminine(\"la créature\")".to_owned()),
+            ("plural", "\"test creatures\"".to_owned()),
+            ("plural_fr", "\"créatures\"".to_owned()),
         ]
         .into()
     }
@@ -712,6 +719,90 @@ mod tests {
     }
 
     #[test]
+    fn a_missing_or_malformed_french_name_is_refused() {
+        let (error, message) = refused(&file(&[valid("ok"), without("mute", "name_fr")]));
+        assert_names(&message, "monster `mute` (entry 2)", "name_fr");
+        assert!(matches!(
+            error,
+            ContentError::InvalidField {
+                field: "name_fr",
+                problem: FieldProblem::Missing,
+                ..
+            }
+        ));
+
+        for wrong in [
+            "Masculine(\"la rate\")",
+            "Feminine(\"rat\")",
+            "Masculine(\"\")",
+        ] {
+            let (error, message) = refused(&file(&[with("odd", "name_fr", wrong)]));
+            assert_names(&message, "monster `odd` (entry 1)", "name_fr");
+            assert!(
+                matches!(
+                    error,
+                    ContentError::InvalidField {
+                        problem: FieldProblem::BadFrenchArticle { .. },
+                        ..
+                    }
+                ),
+                "{wrong}: {error:?}"
+            );
+        }
+        let (error, _) = refused(&file(&[with("odd", "name_fr", "Masculine(\"le  \")")]));
+        assert!(matches!(
+            error,
+            ContentError::InvalidField {
+                problem: FieldProblem::Empty,
+                ..
+            }
+        ));
+
+        // The article is not counted against the limit, the noun is.
+        let longest = "x".repeat(MAX_NAME_LENGTH);
+        let at_limit = format!("Masculine(\"le {longest}\")");
+        assert!(Content::parse(&file(&[with("long", "name_fr", &at_limit)])).is_ok());
+        let too_long = format!("Masculine(\"le {longest}y\")");
+        let (_, message) = refused(&file(&[with("long", "name_fr", &too_long)]));
+        assert_names(&message, "monster `long` (entry 1)", "name_fr");
+    }
+
+    #[test]
+    fn a_missing_plural_in_either_language_is_refused() {
+        for field in ["plural", "plural_fr"] {
+            let (error, message) = refused(&file(&[valid("ok"), without("lone", field)]));
+            assert_names(&message, "monster `lone` (entry 2)", field);
+            assert!(matches!(
+                error,
+                ContentError::InvalidField {
+                    problem: FieldProblem::Missing,
+                    ..
+                }
+            ));
+        }
+    }
+
+    #[test]
+    fn every_shipped_entry_is_named_in_french() {
+        let shipped = Content::load().expect("the shipped content is valid");
+        for monster in shipped.monsters() {
+            assert!(!monster.french_name().noun().is_empty(), "{}", monster.id());
+        }
+        for item in shipped.items() {
+            assert!(!item.french_name().noun().is_empty(), "{}", item.id());
+        }
+        for sigil in shipped.sigils() {
+            assert!(!sigil.french_name().is_empty(), "{}", sigil.id());
+        }
+        let hierophant = shipped.monster("hierophant").expect("a shipped monster");
+        assert_eq!(hierophant.french_name().noun(), "hiérophante");
+        assert!(!hierophant.french_name().elided(), "le hiérophante");
+        let shade = shipped.monster("shade").expect("a shipped monster");
+        assert_eq!(shade.french_name().gender(), Gender::Feminine);
+        assert!(shade.french_name().elided(), "l'ombre");
+    }
+
+    #[test]
     fn missing_identifier_is_refused_with_the_entry_position() {
         let source = file(&[valid("ok"), without("ignored", "id")]);
 
@@ -785,14 +876,14 @@ mod tests {
 
     #[test]
     fn value_of_the_wrong_type_reports_line_entry_and_field() {
-        // Line 1 is `[` and each entry takes 11 lines, so the second entry
-        // opens on line 13 and its fifth field, `speed`, is on line 18.
+        // Line 1 is `[` and each entry takes 14 lines, so the second entry
+        // opens on line 16 and its fifth field, `speed`, is on line 21.
         let source = file(&[valid("ok"), with("swift", "speed", "\"fast\"")]);
-        assert!(source.lines().nth(17).unwrap().contains("speed: \"fast\""));
+        assert!(source.lines().nth(20).unwrap().contains("speed: \"fast\""));
 
         let (error, _) = refused(&source);
 
-        let message = syntax_error_on(&error, 18);
+        let message = syntax_error_on(&error, 21);
         assert_names(&message, "monster `swift` (entry 2), field", "speed");
     }
 
@@ -811,12 +902,12 @@ mod tests {
     fn syntax_error_before_the_identifier_names_the_entry_position() {
         let mut fields = fields("late_id");
         fields.rotate_left(1);
-        // `id` now comes last, so the parser meets `family` (line 15) first.
+        // `id` now comes last, so the parser meets `family` (line 18) first.
         let source = file(&[valid("ok"), write_entry(&fields).replace("Vermin", "3")]);
 
         let (error, _) = refused(&source);
 
-        let message = syntax_error_on(&error, 15);
+        let message = syntax_error_on(&error, 18);
         assert_names(&message, "monster entry 2, field", "family");
     }
 
@@ -856,7 +947,7 @@ mod tests {
         assert!(message.contains("before the first monster"), "{message}");
 
         let (error, _) = refused(&format!("{} trailing", file(&[valid("ok")])));
-        let message = syntax_error_on(&error, 13);
+        let message = syntax_error_on(&error, 16);
         assert!(message.contains("after the last monster"), "{message}");
     }
 }
