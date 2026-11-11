@@ -2,6 +2,9 @@
 title: Sigilfall
 description: A terminal roguelike where spells are cast by tracing sigils on a 3 × 3 grid with the number keys.
 template: splash
+head:
+  - tag: title
+    content: Sigilfall
 hero:
   tagline: A terminal roguelike where spells are cast by tracing sigils on a 3 × 3 grid with the number keys, on QWERTY and AZERTY keyboards alike.
   actions:

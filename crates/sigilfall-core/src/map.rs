@@ -9,7 +9,7 @@
 //! The map also keeps the player's sight: which cells are visible right now
 //! and which have been seen at least once (remembered). Computing what is
 //! visible is the job of the `fov` module, building generated floors that of
-//! the `generation` module. Engraved glyphs are not handled here yet.
+//! the `generation` module. Engraved glyphs live in `game::world`, not here.
 
 use crate::geometry::{Direction, Position};
 

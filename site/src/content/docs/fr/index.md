@@ -2,6 +2,9 @@
 title: Sigilfall
 description: Un roguelike en terminal où l'on lance des sorts en traçant des sigilles sur une grille de 3 × 3 avec les touches des chiffres.
 template: splash
+head:
+  - tag: title
+    content: Sigilfall
 hero:
   tagline: Un roguelike en terminal où l'on lance des sorts en traçant des sigilles sur une grille de 3 × 3 avec les touches des chiffres, sur un clavier QWERTY comme AZERTY.
   actions:
