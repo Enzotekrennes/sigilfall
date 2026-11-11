@@ -4,10 +4,15 @@
 //
 // - id:        stable key used by saves; lower-case letters, digits and
 //              underscores, starting with a letter. Never rename.
-// - name:      name shown to the player in English, at most 24 characters.
+// - name:      name shown to the player in English, at most 24 characters,
+//              in lower case but for proper nouns ("page of the Veil"), as
+//              the names of the creatures: the game writes it inside its
+//              sentences ("You drink the healing draught") and only puts a
+//              capital at the start of a line of the inventory.
 // - name_fr:   French name: the noun with its definite article, wrapped in
 //              its gender, such as Masculine("le rat d'ossuaire"),
-//              Feminine("la fiole") or Feminine("l'ombre"). The article is
+//              Feminine("la fiole") or Feminine("l'ombre"), in lower case
+//              but for proper nouns, as `name`. The article is
 //              `le ` for a masculine noun, `la ` for a feminine one, `l'`
 //              before a vowel or a mute h; the sentences of the game are
 //              built from it ("l'ombre est brûlée", "un hiérophante").
@@ -32,29 +37,29 @@
 [
     Item(
         id: "healing_draught",
-        name: "Healing Draught",
-        name_fr: Masculine("le Philtre de soin"),
+        name: "healing draught",
+        name_fr: Masculine("le philtre de soin"),
         effect: Heal(10),
         min_depth: 1,
     ),
     Item(
         id: "essence_phial",
-        name: "Essence Phial",
-        name_fr: Feminine("la Fiole d'essence"),
+        name: "essence phial",
+        name_fr: Feminine("la fiole d'essence"),
         effect: RestoreEssence(4),
         min_depth: 1,
     ),
     Item(
         id: "steadying_ink",
-        name: "Steadying Ink",
-        name_fr: Feminine("l'Encre d'aplomb"),
+        name: "steadying ink",
+        name_fr: Feminine("l'encre d'aplomb"),
         effect: Steady(2),
         min_depth: 1,
     ),
     Item(
         id: "veil_page",
-        name: "Page of the Veil",
-        name_fr: Feminine("la Page du Voile"),
+        name: "page of the Veil",
+        name_fr: Feminine("la page du Voile"),
         effect: Teach("veil"),
         min_depth: 2,
     ),

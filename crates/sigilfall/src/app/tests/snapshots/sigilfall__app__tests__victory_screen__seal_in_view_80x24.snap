@@ -26,4 +26,4 @@ expression: screen
                                                                                 
                                                                                 
                                                                                 
- wasd move   . wait   t trace   g take   i pack   > unseal   q save & quit
+ wasd move  . wait  t trace  g take  i pack  > unseal  q save & quit  x explore

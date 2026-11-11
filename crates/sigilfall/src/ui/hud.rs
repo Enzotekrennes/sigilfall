@@ -803,15 +803,15 @@ mod tests {
                 "v rat ×2        1/1",
                 "e eye           1/1",
                 "s shade         1/1",
-                "¡ Healing Draugh ×2",
-                "♦ Steadying Ink",
+                "¡ healing draugh ×2",
+                "♦ steadying ink",
             ]
         );
         let ascii = Theme::new(ColorMode::Monochrome, GlyphSet::Ascii);
         let lines = in_view_block(&game, &content, 10, 19, &ascii);
         assert_eq!(
             texts(&lines)[5..],
-            ["! Healing Draugh x2", "* Steadying Ink"]
+            ["! healing draugh x2", "* steadying ink"]
         );
         assert_eq!(
             lines[5].spans[0].style, ascii.item,
@@ -1248,7 +1248,7 @@ mod sharing_tests {
                 "v rat           1/1",
                 "e eye           1/1",
                 "s shade         1/1",
-                "¡ Healing Draught",
+                "¡ healing draught",
                 "≡ known glyph ×5",
             ],
             "{rows:#?}"

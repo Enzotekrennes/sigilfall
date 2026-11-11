@@ -10,7 +10,8 @@
 //! - texts that take values are functions with a `language` parameter,
 //!   both wordings side by side in one `match`: [`describe`], which turns
 //!   the events of one `Game::submit` into [`Message`]s, the opening
-//!   messages ([`welcome`], [`welcome_back`], [`opening`]), the notices about
+//!   messages ([`welcome`], [`welcome_with_sigil`], [`welcome_back`],
+//!   [`opening`]), the hint about Caps Lock ([`caps_lock_hint`]), the notices about
 //!   files ([`file_notice`], with [`save_refusal`] and [`options_problem`]),
 //!   the save notice [`save_not_deleted`], why automatic exploration stopped
 //!   ([`exploration_halted`]), the words of the end screens ([`epitaph`],
@@ -141,11 +142,6 @@ pub const PICK_UP_KEY: &str = "g";
 /// Key that opens the inventory, in the key help of the game screen.
 pub const INVENTORY_KEY: &str = "i";
 
-/// Key that goes down the stairs, in the key help of the game screen on
-/// every layout; the letters of `input::descend_keys` do the same, but the
-/// 80-column help line has no room left to name them.
-pub const DESCEND_KEY: &str = ">";
-
 /// Key that drops the chosen item, in the key help of the inventory.
 pub const DROP_KEY: &str = "d";
 
@@ -198,12 +194,18 @@ pub fn version() -> String {
 
 /// What the seed entry says when `typed` is not a seed: the text as typed
 /// and what to do.
+///
+/// With the warning mark before it, the sentence fits 80 columns whole even
+/// when `typed` fills the field (`ui::title::SEED_CAPACITY`, 24
+/// characters): 71 columns in English, 69 in French, whose guillemets and
+/// no-break spaces take two more columns than the English quotes, hence
+/// its shorter "see above".
 pub fn invalid_seed(language: Language, typed: &str) -> String {
     match language {
         Language::English => format!("\"{typed}\" is not a seed: use one of the forms above."),
-        Language::French => format!(
-            "«{NBSP}{typed}{NBSP}» n'est pas une graine{NBSP}: utilisez l'une des formes ci-dessus."
-        ),
+        Language::French => {
+            format!("«{NBSP}{typed}{NBSP}» n'est pas une graine{NBSP}: voir ci-dessus.")
+        }
     }
 }
 
@@ -709,6 +711,44 @@ pub fn welcome(language: Language) -> Message {
     Message::new(Tone::Info, text)
 }
 
+/// The first message of a new run whose player starts knowing `sigil`, in
+/// place of [`welcome`]: where the player stands, the sigil ready to cast
+/// and the key that opens the trace grid ([`TRACE_KEY`], the same on every
+/// layout), so a new player knows at once that a spell is ready and how to
+/// cast it.
+///
+/// "You enter the dungeon knowing the sigil Ember: press t to trace it." /
+/// "Vous entrez dans le donjon avec le sigille Braise : t pour le tracer."
+/// ([`Tone::Sigil`]). One line of the log with the shipped sigils, so a
+/// notice about the save that opens the log (4 lines at most, see
+/// [`save_set_aside`]) still shows whole above it in the 5 rows of the log.
+pub fn welcome_with_sigil(language: Language, sigil: &SigilDef) -> Message {
+    let name = sigil_def_name(language, sigil);
+    let text = match language {
+        Language::English => {
+            format!(
+                "You enter the dungeon knowing the sigil {name}: press {TRACE_KEY} to trace it."
+            )
+        }
+        Language::French => format!(
+            "Vous entrez dans le donjon avec le sigille {name}{NBSP}: {TRACE_KEY} pour le tracer."
+        ),
+    };
+    Message::new(Tone::Sigil, text)
+}
+
+/// The message logged when `letter`, a movement letter typed in upper case,
+/// did nothing on the map (`input::capital_movement_letter`): Caps Lock is
+/// the likely cause. "Z does nothing: Caps Lock on?" / "Z ne fait rien :
+/// Verr Maj activé ?" ([`Tone::Info`]: no time passed).
+pub fn caps_lock_hint(language: Language, letter: char) -> Message {
+    let text = match language {
+        Language::English => format!("{letter} does nothing: Caps Lock on?"),
+        Language::French => format!("{letter} ne fait rien{NBSP}: Verr Maj activé{NBSP}?"),
+    };
+    Message::new(Tone::Info, text)
+}
+
 /// The first message of a run resumed from its save, in place of
 /// [`welcome`], so the player knows the game went on where it stopped.
 pub fn welcome_back(language: Language) -> Message {
@@ -769,7 +809,7 @@ pub fn save_not_deleted(language: Language) -> Message {
 ///   the ossuary rat in view." ([`Tone::Info`]: nothing happened);
 /// - a monster coming into view: "An ossuary rat comes into view."
 ///   ([`Tone::Danger`]);
-/// - an item coming into view: "You spot an Essence Phial." ([`Tone::Info`]);
+/// - an item coming into view: "You spot an essence phial." ([`Tone::Info`]);
 /// - an unread glyph coming into view: "You spot a carved glyph you have
 ///   not read." ([`Tone::Sigil`]);
 /// - hit points lost: "You are hurt and stop exploring." ([`Tone::Danger`]);
@@ -928,7 +968,7 @@ fn bounded_path(path: &str) -> String {
 ///
 /// What is written, in English (the French sentences say the same, with
 /// articles and agreements of their own: "Braise, tracé pur : l'ombre est
-/// brûlée (6).", "Vous buvez le Philtre de soin et récupérez 8 PV (30/30)."):
+/// brûlée (6).", "Vous buvez le philtre de soin et récupérez 8 PV (30/30)."):
 /// - a blow: who struck whom and the damage, "You hit the shade (3)."
 ///   ([`Tone::Info`]) or "The shade hits you (2)." ([`Tone::Danger`]);
 /// - a killing blow: the same sentence with "kill", which names the victim,
@@ -959,19 +999,19 @@ fn bounded_path(path: &str) -> String {
 ///   2." or "Passage needs a direction." ([`Tone::Info`]);
 /// - a cast an item steadied: the cast's line says so, with the steadied
 ///   casts left, "Ember, steadied trace (1 left): the shade is seared (6).";
-/// - an item picked up: "You pick up the Healing Draught." ([`Tone::Success`]);
-///   one dropped: "You drop the Healing Draught." ([`Tone::Info`]);
+/// - an item picked up: "You pick up the healing draught." ([`Tone::Success`]);
+///   one dropped: "You drop the healing draught." ([`Tone::Info`]);
 /// - an item used and its effect, on one [`Tone::Success`] line with the
 ///   verb of its family (drink a vial, read a page, use a catalyst) and,
 ///   for a restoration, the value reached out of its maximum, so a capped
-///   heal reads as such: "You drink the Healing Draught and recover 8 HP
-///   (30/30).", "You drink the Healing Draught, but you were not hurt
-///   (30/30).", "You drink the Essence Phial and recover 4 essence (6/6).",
-///   "You read the Page of the Veil: Veil joins your grimoire.", "You use
-///   the Steadying Ink: your next 2 unstable casts will be cast pure.";
+///   heal reads as such: "You drink the healing draught and recover 8 HP
+///   (30/30).", "You drink the healing draught, but you were not hurt
+///   (30/30).", "You drink the essence phial and recover 4 essence (6/6).",
+///   "You read the page of the Veil: Veil joins your grimoire.", "You use
+///   the steadying ink: your next 2 unstable casts will be cast pure.";
 /// - an action on an item that the game refused, which took no time
 ///   ([`Tone::Info`]): "There is nothing here to pick up.", "Your pack is
-///   full (10/10): the Healing Draught stays on the floor.", and the
+///   full (10/10): the healing draught stays on the floor.", and the
 ///   sentences of [`item_refusal`];
 /// - a descent: "You descend to depth 2." ([`Tone::Info`]: the status line
 ///   and the new floor already show the change, and the line marks in the
@@ -1420,8 +1460,8 @@ pub fn describe(
 
 /// Returns why the game refused to use or drop the item `item` of `game`
 /// for `reason`, as the log and the inventory say it: "You do not carry
-/// that item.", "You already know Veil: the Page of the Veil has nothing
-/// to teach.", "Something already lies here: drop the Healing Draught
+/// that item.", "You already know Veil: the page of the Veil has nothing
+/// to teach.", "Something already lies here: drop the healing draught
 /// elsewhere."
 ///
 /// The item is named from `game`, which keeps every item not used up; one
@@ -1460,14 +1500,27 @@ pub fn item_refusal(language: Language, game: &Game, item: ItemId, reason: ItemR
 }
 
 /// Returns the name shown to the player for the item definition `id` of
-/// `content`, such as "Healing Draught" ("Philtre de soin" in French,
-/// without its article); an identifier missing from `content` is shown as
+/// `content`, such as "healing draught" ("philtre de soin" in French,
+/// without its article), in lower case as the content writes it, like the
+/// names of the creatures; an identifier missing from `content` is shown as
 /// is, as [`monster_name`] does.
 pub fn item_name<'name>(language: Language, content: &'name Content, id: &'name str) -> &'name str {
     content.item(id).map_or(id, |item| match language {
         Language::English => item.name(),
         Language::French => item.french_name().noun(),
     })
+}
+
+/// Returns the name of `item` at the start of a line of the inventory, its
+/// first letter in upper case: "Healing draught", "Encre d'aplomb", "Page
+/// of the Veil". Inside a sentence the name keeps the lower case of the
+/// content ("You drink the healing draught").
+pub fn item_entry_name(language: Language, item: &ItemDef) -> String {
+    let name = match language {
+        Language::English => item.name(),
+        Language::French => item.french_name().noun(),
+    };
+    capitalized(name)
 }
 
 /// Returns what `item` does in a few words, for the inventory: "heal 10
@@ -1881,7 +1934,7 @@ enum Restored {
 }
 
 /// The line of an item that restored `amount` of `what`, opened by `lead`
-/// ("You drink the Healing Draught") and closed by the `value` reached out
+/// ("You drink the healing draught") and closed by the `value` reached out
 /// of `max`, so a capped restoration reads as such: "… and recover 8 HP
 /// (30/30)." or, when nothing was missing, "…, but you were not hurt
 /// (30/30)."

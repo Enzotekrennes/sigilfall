@@ -30,6 +30,7 @@ mod demo_tape;
 mod descent;
 mod exploration;
 mod field_of_view;
+mod first_steps;
 mod french;
 mod game_screen;
 mod inventory_screen;
@@ -70,6 +71,14 @@ fn fixed_room_app(theme: Theme, seed: Seed) -> App {
 /// The game's own monsters, for their names.
 fn shipped_content() -> Content {
     Content::load().expect("the shipped content is valid")
+}
+
+/// The first line of the log of a new run in `language`: the welcome that
+/// names Ember, the sigil every run starts with, and the key that traces it.
+fn new_run_welcome(language: Language) -> Message {
+    let content = shipped_content();
+    let ember = content.sigil("ember").expect("a shipped sigil");
+    messages::welcome_with_sigil(language, ember)
 }
 
 /// A key press of `code`, as crossterm reports it.

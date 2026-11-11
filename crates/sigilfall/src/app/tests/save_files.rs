@@ -289,7 +289,7 @@ fn quitting_from_the_end_screen_brings_no_save_back() {
     let next = launch_new_game(&folder);
     assert_eq!(
         log_lines(&next),
-        vec![messages::welcome(Language::English)],
+        vec![new_run_welcome(Language::English)],
         "a new game"
     );
 }
@@ -352,7 +352,7 @@ fn a_corrupt_save_is_set_aside_with_a_message_and_a_new_game_starts() {
                 && full.ends_with(shown.trim_start_matches(messages::ELLIPSIS))),
         "{shown} for {full}"
     );
-    assert_eq!(opening[1], messages::welcome(Language::English));
+    assert_eq!(opening[1], new_run_welcome(Language::English));
     assert_eq!(
         fs::read_to_string(&moved_to).unwrap(),
         "(format_version: 1, seed: oops",
@@ -420,7 +420,7 @@ fn a_leftover_temporary_file_is_never_resumed() {
     let app = launch(&folder, Some(OTHER_SEED)).unwrap();
 
     assert_eq!(app.game().seed(), OTHER_SEED);
-    assert_eq!(log_lines(&app), vec![messages::welcome(Language::English)]);
+    assert_eq!(log_lines(&app), vec![new_run_welcome(Language::English)]);
 }
 
 #[test]
@@ -480,7 +480,7 @@ fn a_seed_given_without_a_save_starts_that_seed() {
     let app = launch(&folder, Some(OTHER_SEED)).unwrap();
 
     assert_eq!(app.game().seed(), OTHER_SEED);
-    assert_eq!(log_lines(&app), vec![messages::welcome(Language::English)]);
+    assert_eq!(log_lines(&app), vec![new_run_welcome(Language::English)]);
 }
 
 #[test]
@@ -864,10 +864,10 @@ fn a_deep_run_with_a_pack_and_a_grimoire_resumes_with_the_same_screens() {
     first.handle_key(press(KeyCode::Char('i')));
     let pack_screen = screen_text(&first, 80, 24);
     for (_, item) in game.inventory() {
+        let name = messages::item_entry_name(Language::English, item.definition());
         assert!(
-            pack_screen.contains(item.definition().name()),
-            "the pack shows {}:\n{pack_screen}",
-            item.definition().name()
+            pack_screen.contains(&name),
+            "the pack shows {name}:\n{pack_screen}"
         );
     }
     first.handle_key(press(KeyCode::Esc));
@@ -1592,7 +1592,7 @@ fn a_20_kb_error_and_a_120_character_path_show_whole_on_the_title_and_in_the_log
     );
     assert!(
         log.contains(&format!(
-            "the old save was kept as …{tail}. You enter the dungeon."
+            "the old save was kept as …{tail}. ~ You enter the dungeon knowing"
         )),
         "the whole message, then the welcome line:
 {}",

@@ -222,14 +222,17 @@ fn run_label(game: &Game, theme: &Theme) -> Line<'static> {
 /// true), where the same key breaks the seal instead, "descend" becomes
 /// "unseal".
 ///
-/// The game's help names the layout's letters for moving (WASD or ZQSD):
-/// the arrows, the digits and the vi keys, the same on every layout, are
-/// left to the README with the explore key (`input::EXPLORE_KEY`), so the
-/// help can say, in both languages, that quitting saves the game. In
-/// French it then fits 80 columns with two blank columns between pairs
-/// instead of three (`ui::key_help_within`). The direction prompt, which
-/// has room, names the letters, the arrows and the digits, which give the
-/// diagonals.
+/// The game's help names the layout's letters for moving (WASD or ZQSD)
+/// and its key for the stairs that needs no Shift (`>` or `<`,
+/// `input::KeyNames::descend`): the arrows, the digits and the vi keys, the
+/// same on every layout, are left to the README, so the help can say, in
+/// both languages, that quitting saves the game. In French it then fits 80
+/// columns with two blank columns between pairs instead of three
+/// (`ui::key_help_within`). The explore key (`input::EXPLORE_KEY`) comes
+/// last, only when the row has room for it whole: in English from 80
+/// columns, with two blank columns between pairs; in French from 92. The
+/// direction prompt, which has room, names the letters, the arrows and the
+/// digits, which give the diagonals.
 fn key_help(
     overlay: Option<Overlay<'_>>,
     carries_items: bool,
@@ -245,15 +248,25 @@ fn key_help(
         labels.descend_label
     };
     let bindings: Vec<(String, &str)> = match overlay {
-        None => vec![
-            (keys.movement, labels.move_label),
-            (messages::WAIT_KEY.to_owned(), labels.wait_label),
-            (messages::TRACE_KEY.to_owned(), labels.trace_key_label),
-            (messages::PICK_UP_KEY.to_owned(), labels.pick_up_label),
-            (messages::INVENTORY_KEY.to_owned(), labels.inventory_label),
-            (messages::DESCEND_KEY.to_owned(), descend_label),
-            (keys.quit, labels.save_and_quit_label),
-        ],
+        None => {
+            let mut bindings = vec![
+                (keys.movement, labels.move_label),
+                (messages::WAIT_KEY.to_owned(), labels.wait_label),
+                (messages::TRACE_KEY.to_owned(), labels.trace_key_label),
+                (messages::PICK_UP_KEY.to_owned(), labels.pick_up_label),
+                (messages::INVENTORY_KEY.to_owned(), labels.inventory_label),
+                (keys.descend, descend_label),
+                (keys.quit, labels.save_and_quit_label),
+                (input::EXPLORE_KEY.to_string(), labels.explore_label),
+            ];
+            let line = super::key_help_within(bindings.clone(), width, theme);
+            if line.width() <= usize::from(width) {
+                return line;
+            }
+            // No room for the explore key: the README names it.
+            bindings.pop();
+            bindings
+        }
         Some(Overlay::Inventory(_)) if carries_items => vec![
             (
                 format!("{}{}/{}", glyphs.arrow_up, glyphs.arrow_down, keys.slots),
@@ -803,9 +816,10 @@ mod tests {
                     let above = key_help(None, false, false, 80, &theme).to_string();
                     let bottom = key_help(None, false, true, 80, &theme).to_string();
 
+                    let key = input::key_names(keyboard).descend;
                     let (descend, unseal) = (
-                        format!("> {}", labels.descend_label),
-                        format!("> {}", labels.unseal_label),
+                        format!("{key} {}", labels.descend_label),
+                        format!("{key} {}", labels.unseal_label),
                     );
                     assert!(above.contains(&descend), "{above}");
                     assert!(bottom.contains(&unseal), "{bottom}");
@@ -831,41 +845,60 @@ mod tests {
                 Language::English,
                 Keyboard::Qwerty,
                 "wasd move",
+                "> descend",
                 "q save & quit",
+                "x explore",
             ),
             (
                 Language::English,
                 Keyboard::Azerty,
                 "zqsd move",
+                "< descend",
                 "p save & quit",
+                "x explore",
             ),
             (
                 Language::French,
                 Keyboard::Qwerty,
                 "wasd aller",
+                "> descente",
                 "q sauver et quitter",
+                "x explorer",
             ),
             (
                 Language::French,
                 Keyboard::Azerty,
                 "zqsd aller",
+                "< descente",
                 "p sauver et quitter",
+                "x explorer",
             ),
         ];
-        for (language, keyboard, movement, quit) in cases {
+        for (language, keyboard, movement, descend, quit, explore) in cases {
             let narrow = help(language, keyboard, 80);
             assert!(narrow.starts_with(&format!(" {movement}")), "{narrow:?}");
-            assert!(narrow.ends_with(quit), "{narrow:?}");
-            // Three columns between pairs when they fit, two otherwise.
+            assert!(narrow.contains(&format!(" {descend} ")), "{narrow:?}");
+            assert!(narrow.contains(quit), "{narrow:?}");
+            assert!(narrow.chars().count() <= 80, "{narrow:?}");
+            // The explore key comes last when it fits whole: in English at
+            // 80 columns, two between pairs; not in French, whose help is
+            // already 80 columns wide without it.
+            match language {
+                Language::English => assert!(
+                    narrow.ends_with(&format!("  {quit}  {explore}")),
+                    "{narrow:?}"
+                ),
+                Language::French => {
+                    assert!(narrow.ends_with(&format!("  {quit}")), "{narrow:?}");
+                    assert!(!narrow.contains(explore), "{narrow:?}");
+                }
+            }
+            // On a wide screen every pair is there, three columns apart.
             let wide = help(language, keyboard, 120);
-            assert!(wide.contains(&format!("   {quit}")), "{wide:?}");
-            let gap = if wide.chars().count() <= 80 {
-                "   "
-            } else {
-                "  "
-            };
-            assert!(narrow.contains(&format!("{gap}{quit}")), "{narrow:?}");
-            assert!(!narrow.contains(&format!("{gap} {quit}")), "{narrow:?}");
+            assert!(
+                wide.ends_with(&format!("   {quit}   {explore}")),
+                "{wide:?}"
+            );
         }
     }
 

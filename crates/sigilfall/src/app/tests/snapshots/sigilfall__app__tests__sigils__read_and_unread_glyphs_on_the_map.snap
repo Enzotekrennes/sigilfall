@@ -26,4 +26,4 @@ expression: text(&app)
 "                                                                                "
 "                                                                                "
 "                                                                                "
-" wasd move   . wait   t trace   g take   i pack   > descend   q save & quit     "
+" wasd move  . wait  t trace  g take  i pack  > descend  q save & quit  x explore"

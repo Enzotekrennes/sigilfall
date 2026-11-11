@@ -149,6 +149,9 @@ pub struct Labels {
     /// What the descend key does on the bottom floor, where it breaks the
     /// seal.
     pub unseal_label: &'static str,
+    /// What the explore key does, in the game's key help when the row has
+    /// room for it.
+    pub explore_label: &'static str,
     /// Title of the inventory's frame.
     pub inventory_title: &'static str,
     /// What the arrows and the digits do in the lists.
@@ -317,6 +320,7 @@ impl Labels {
             inventory_label,
             descend_label,
             unseal_label,
+            explore_label,
             inventory_title,
             choose_label,
             use_label,
@@ -423,6 +427,7 @@ impl Labels {
             *inventory_label,
             *descend_label,
             *unseal_label,
+            *explore_label,
             *inventory_title,
             *choose_label,
             *use_label,
@@ -569,6 +574,7 @@ pub const ENGLISH: Labels = Labels {
     inventory_label: "pack",
     descend_label: "descend",
     unseal_label: "unseal",
+    explore_label: "explore",
     inventory_title: "Inventory",
     choose_label: "choose",
     use_label: "use",
@@ -715,6 +721,7 @@ pub const FRENCH: Labels = Labels {
     inventory_label: "sac",
     descend_label: "descente",
     unseal_label: "briser",
+    explore_label: "explorer",
     inventory_title: "Inventaire",
     choose_label: "choisir",
     use_label: "utiliser",

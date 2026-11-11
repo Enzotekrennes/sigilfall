@@ -100,7 +100,9 @@ On the map:
 
 On AZERTY, `q` and `d` move, so quitting takes `p`. On both layouts the
 letter that goes down the stairs is `E`: `d` moves east, and `e` does
-nothing on the map, so Caps Lock never turns a step into a descent. Escape
+nothing on the map, so Caps Lock never turns a step into a descent. A
+movement letter typed in upper case does nothing, and the log asks once
+whether Caps Lock is on. Escape
 never quits: it closes the grid, the inventory
 and the sub-screens of the title, and does nothing on the map. No key does
 two things on one screen of one layout; a test goes through every key of
@@ -111,11 +113,14 @@ stops as soon as a monster comes into view, an item or an unread glyph
 appears, you are hurt, nothing is left to explore, any key is pressed, or
 after 200 steps; the log says why. It does not start with a monster in view.
 The key help at the bottom of the screen names the letters of your layout
-for moving and says that quitting saves the game; it has no room for the
-arrows, the digits, the vi keys or `x`, so they are listed here only.
+for moving, the key of the stairs typed without Shift (`>` on QWERTY, `<` on
+AZERTY), and says that quitting saves the game. It names `x` when the row
+has room for it: from 80 columns in English, from 92 in French. The arrows,
+the digits and the vi keys are listed here only.
 
 While tracing a sigil, the grid is numbered like the keypad (7 8 9 on top,
-1 2 3 at the bottom):
+1 2 3 at the bottom). Each node shows its digit, as the grimoire writes the
+patterns, and on AZERTY the key that links it under the digit (`è` under 7):
 
 | Keys | Action |
 |---|---|
@@ -153,7 +158,8 @@ on its way does not close the summary unseen.
 
 ### How sigils work
 
-Every run starts with Ember (`7 5 3`), a spell that burns the nearest foe.
+Every run starts with Ember (`7 5 3`), a spell that burns the nearest foe;
+the first line of the log says so, with the key that opens the grid.
 Glyphs carved in the floor (`§`) teach the other sigils when you step on
 them, and the grimoire beside the grid lists the patterns you know. A trace
 that matches a known pattern exactly casts it; one node off, the spell goes

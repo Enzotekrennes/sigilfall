@@ -115,7 +115,7 @@ impl<'name> Who<'name> {
 /// "an" before a `name` that starts with a vowel letter, "a" otherwise.
 ///
 /// Spelling decides, not sound: right for every monster and item of the
-/// game ("an acolyte", "a hierophant", "an Essence Phial"), wrong for a name
+/// game ("an acolyte", "a hierophant", "an essence phial"), wrong for a name
 /// such as "unicorn" or "hour", which the content does not have.
 fn english_article(name: &str) -> &'static str {
     let starts_with_vowel = name
@@ -200,8 +200,8 @@ mod tests {
         assert_eq!(named("shade").agreed("brûlé", "brûlée"), "brûlée");
         assert_eq!(named("ossuary_rat").agreed("brûlé", "brûlée"), "brûlé");
         let phial = Who::item(&content, "essence_phial");
-        assert_eq!(phial.definite(Language::French), "la Fiole d'essence");
-        assert_eq!(phial.indefinite(Language::English), "an Essence Phial");
+        assert_eq!(phial.definite(Language::French), "la fiole d'essence");
+        assert_eq!(phial.indefinite(Language::English), "an essence phial");
         assert_eq!(Who::Player.definite(Language::French), "vous");
     }
 

@@ -1,6 +1,6 @@
 ---
 source: crates/sigilfall/src/app/tests/keyboard_layouts.rs
-assertion_line: 255
+assertion_line: 256
 expression: screen(&app)
 ---
  Depth 1 · Turn 2                                      Seed 7F3A-91C2-0B5E-D4A8
@@ -13,7 +13,7 @@ expression: screen(&app)
                      ▒······¡·······▒                     │
                      ▒··············▒                     │ IN VIEW
                      ▒·······@······▒                     │ @ you
-                     ▒▒▒▒▒▒▒▒▒▒▒ ▒▒▒▒                     │ ¡ Essence Phial
+                     ▒▒▒▒▒▒▒▒▒▒▒ ▒▒▒▒                     │ ¡ essence phial
                                                           │
                                                           │
                                                           │
@@ -21,9 +21,9 @@ expression: screen(&app)
                                                           │
                                                           │
 ─ Log ────────────────────────────────────────────────────┴─────────────────────
-   You enter the dungeon.
+ ~ You enter the dungeon knowing the sigil Ember: press t to trace it.
 
 
 
 
- zqsd move   . wait   t trace   g take   i pack   > descend   p save & quit
+ zqsd move  . wait  t trace  g take  i pack  < descend  p save & quit  x explore

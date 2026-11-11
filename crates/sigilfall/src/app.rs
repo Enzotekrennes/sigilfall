@@ -26,7 +26,11 @@
 //!
 //! The application keeps the message log of the game in progress: the
 //! events of each action are turned into lines of the language in use by
-//! the `messages` module and appended to it. The problems met with the
+//! the `messages` module and appended to it. A new game's log opens with
+//! a welcome that names the sigil the player starts with and the key that
+//! traces it. A movement letter typed in upper case on the map does nothing,
+//! and the log asks once whether Caps Lock is on, until a key does something
+//! again. The problems met with the
 //! save and options files are kept as facts ([`FileNotice`]) and worded
 //! when a screen shows them, so they follow a change of language. Once the game is over, its end screen
 //! replaces it: the death summary (`ui::death`) once the player has died,
@@ -60,7 +64,7 @@
 //! meantime; a refusal of the game took no time and keeps the inventory
 //! open, with the reason under the list.
 //!
-//! Going down the stairs (`>`, or `E`) is a game action like
+//! Going down the stairs (`>`, `<` on AZERTY, or `E`) is a game action like
 //! a move: the game replaces the floor and its field of view, the screen
 //! draws the new one around the player with the depth on the status line,
 //! and the log keeps the floors above. Off the stairs the game refuses it at
@@ -177,6 +181,9 @@ struct Run {
     game: Game,
     /// What happened so far, in words, newest last.
     log: MessageLog,
+    /// Whether the log already asked if Caps Lock is on since the last key
+    /// that did something on the map (see [`App::hint_caps_lock`]).
+    caps_lock_hinted: bool,
 }
 
 /// The running application: the screen shown, the game in progress if
@@ -466,7 +473,11 @@ impl App {
         } else {
             self.state = State::Playing;
         }
-        self.run = Some(Run { game, log });
+        self.run = Some(Run {
+            game,
+            log,
+            caps_lock_hinted: false,
+        });
         self.save_notice = None;
     }
 
@@ -496,21 +507,27 @@ impl App {
     }
 
     /// Starts the new game `run`, its log opening with the problems
-    /// waiting in `opening`, then the welcome message, in the language in
-    /// use: a game on a seed drawn now (`cli::random_seed`), on the seed
-    /// given, or the daily dungeon of the date given (`Game::daily`).
+    /// waiting in `opening`, then the welcome message, which names the
+    /// sigil the player starts with and the key that traces it
+    /// (`messages::welcome_with_sigil`; the plain `messages::welcome` if the
+    /// grimoire starts empty), in the language in use: a game on a seed
+    /// drawn now (`cli::random_seed`), on the seed given, or the daily
+    /// dungeon of the date given (`Game::daily`).
     fn start_new_game(&mut self, run: NewRun) {
         let language = self.language();
         let mut opening: Vec<Message> = std::mem::take(&mut self.opening)
             .iter()
             .map(|notice| messages::opening(language, notice))
             .collect();
-        opening.push(messages::welcome(language));
         let game = match run {
             NewRun::Random => Game::new(cli::random_seed(), &self.content),
             NewRun::Seed(seed) => Game::new(seed, &self.content),
             NewRun::Daily(date) => Game::daily(date, &self.content),
         };
+        opening.push(game.grimoire().sigils().first().map_or_else(
+            || messages::welcome(language),
+            |sigil| messages::welcome_with_sigil(language, sigil),
+        ));
         self.begin(game, opening);
     }
 
@@ -808,8 +825,14 @@ impl App {
         if self.exploration.is_some() {
             return self.handle_exploring_key(key);
         }
-        match input::command_for(self.keyboard(), key) {
-            None => {}
+        let command = input::command_for(self.keyboard(), key);
+        if let Some(run) = &mut self.run
+            && command.is_some()
+        {
+            run.caps_lock_hinted = false;
+        }
+        match command {
+            None => self.hint_caps_lock(key),
             Some(Command::Quit) => self.state = State::Quit,
             Some(_) if !self.screen_is_visible() => {}
             Some(Command::Act(action)) => {
@@ -818,6 +841,27 @@ impl App {
             Some(Command::Trace) => self.state = State::Casting(Casting::start()),
             Some(Command::Inventory) => self.state = State::Inventory(InventoryScreen::open()),
             Some(Command::Explore) => self.start_exploring(),
+        }
+    }
+
+    /// Logs [`messages::caps_lock_hint`] when `key`, which did nothing on
+    /// the map, is a movement letter typed in upper case
+    /// (`input::capital_movement_letter`), unless the log already asked
+    /// since the last key that did something: a player who holds a key or
+    /// presses several with Caps Lock on reads it once, not once a key. No
+    /// time passes. Nothing is logged while the screen is too small to be
+    /// read.
+    fn hint_caps_lock(&mut self, key: KeyEvent) {
+        let Some(letter) = input::capital_movement_letter(self.keyboard(), key) else {
+            return;
+        };
+        if !self.screen_is_visible() {
+            return;
+        }
+        let language = self.language();
+        if let Some(run) = self.run.as_mut().filter(|run| !run.caps_lock_hinted) {
+            run.log.push(messages::caps_lock_hint(language, letter));
+            run.caps_lock_hinted = true;
         }
     }
 

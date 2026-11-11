@@ -194,7 +194,11 @@ fn keyboard_on_the_command_line_wins_for_the_session_without_changing_the_option
     let mut app = launch_with_arguments(&folder, &["--keyboard", "azerty", "--seed", "42"])
         .expect("the launch succeeds");
     assert!(help(&app).starts_with(" zqsd move"), "{}", help(&app));
-    assert!(help(&app).ends_with("p save & quit"), "{}", help(&app));
+    assert!(
+        help(&app).ends_with("p save & quit  x explore"),
+        "{}",
+        help(&app)
+    );
     app.handle_key(press(KeyCode::Char('p')));
     app.save_on_exit().unwrap();
 
@@ -240,12 +244,14 @@ fn every_key_help_names_the_keys_of_the_layout_in_each_language_within_80_column
 #[test]
 fn the_game_screen_in_each_language_and_layout() {
     for (language, keyboard, name) in COMBINATIONS {
-        let content = shipped_content();
-        let mut app = App::with_game(
-            theme(language, keyboard),
-            Game::new(SEED, &content),
-            content,
-        );
+        // A new game as the player starts it, its log opening with the
+        // sigil known and the key that traces it.
+        let folder = ScratchFolder::new("keyboard-game-screen");
+        let cli = Cli {
+            seed: Some(SEED),
+            ..no_arguments()
+        };
+        let mut app = launch_on(&folder, language, keyboard, &cli);
         app.handle_key(press(KeyCode::Char('.')));
         assert_snapshot!(format!("game_screen_{name}"), screen(&app));
     }

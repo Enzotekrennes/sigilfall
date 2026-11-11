@@ -1,17 +1,18 @@
 ---
 source: crates/sigilfall/src/app/tests/sigils.rs
+assertion_line: 427
 expression: text
 ---
 " Depth 1 · Turn 2                                      Seed 7F3A-91C2-0B5E-D4A8 "
 "╭─ Failed trace ────────────────────────────────────────╮ │ HP            30/30 "
 "│                                                       │ │ ██████████████████  "
-"│  ○     ●     ○   FAILED                               │ │ Essence         4/6 "
+"│  ○7    ●8    ○9  FAILED                               │ │ Essence         4/6 "
 "│      ╱   ╲       not in your grimoire                 │ │                     "
 "│    ╱       ╲     traced    4·8·6                      │ │ SIGILS          0/5 "
-"│  ●     ○     ×                                        │ │ none yet            "
+"│  ●4    ○5    ×6                                       │ │ none yet            "
 "│                                                       │ │                     "
 "│                                                       │ │ IN VIEW             "
-"│  ○     ○     ○   The spell fizzles.                   │ │ @ you               "
+"│  ○1    ○2    ○3  The spell fizzles.                   │ │ @ you               "
 "│                                                       │ │                     "
 "│                  Sigils are learnt from the glyphs    │ │                     "
 "│                  carved in the floor, § on the        │ │                     "

@@ -228,10 +228,7 @@ fn new_game_without_a_save_starts_at_once_on_a_random_seed() {
 
     assert_eq!(first.state(), State::Playing);
     assert_eq!(first.game().player_turns(), 0);
-    assert_eq!(
-        log_lines(&first),
-        vec![messages::welcome(Language::English)]
-    );
+    assert_eq!(log_lines(&first), vec![new_run_welcome(Language::English)]);
     // Two draws of 64 random bits are equal once in 2^64 runs.
     assert_ne!(first.game().seed(), second.game().seed());
 }
@@ -287,7 +284,7 @@ fn new_game_with_a_save_asks_first_and_keeps_the_save_unless_told_otherwise() {
     assert!(!app.has_saved_game());
     assert_eq!(app.game().player_turns(), 0);
     assert_ne!(app.game().seed(), saved.seed());
-    assert_eq!(log_lines(&app), vec![messages::welcome(Language::English)]);
+    assert_eq!(log_lines(&app), vec![new_run_welcome(Language::English)]);
 }
 
 #[test]
@@ -482,7 +479,10 @@ fn seed_on_the_command_line_skips_the_title() {
     assert_eq!(app.game().seed(), SEED);
     let rows = screen_rows(&app);
     assert!(rows[0].contains("Seed 7F3A-91C2-0B5E-D4A8"), "{rows:?}");
-    assert!(rows[23].trim_end().ends_with("q save & quit"), "{rows:?}");
+    assert!(
+        rows[23].trim_end().ends_with("q save & quit  x explore"),
+        "{rows:?}"
+    );
 }
 
 #[test]

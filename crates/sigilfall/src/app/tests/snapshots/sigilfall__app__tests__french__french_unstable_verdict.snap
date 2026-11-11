@@ -1,18 +1,18 @@
 ---
 source: crates/sigilfall/src/app/tests/french.rs
-assertion_line: 568
+assertion_line: 569
 expression: screen(&app)
 ---
  Profondeur 1 · Tour 4                               Graine 7F3A-91C2-0B5E-D4A8
 ╭─ Tracé instable ──────────────────────────────────────╮ │ PV            30/30
 │                                                       │ │ ██████████████████
-│  ○     ×─────●   INSTABLE                             │ │ Essence         4/6
+│  ○7    ×─────●9  INSTABLE                             │ │ Essence         4/6
 │            ╱     Lance, à un nœud près                │ │
 │          ╱       attendu   1·5·9·6                    │ │ SIGILLES        1/5
-│  ○     ●     ○   tracé     1·5·9·8                    │ │ Lance
+│  ○4    ●5    ○6  tracé     1·5·9·8                    │ │ Lance
 │      ╱                                                │ │
 │    ╱                                                  │ │ EN VUE
-│  ●     ○     ○   La magie se retourne contre vous.    │ │ @ vous
+│  ●1    ○2    ○3  La magie se retourne contre vous.    │ │ @ vous
 │                                                       │ │ ≡ glyphe connu
 │                                                       │ │
 │                                                       │ │

@@ -52,7 +52,7 @@ const MODES: [ColorMode; 4] = [
     ColorMode::Monochrome,
 ];
 
-/// Healing of the shipped Healing Draught (`content/items.ron`), checked
+/// Healing of the shipped healing draught (`content/items.ron`), checked
 /// by [`the_shipped_draught_heals_ten`].
 const DRAUGHT_HEAL: i32 = 10;
 
@@ -231,7 +231,7 @@ fn g_picks_up_the_item_underfoot_and_time_passes() {
     );
     assert_eq!(
         last_log(&app),
-        (Tone::Success, "You pick up the Healing Draught.".to_owned())
+        (Tone::Success, "You pick up the healing draught.".to_owned())
     );
     assert_eq!(
         app.game().visible_items().count(),
@@ -281,7 +281,7 @@ fn a_full_inventory_leaves_the_item_on_the_floor_and_says_why() {
         last_log(&app),
         (
             Tone::Info,
-            "Your pack is full (10/10): the Essence Phial stays on the floor.".to_owned()
+            "Your pack is full (10/10): the essence phial stays on the floor.".to_owned()
         )
     );
     let left = app.game().visible_items().map(|item| item.definition);
@@ -326,7 +326,7 @@ fn drinking_a_draught_heals_up_to_the_maximum_and_the_panel_shows_it() {
         last_log(&app),
         (
             Tone::Success,
-            format!("You drink the Healing Draught and recover {restored} HP (30/30).")
+            format!("You drink the healing draught and recover {restored} HP (30/30).")
         )
     );
     assert!(row_text(&screen(&app), 1).ends_with("HP            30/30 "));
@@ -346,7 +346,7 @@ fn drinking_a_draught_when_badly_hurt_restores_its_whole_strength() {
     assert_eq!(app.game().player_actor().hp(), healed);
     assert_eq!(
         last_log(&app).1,
-        format!("You drink the Healing Draught and recover 10 HP ({healed}/30).")
+        format!("You drink the healing draught and recover 10 HP ({healed}/30).")
     );
     assert!(
         row_text(&screen(&app), 1).ends_with(&format!("{healed}/30 ")),
@@ -363,7 +363,7 @@ fn drinking_a_draught_unhurt_says_so_instead_of_mending() {
     assert_eq!(app.game().player_actor().hp(), PLAYER_MAX_HP);
     assert_eq!(
         last_log(&app).1,
-        "You drink the Healing Draught, but you were not hurt (30/30)."
+        "You drink the healing draught, but you were not hurt (30/30)."
     );
     assert!(app.log().newest_first().all(|m| !m.text.contains("mend")));
 }
@@ -389,10 +389,10 @@ fn dropping_lays_the_chosen_item_underfoot_and_closes_the_inventory() {
     assert_eq!(dropped, [("steadying_ink", PLAYER_START)]);
     assert_eq!(
         last_log(&app),
-        (Tone::Info, "You drop the Steadying Ink.".to_owned())
+        (Tone::Info, "You drop the steadying ink.".to_owned())
     );
     let text = text(&app);
-    assert!(text.contains("♦ Steadying Ink"), "listed in view: {text}");
+    assert!(text.contains("♦ steadying ink"), "listed in view: {text}");
 }
 
 #[test]
@@ -412,7 +412,7 @@ fn a_refused_drop_takes_no_time_and_keeps_the_inventory_open() {
         inventory.refusal().map(|(_, reason)| reason),
         Some(ItemRefusal::CellTaken)
     );
-    let refusal = "Something already lies here: drop the Healing Draught elsewhere.";
+    let refusal = "Something already lies here: drop the healing draught elsewhere.";
     assert_eq!(last_log(&app), (Tone::Info, refusal.to_owned()));
     let notice = |app: &App| {
         let screen = screen(app);
@@ -420,15 +420,15 @@ fn a_refused_drop_takes_no_time_and_keeps_the_inventory_open() {
     };
     let [first, second] = notice(&app);
     assert!(
-        first.starts_with("│ ! Something already lies here: drop the Healing "),
+        first.starts_with("│ ! Something already lies here: drop the healing "),
         "{first}"
     );
-    assert!(second.starts_with("│   Draught elsewhere. "), "{second}");
+    assert!(second.starts_with("│   draught elsewhere. "), "{second}");
 
     app.handle_key(press(KeyCode::Down));
     let [first, second] = notice(&app);
     assert!(
-        !first.contains("Something") && !second.contains("Draught"),
+        !first.contains("Something") && !second.contains("draught"),
         "a new choice clears it: {first}{second}"
     );
 }
@@ -454,7 +454,7 @@ fn a_page_whose_sigil_is_known_is_refused_without_cost() {
     assert!(matches!(app.state(), State::Inventory(_)));
     assert_eq!(
         last_log(&app).1,
-        "You already know Veil: the Page of the Veil has nothing to teach."
+        "You already know Veil: the page of the Veil has nothing to teach."
     );
     assert_snapshot!(text(&app));
 }
@@ -470,7 +470,7 @@ fn reading_an_unknown_page_teaches_its_sigil() {
         last_log(&app),
         (
             Tone::Success,
-            "You read the Page of the Veil: Veil joins your grimoire.".to_owned()
+            "You read the page of the Veil: Veil joins your grimoire.".to_owned()
         )
     );
 }
@@ -674,9 +674,9 @@ fn a_map_with_items_in_view_lists_them_in_the_panel() {
     let text = text(&app);
 
     for line in [
-        "¡ Healing Draugh ×2",
-        "♦ Steadying Ink",
-        "¶ Page of the Veil",
+        "¡ healing draugh ×2",
+        "♦ steadying ink",
+        "¶ page of the Veil",
     ] {
         assert!(text.contains(line), "{line}: {text}");
     }
@@ -692,7 +692,7 @@ fn the_inventory_is_plain_ascii_with_ascii_glyphs() {
 
     let text = text(&app);
     assert!(text.is_ascii(), "{text}");
-    assert!(text.contains("> 2  ! Healing Draught"), "{text}");
+    assert!(text.contains("> 2  ! Healing draught"), "{text}");
     assert!(text.contains("^v/1-0 choose"), "{text}");
 }
 
@@ -701,7 +701,7 @@ fn the_key_help_names_the_item_keys_on_every_screen() {
     let mut app = app_on(carrying(&["healing_draught"]), dark());
     let help = |app: &App| row_text(&screen(app), 23);
 
-    assert!(help(&app).contains("g take   i pack   > descend   q save & quit"));
+    assert!(help(&app).contains("g take  i pack  > descend  q save & quit  x explore"));
     app.handle_key(press(KeyCode::Char('i')));
     assert_eq!(
         help(&app).trim_end(),
@@ -1059,7 +1059,7 @@ fn the_item_is_drawn_on_the_map_until_picked_up() {
     assert!(before.contains('¶'), "the page is drawn: {before}");
     assert!(before.contains('♦'), "the ink is drawn: {before}");
     assert!(
-        before.contains("Healing Draught"),
+        before.contains("healing draught"),
         "IN VIEW names it: {before}"
     );
 
@@ -1069,7 +1069,7 @@ fn the_item_is_drawn_on_the_map_until_picked_up() {
     let after = rows_text(&app);
     assert!(after.contains('¶') && after.contains('♦'));
     assert!(
-        !after.contains("¡ Healing Draught"),
+        !after.contains("¡ healing draught"),
         "the picked draught left the floor legend: {after}"
     );
     assert!(
@@ -1093,10 +1093,10 @@ fn the_inventory_lists_items_in_the_order_picked_up_with_their_effect() {
     keys(&mut app, "i");
     let screen = rows(&app);
     let wanted = [
-        ("1", "Steadying Ink", "steady 2 casts"),
-        ("2", "Healing Draught", "heal 10 HP"),
+        ("1", "Steadying ink", "steady 2 casts"),
+        ("2", "Healing draught", "heal 10 HP"),
         ("3", "Page of the Veil", "teach Veil"),
-        ("4", "Essence Phial", "restore 4 essence"),
+        ("4", "Essence phial", "restore 4 essence"),
     ];
     let mut last_row = 0;
     for (slot, name, effect) in wanted {
@@ -1135,7 +1135,7 @@ fn a_draught_restores_hit_points_and_the_panel_shows_them() {
         let after_hp = before_hp + 10;
         assert_eq!(
             last_log_text(&app),
-            format!("You drink the Healing Draught and recover 10 HP ({after_hp}/30)."),
+            format!("You drink the healing draught and recover 10 HP ({after_hp}/30)."),
             "seed {seed}"
         );
         assert_eq!(app.game().player_actor().hp(), after_hp);
@@ -1165,7 +1165,7 @@ fn a_small_wound_is_healed_to_the_maximum_and_no_further() {
 
             assert_eq!(
                 last_log_text(&app),
-                format!("You drink the Healing Draught and recover {missing} HP (30/30)."),
+                format!("You drink the healing draught and recover {missing} HP (30/30)."),
                 "seed {seed}"
             );
             assert_eq!(app.game().player_actor().hp(), MAX_HP);
@@ -1186,7 +1186,7 @@ fn a_draught_drunk_unhurt_says_so_and_stays_at_the_maximum() {
 
     assert_eq!(
         last_log_text(&app),
-        "You drink the Healing Draught, but you were not hurt (30/30)."
+        "You drink the healing draught, but you were not hurt (30/30)."
     );
     assert_eq!(app.game().player_actor().hp(), MAX_HP);
     assert!(
@@ -1233,7 +1233,7 @@ fn a_full_pack_leaves_the_item_on_the_floor_and_the_log_says_why() {
 
         assert_eq!(
             last_log_text(&app),
-            "Your pack is full (10/10): the Essence Phial stays on the floor.",
+            "Your pack is full (10/10): the essence phial stays on the floor.",
             "seed {seed}"
         );
         assert_eq!(world(&app), still, "nothing was paid");
@@ -1246,7 +1246,7 @@ fn a_full_pack_leaves_the_item_on_the_floor_and_the_log_says_why() {
             "the phial still lies on the floor"
         );
         assert!(
-            rows_text(&app).contains("Essence Phial"),
+            rows_text(&app).contains("essence phial"),
             "still in the legend"
         );
     }
@@ -1262,7 +1262,7 @@ fn a_full_pack_is_readable_in_80_by_24() {
     assert_eq!(
         screen
             .iter()
-            .filter(|r| r.contains("¡ Healing Draught"))
+            .filter(|r| r.contains("¡ Healing draught"))
             .count(),
         CAPACITY,
         "ten lines:\n{}",
@@ -1274,7 +1274,7 @@ fn a_full_pack_is_readable_in_80_by_24() {
         assert!(
             screen
                 .iter()
-                .any(|r| r.contains(&format!(" {digit}  ¡ Healing Draught"))),
+                .any(|r| r.contains(&format!(" {digit}  ¡ Healing draught"))),
             "slot {digit}:\n{}",
             screen.join("\n")
         );
@@ -1298,7 +1298,7 @@ fn a_refusal_with_a_full_pack_fits_under_ten_lines() {
     keys(&mut app, "d");
 
     let screen = rows(&app);
-    let wanted = "Something already lies here: drop the Healing Draught elsewhere.";
+    let wanted = "Something already lies here: drop the healing draught elsewhere.";
     let joined = screen.join("\n");
     assert!(
         joined.contains("Something already lies here") && joined.contains("elsewhere."),
@@ -1308,7 +1308,7 @@ fn a_refusal_with_a_full_pack_fits_under_ten_lines() {
     assert_eq!(
         screen
             .iter()
-            .filter(|r| r.contains("Healing Draught") && r.contains("heal 10 HP"))
+            .filter(|r| r.contains("Healing draught") && r.contains("heal 10 HP"))
             .count(),
         CAPACITY,
         "{joined}"
@@ -1330,7 +1330,7 @@ fn an_item_dropped_from_the_inventory_lies_under_the_player_for_half_a_turn() {
 
         assert_eq!(
             last_log_text(&app),
-            "You drop the Healing Draught.",
+            "You drop the healing draught.",
             "seed {seed}"
         );
         assert_eq!(carried(&app), vec!["essence_phial".to_owned()]);
@@ -1345,7 +1345,7 @@ fn an_item_dropped_from_the_inventory_lies_under_the_player_for_half_a_turn() {
 
         // And it can be picked up again.
         keys(&mut app, "g");
-        assert_eq!(last_log_text(&app), "You pick up the Healing Draught.");
+        assert_eq!(last_log_text(&app), "You pick up the healing draught.");
         assert_eq!(carried(&app).len(), 2);
     }
 }
@@ -1365,7 +1365,7 @@ fn dropping_where_an_item_already_lies_keeps_the_inventory_open_and_costs_nothin
 
     assert_eq!(
         last_log_text(&app),
-        "Something already lies here: drop the Essence Phial elsewhere."
+        "Something already lies here: drop the essence phial elsewhere."
     );
     assert_eq!(world(&app), still);
     assert_eq!(energy_and_ticks(&app), clock_before);
@@ -1421,7 +1421,7 @@ fn a_page_of_a_known_sigil_is_refused_without_cost_and_stays_in_the_pack() {
 
         assert_eq!(
             last_log_text(&app),
-            "You already know Veil: the Page of the Veil has nothing to teach.",
+            "You already know Veil: the page of the Veil has nothing to teach.",
             "seed {seed}"
         );
         assert_eq!(world(&app), still);
@@ -1458,7 +1458,7 @@ fn the_essence_phial_restores_essence_up_to_the_maximum_and_the_panel_agrees() {
         keys(&mut app, "i");
         key(&mut app, KeyCode::Enter);
         let expected = format!(
-            "You drink the Essence Phial and recover {restored} essence ({}/6).",
+            "You drink the essence phial and recover {restored} essence ({}/6).",
             essence + restored
         );
         assert!(
@@ -1495,7 +1495,7 @@ fn a_phial_drunk_with_a_full_reserve_never_shows_more_than_six() {
 
     let line = last_log_text(&app);
     assert!(
-        line.contains("Essence Phial") && line.contains("(6/6)"),
+        line.contains("essence phial") && line.contains("(6/6)"),
         "{line}"
     );
     assert_eq!(panel_value(&app, "Essence"), Some("6/6".to_owned()));
@@ -1520,7 +1520,7 @@ fn the_ink_steadies_the_next_two_unstable_casts_and_the_log_says_so() {
         key(&mut app, KeyCode::Enter);
         assert_eq!(
             last_log_text(&app),
-            "You use the Steadying Ink: your next 2 unstable casts will be cast pure.",
+            "You use the steadying ink: your next 2 unstable casts will be cast pure.",
             "seed {seed}"
         );
         assert_eq!(app.game().steady_casts(), 2);
@@ -1580,7 +1580,7 @@ fn the_page_of_the_veil_teaches_veil_and_the_panel_lists_it() {
 
         assert_eq!(
             last_log_text(&app),
-            "You read the Page of the Veil: Veil joins your grimoire.",
+            "You read the page of the Veil: Veil joins your grimoire.",
             "seed {seed}"
         );
         assert!(app.game().grimoire().knows("veil"));
@@ -1606,7 +1606,7 @@ fn an_item_out_of_sight_is_not_drawn_nor_listed_until_the_player_nears_it() {
         let far = rows_text(&app);
         assert!(!far.contains('¡'), "seed {seed}: drawn out of sight\n{far}");
         assert!(
-            !far.contains("Healing Draught"),
+            !far.contains("healing draught"),
             "listed out of sight\n{far}"
         );
 
@@ -1621,7 +1621,7 @@ fn an_item_out_of_sight_is_not_drawn_nor_listed_until_the_player_nears_it() {
         }
         assert!(shown, "seed {seed}: the item never came into view");
         assert!(
-            rows_text(&app).contains("Healing Draught"),
+            rows_text(&app).contains("healing draught"),
             "listed in view"
         );
 
@@ -1637,7 +1637,7 @@ fn an_item_out_of_sight_is_not_drawn_nor_listed_until_the_player_nears_it() {
             "seed {seed}: remembered cell still shows the item\n{}",
             rows_text(&app)
         );
-        assert!(!rows_text(&app).contains("Healing Draught"));
+        assert!(!rows_text(&app).contains("healing draught"));
     }
 }
 
@@ -1697,26 +1697,26 @@ fn the_keys_move_the_choice_in_a_loop_and_by_digit() {
             .find(|r| r.contains('›') && r.contains('│'))
             .unwrap_or_default()
     };
-    assert!(chosen(&app).contains("Steadying Ink"), "{}", chosen(&app));
+    assert!(chosen(&app).contains("Steadying ink"), "{}", chosen(&app));
     let turns = app.game().player_turns();
 
     key(&mut app, KeyCode::Down);
-    assert!(chosen(&app).contains("Healing Draught"));
+    assert!(chosen(&app).contains("Healing draught"));
     keys(&mut app, "j");
     assert!(chosen(&app).contains("Page of the Veil"));
     keys(&mut app, "k");
-    assert!(chosen(&app).contains("Healing Draught"));
+    assert!(chosen(&app).contains("Healing draught"));
     key(&mut app, KeyCode::Up);
     key(&mut app, KeyCode::Up);
-    assert!(chosen(&app).contains("Essence Phial"), "wraps to the last");
+    assert!(chosen(&app).contains("Essence phial"), "wraps to the last");
     key(&mut app, KeyCode::Down);
-    assert!(chosen(&app).contains("Steadying Ink"), "wraps to the first");
+    assert!(chosen(&app).contains("Steadying ink"), "wraps to the first");
     keys(&mut app, "3");
     assert!(chosen(&app).contains("Page of the Veil"));
     key(&mut app, KeyCode::End);
-    assert!(chosen(&app).contains("Essence Phial"));
+    assert!(chosen(&app).contains("Essence phial"));
     key(&mut app, KeyCode::Home);
-    assert!(chosen(&app).contains("Steadying Ink"));
+    assert!(chosen(&app).contains("Steadying ink"));
     keys(&mut app, "9");
     assert!(
         !chosen(&app).is_empty() && chosen(&app).matches('›').count() == 1,
@@ -1736,7 +1736,7 @@ fn the_zero_key_chooses_the_tenth_slot() {
     assert!(
         rows(&app)
             .iter()
-            .any(|r| r.contains('›') && r.contains("Steadying Ink")),
+            .any(|r| r.contains('›') && r.contains("Steadying ink")),
         "{}",
         rows_text(&app)
     );
@@ -1794,7 +1794,7 @@ fn the_chosen_line_reads_without_colour_in_every_mode_and_both_glyph_sets() {
             let chosen = marked[0];
             let other = screen
                 .iter()
-                .position(|r| r.contains("  1  ") && r.contains("Healing Draught"))
+                .position(|r| r.contains("  1  ") && r.contains("Healing draught"))
                 .unwrap_or_else(|| panic!("{mode:?}: first line\n{}", screen.join("\n")));
 
             // Compare the style of the name's cell on the chosen line and on
@@ -1804,9 +1804,9 @@ fn the_chosen_line_reads_without_colour_in_every_mode_and_both_glyph_sets() {
                 let row = &screen[y];
                 let at = row
                     .find(if y == chosen {
-                        "Essence Phial"
+                        "Essence phial"
                     } else {
-                        "Healing Draught"
+                        "Healing draught"
                     })
                     .unwrap();
                 u16::try_from(row[..at].chars().count()).unwrap()
@@ -1917,7 +1917,7 @@ fn the_inventory_cannot_be_opened_or_used_below_80_by_24() {
     assert_eq!(carried(&app).len(), 1);
 
     let small = rows_of(&buffer_at(&app, 79, 24)).join("\n");
-    assert!(!small.contains("Healing Draught"), "{small}");
+    assert!(!small.to_lowercase().contains("healing draught"), "{small}");
     assert!(
         small.to_lowercase().contains("terminal") || small.contains("80"),
         "{small}"
@@ -1935,7 +1935,7 @@ fn the_inventory_screen_does_not_hide_the_side_panel_or_the_log() {
         "SIGILS",
         "IN VIEW",
         "Log",
-        "You pick up the Essence Phial.",
+        "You pick up the essence phial.",
     ] {
         assert!(screen.contains(expected), "{expected} missing:\n{screen}");
     }
@@ -1949,16 +1949,16 @@ fn the_screen_has_no_item_text_clipped_with_the_longest_names() {
     let sigils = include_str!("../../../../sigilfall-core/content/sigils.ron")
         .replace("name: \"Veil\"", "name: \"Veil of the Long Nights.\"");
     let items = include_str!("../../../../sigilfall-core/content/items.ron").replace(
-        "name: \"Page of the Veil\"",
-        "name: \"Page of the Veil Beyond\"",
+        "name: \"page of the Veil\"",
+        "name: \"page of the Veil Beyond\"",
     );
     let Ok(content) = Content::parse_all(MONSTERS, &sigils, &items) else {
         // The bound on names (24 characters) refuses these: use the limit.
         let sigils = include_str!("../../../../sigilfall-core/content/sigils.ron")
             .replace("name: \"Veil\"", "name: \"Veil of the Long Night\"");
         let items = include_str!("../../../../sigilfall-core/content/items.ron").replace(
-            "name: \"Page of the Veil\"",
-            "name: \"Page of the Veil Beyond\"",
+            "name: \"page of the Veil\"",
+            "name: \"page of the Veil Beyond\"",
         );
         let content = Content::parse_all(MONSTERS, &sigils, &items).expect("names at the limit");
         long_names_screen(content);
@@ -2127,7 +2127,7 @@ fn the_overlay_stays_whole_on_larger_terminals() {
     for (width, height) in [(80, 24), (81, 25), (100, 30), (120, 40), (200, 60)] {
         let screen = rows_of(&buffer_at(&app, width, height)).join("\n");
         assert!(screen.contains("Inventory"), "{width}x{height}");
-        assert!(screen.contains("Healing Draught"), "{width}x{height}");
+        assert!(screen.contains("Healing draught"), "{width}x{height}");
         assert!(screen.contains("Page of the Veil"), "{width}x{height}");
         assert!(screen.contains("2/10"), "{width}x{height}");
         assert!(screen.contains("Esc close"), "{width}x{height}");

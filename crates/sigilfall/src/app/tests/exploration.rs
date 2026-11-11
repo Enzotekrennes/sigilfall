@@ -192,7 +192,7 @@ fn an_item_stops_the_walk_when_it_comes_into_view_and_only_then() {
 
     assert_eq!(
         last_line(&app),
-        (Tone::Info, "You spot an Essence Phial.".to_owned())
+        (Tone::Info, "You spot an essence phial.".to_owned())
     );
     assert_eq!(app.game().visible_items().count(), 1);
 
@@ -204,7 +204,7 @@ fn an_item_stops_the_walk_when_it_comes_into_view_and_only_then() {
     assert!(app.game().player_turns() > turns);
     assert_ne!(
         last_line(&app).1,
-        "You spot an Essence Phial.",
+        "You spot an essence phial.",
         "the phial in view does not stop the walk again"
     );
 }

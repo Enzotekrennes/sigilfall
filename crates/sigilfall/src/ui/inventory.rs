@@ -26,7 +26,6 @@ use sigilfall_core::item::{Item, ItemId, ItemRefusal};
 
 use super::log::wrap;
 use super::sigil::{draw_frame, draw_lines, overlay_area};
-use crate::language::Language;
 use crate::messages;
 use crate::theme::Theme;
 
@@ -315,12 +314,11 @@ fn item_lines(
         .collect()
 }
 
-/// The name of `item` in the language of `theme`, without an article.
-fn item_name<'item>(item: &'item Item, theme: &Theme) -> &'item str {
-    match theme.language {
-        Language::English => item.definition().name(),
-        Language::French => item.definition().french_name().noun(),
-    }
+/// The name of `item` in the language of `theme`, without an article, its
+/// first letter in upper case as it starts the line
+/// (`messages::item_entry_name`).
+fn item_name(item: &Item, theme: &Theme) -> String {
+    messages::item_entry_name(theme.language, item.definition())
 }
 
 /// One line of the empty state, in `text_muted`, with the `{glyph}` mark

@@ -243,10 +243,10 @@ fn the_ascii_status_line_and_help_stay_plain_ascii() {
     let help = row_text(&buffer, 23);
 
     assert!(status.starts_with(" Depth 1 - Turn 1 "), "{status:?}");
-    // Seven help entries fit the 80 columns: nothing cut.
+    // Eight help entries fit the 80 columns, two columns apart: nothing cut.
     assert_eq!(
         help.trim_end(),
-        " wasd move   . wait   t trace   g take   i pack   > descend   q save & quit"
+        " wasd move  . wait  t trace  g take  i pack  > descend  q save & quit  x explore"
     );
     assert!(help.is_ascii(), "{help:?}");
 }
@@ -973,7 +973,7 @@ fn the_panel_the_inventory_and_the_grimoire_are_the_same_on_the_next_floor() {
     assert_eq!(app.game().steady_casts(), steady, "steadied casts");
     keys(&mut app, "i");
     let inventory_after = text(&app);
-    for name in ["Healing Draught", "Essence Phial", "Steadying Ink"] {
+    for name in ["Healing draught", "Essence phial", "Steadying ink"] {
         assert!(
             inventory_before.contains(name),
             "{name} before:\n{inventory_before}"
@@ -1031,7 +1031,10 @@ fn the_key_help_names_the_descent_and_still_fits_in_80_columns() {
     assert!(help.contains("> descend"), "{help:?}");
     assert!(help.contains("q save & quit"), "{help:?}");
     assert_eq!(help.chars().count(), 80);
-    assert!(help.trim_end().ends_with("q save & quit"), "{help:?}");
+    assert!(
+        help.trim_end().ends_with("q save & quit  x explore"),
+        "{help:?}"
+    );
 }
 
 #[test]

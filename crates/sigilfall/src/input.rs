@@ -19,7 +19,9 @@
 //! [`exploring_command_for`] while the floor is explored automatically
 //! ([`ExploringCommand`]) and [`seed_command_for`] while a seed is typed
 //! ([`SeedCommand`]). [`key_names`] gives the keys the key help names that
-//! differ between layouts.
+//! differ between layouts, [`node_key`] the key of a node of the trace grid
+//! that is not its digit, and [`capital_movement_letter`] tells a movement
+//! letter typed in upper case, which does nothing, from other keys.
 //!
 //! Every table holds each key once, so no key does two things on one
 //! screen of one layout (a test goes through them all). The layouts share
@@ -230,7 +232,7 @@ pub enum OptionsCommand {
 pub type Binding<C> = (KeyCode, C);
 
 /// The keys the key help names that differ between layouts, written as
-/// the help shows them. The other keys it names (`.`, `t`, `g`, `i`, `>`,
+/// the help shows them. The other keys it names (`.`, `t`, `g`, `i`, `x`,
 /// `d`, Enter, Escape, Backspace) are the same on both.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyNames {
@@ -245,6 +247,9 @@ pub struct KeyNames {
     pub slots: String,
     /// The key that saves and quits ([`quit_key`]).
     pub quit: String,
+    /// The key that goes down the stairs, the first of [`descend_keys`]:
+    /// `>` on QWERTY, `<` on AZERTY, both typed without Shift.
+    pub descend: String,
 }
 
 /// Returns the keys the key help names on `keyboard` (see [`KeyNames`]),
@@ -267,6 +272,7 @@ pub fn key_names(keyboard: Keyboard) -> KeyNames {
         nodes: range(1, 9),
         slots: range(1, 0),
         quit: quit_key(keyboard).to_string(),
+        descend: descend_keys(keyboard)[0].to_string(),
     }
 }
 
@@ -288,19 +294,53 @@ pub const fn quit_key(keyboard: Keyboard) -> char {
 /// Returns the keys that go down the stairs on `keyboard`, the one the key
 /// help names first.
 ///
-/// `>` is the key of the genre and the one the help names on both layouts:
-/// Shift and `.` on QWERTY, Shift and the `<` key on AZERTY. Some layouts
-/// have no plain way to type it, such as AZERTY on a laptop without the `<`
-/// key, so a capital letter does the same on both layouts: `E` ("escalier",
-/// or "exit" the floor). `D` was the letter before WASD and ZQSD, but `d`
-/// now moves east on both, and Caps Lock would have turned a step east into
-/// a descent; `e` is bound to nothing on the game screen. AZERTY also takes
-/// `<`, the same key as `>` without Shift, since nothing goes up.
+/// `>` is the key of the genre, typed with Shift and `.` on QWERTY, where
+/// the help names it. On AZERTY it takes Shift and the `<` key, so the help
+/// names `<`, the same key without Shift, which goes down there too since
+/// nothing goes up. Some layouts have no plain way to type either, such as
+/// AZERTY on a laptop without the `<` key, so a capital letter does the
+/// same on both layouts: `E` ("escalier", or "exit" the floor). `D` was the
+/// letter before WASD and ZQSD, but `d` now moves east on both, and Caps
+/// Lock would have turned a step east into a descent; `e` is bound to
+/// nothing on the game screen.
 pub const fn descend_keys(keyboard: Keyboard) -> &'static [char] {
     match keyboard {
         Keyboard::Qwerty => &['>', 'E'],
-        Keyboard::Azerty => &['>', '<', 'E'],
+        Keyboard::Azerty => &['<', '>', 'E'],
     }
+}
+
+/// Returns the key of `keyboard` that links `node` on the trace grid besides
+/// its digit, for the label the grid shows beside the digit: on AZERTY the
+/// top-row key typed without Shift (`&` for 1 to `ç` for 9,
+/// [`AZERTY_DIGIT_ROW`]); `None` on QWERTY, where the digit is the key.
+pub fn node_key(keyboard: Keyboard, node: Node) -> Option<char> {
+    match keyboard {
+        Keyboard::Qwerty => None,
+        Keyboard::Azerty => Some(AZERTY_DIGIT_ROW[usize::from(node.digit())]),
+    }
+}
+
+/// Returns the letter of `key` when it is a movement letter of `keyboard`
+/// typed in upper case, which does nothing on the game screen: `W A S D` or
+/// `Z Q S D`, and the vi keys `H J K L Y U B N`. Caps Lock is the usual
+/// cause, and the application says so once (`messages::caps_lock_hint`).
+///
+/// `None` for any other key, for a capital bound to something (`E` goes
+/// down the stairs), and for releases, repeats and keys with Ctrl or Alt,
+/// which every keymap ignores anyway.
+pub fn capital_movement_letter(keyboard: Keyboard, key: KeyEvent) -> Option<char> {
+    let Press::Code(KeyCode::Char(typed)) = plain_press(key)? else {
+        return None;
+    };
+    if !typed.is_uppercase() || bound(&game_bindings(keyboard), KeyCode::Char(typed)).is_some() {
+        return None;
+    }
+    let mut lower = typed.to_lowercase();
+    let (Some(letter), None) = (lower.next(), lower.next()) else {
+        return None;
+    };
+    bound(&direction_bindings(keyboard), KeyCode::Char(letter)).map(|_| typed)
 }
 
 /// Returns the letters that move north, west, south and east on

@@ -762,7 +762,7 @@ fn an_item_used_and_its_effect_make_one_line_with_the_capped_value() {
                     hp: 30,
                 },
             ],
-            "You drink the Healing Draught and recover 8 HP (30/30).",
+            "You drink the healing draught and recover 8 HP (30/30).",
         ),
         (
             vec![
@@ -773,7 +773,7 @@ fn an_item_used_and_its_effect_make_one_line_with_the_capped_value() {
                     hp: 30,
                 },
             ],
-            "You drink the Healing Draught, but you were not hurt (30/30).",
+            "You drink the healing draught, but you were not hurt (30/30).",
         ),
         (
             vec![
@@ -784,7 +784,7 @@ fn an_item_used_and_its_effect_make_one_line_with_the_capped_value() {
                     essence: 5,
                 },
             ],
-            "You drink the Essence Phial and recover 4 essence (5/6).",
+            "You drink the essence phial and recover 4 essence (5/6).",
         ),
         (
             vec![
@@ -795,7 +795,7 @@ fn an_item_used_and_its_effect_make_one_line_with_the_capped_value() {
                     essence: 6,
                 },
             ],
-            "You drink the Essence Phial, but your essence was full (6/6).",
+            "You drink the essence phial, but your essence was full (6/6).",
         ),
         (
             vec![
@@ -804,19 +804,19 @@ fn an_item_used_and_its_effect_make_one_line_with_the_capped_value() {
                     sigil: "veil".to_owned(),
                 },
             ],
-            "You read the Page of the Veil: Veil joins your grimoire.",
+            "You read the page of the Veil: Veil joins your grimoire.",
         ),
         (
             vec![used("steadying_ink"), Event::Steadied { casts: 2 }],
-            "You use the Steadying Ink: your next 2 unstable casts will be cast pure.",
+            "You use the steadying ink: your next 2 unstable casts will be cast pure.",
         ),
         (
             vec![used("steadying_ink"), Event::Steadied { casts: 1 }],
-            "You use the Steadying Ink: your next unstable cast will be cast pure.",
+            "You use the steadying ink: your next unstable cast will be cast pure.",
         ),
         (
             vec![used("healing_draught")],
-            "You drink the Healing Draught.",
+            "You drink the healing draught.",
         ),
     ];
 
@@ -851,7 +851,7 @@ fn a_healing_spell_and_a_healing_draught_read_apart() {
     assert_eq!(texts(&spell), ["Recall, pure trace: you mend (8)."]);
     assert_eq!(
         texts(&draught),
-        ["You drink the Healing Draught and recover 8 HP (30/30)."]
+        ["You drink the healing draught and recover 8 HP (30/30)."]
     );
 }
 
@@ -887,13 +887,13 @@ fn picking_up_dropping_and_refusals_have_their_own_lines() {
     assert_eq!(
         lines(&messages),
         [
-            (Tone::Success, "You pick up the Healing Draught."),
+            (Tone::Success, "You pick up the healing draught."),
             (Tone::Info, "There is nothing here to pick up."),
             (
                 Tone::Info,
-                "Your pack is full (10/10): the Steadying Ink stays on the floor."
+                "Your pack is full (10/10): the steadying ink stays on the floor."
             ),
-            (Tone::Info, "You drop the Essence Phial."),
+            (Tone::Info, "You drop the essence phial."),
             (Tone::Info, "You do not carry that item."),
         ]
     );
@@ -979,12 +979,12 @@ fn every_other_halt_of_exploration_says_why() {
         (
             Halt::ItemAppeared("essence_phial".to_owned()),
             Tone::Info,
-            "You spot an Essence Phial.",
+            "You spot an essence phial.",
         ),
         (
             Halt::ItemAppeared("healing_draught".to_owned()),
             Tone::Info,
-            "You spot a Healing Draught.",
+            "You spot a healing draught.",
         ),
         (
             Halt::GlyphAppeared,
@@ -1025,11 +1025,11 @@ fn a_refusal_names_the_item_and_why() {
 
     assert_eq!(
         item_refusal(Language::English, &game, page, ItemRefusal::NothingToLearn),
-        "You already know Veil: the Page of the Veil has nothing to teach."
+        "You already know Veil: the page of the Veil has nothing to teach."
     );
     assert_eq!(
         item_refusal(Language::English, &game, draught, ItemRefusal::CellTaken),
-        "Something already lies here: drop the Healing Draught elsewhere."
+        "Something already lies here: drop the healing draught elsewhere."
     );
     assert_eq!(
         item_refusal(

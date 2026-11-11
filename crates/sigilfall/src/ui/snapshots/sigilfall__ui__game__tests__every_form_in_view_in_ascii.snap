@@ -1,6 +1,6 @@
 ---
 source: crates/sigilfall/src/ui/game.rs
-assertion_line: 1249
+assertion_line: 1312
 expression: screen_text(&screen)
 ---
 " Depth 1 - Turn 19                                     Seed 0000-0000-0000-002A "
@@ -26,4 +26,4 @@ expression: screen_text(&screen)
 "                                                                                "
 "                                                                                "
 "                                                                                "
-" wasd move   . wait   t trace   g take   i pack   > descend   q save & quit     "
+" wasd move  . wait  t trace  g take  i pack  > descend  q save & quit  x explore"

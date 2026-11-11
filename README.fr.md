@@ -107,7 +107,9 @@ Sur la carte :
 En AZERTY, `q` et `d` déplacent : quitter passe donc sur `p`. Sur les deux
 dispositions, la lettre qui descend l'escalier est `E` (« escalier ») : `d`
 déplace vers l'est et `e` ne fait rien sur la carte, si bien que Verr Maj ne
-change jamais un pas en descente. Échap ne quitte jamais : il ferme la grille, l'inventaire et les sous-écrans du titre,
+change jamais un pas en descente. Une lettre de déplacement tapée en
+majuscule ne fait rien, et le journal demande une fois si Verr Maj est
+activé. Échap ne quitte jamais : il ferme la grille, l'inventaire et les sous-écrans du titre,
 et ne fait rien sur la carte. Aucune touche ne fait deux choses sur un même
 écran d'une même disposition ; un test passe par toutes les touches de tous
 les écrans pour que cela reste vrai.
@@ -117,12 +119,16 @@ et s'arrête dès qu'un monstre entre en vue, qu'un objet ou un glyphe non lu
 apparaît, que vous êtes blessé, qu'il ne reste rien à explorer, qu'une touche
 est pressée, ou au bout de 200 pas ; le journal dit pourquoi. L'exploration
 ne démarre pas avec un monstre en vue. L'aide des touches en bas de l'écran
-nomme les lettres de votre disposition pour se déplacer et dit que quitter
-sauvegarde la partie ; elle n'a pas la place pour les flèches, les chiffres,
-les touches vi ni `x`, qui ne sont donc listés qu'ici.
+nomme les lettres de votre disposition pour se déplacer, la touche de
+l'escalier tapée sans Maj (`>` en QWERTY, `<` en AZERTY), et dit que quitter
+sauvegarde la partie. Elle nomme `x` quand la ligne a la place : dès 80
+colonnes en anglais, dès 92 en français. Les flèches, les chiffres et les
+touches vi ne sont listés qu'ici.
 
 Pendant le tracé d'un sigille, la grille est numérotée comme le pavé
-numérique (7 8 9 en haut, 1 2 3 en bas) :
+numérique (7 8 9 en haut, 1 2 3 en bas). Chaque nœud affiche son chiffre,
+comme le grimoire écrit les motifs, et en AZERTY la touche qui le relie sous
+le chiffre (`è` sous le 7) :
 
 | Touches | Action |
 |---|---|
@@ -163,7 +169,8 @@ vu.
 ### Les sigilles
 
 Chaque partie commence avec Braise (`7 5 3`), un sort qui brûle l'ennemi le
-plus proche. Les glyphes gravés dans le sol (`§`) enseignent les autres
+plus proche ; la première ligne du journal le dit, avec la touche qui ouvre la
+grille. Les glyphes gravés dans le sol (`§`) enseignent les autres
 sigilles quand vous marchez dessus, et le grimoire à côté de la grille liste
 les motifs que vous connaissez. Un tracé qui reproduit exactement un motif
 connu le lance ; à un nœud près, le sort part instable et un contrecoup

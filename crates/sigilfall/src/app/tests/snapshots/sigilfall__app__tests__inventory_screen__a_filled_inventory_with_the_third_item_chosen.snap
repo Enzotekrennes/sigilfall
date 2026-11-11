@@ -1,15 +1,16 @@
 ---
 source: crates/sigilfall/src/app/tests/inventory_screen.rs
+assertion_line: 657
 expression: text(&app)
 ---
 " Depth 1 · Turn 6                                      Seed 7F3A-91C2-0B5E-D4A8 "
 "╭─ Inventory ──────────────────────────────────── 5/10 ─╮ │ HP            30/30 "
 "│                                                       │ │ ██████████████████  "
-"│   1  ¡ Healing Draught   heal 10 HP                   │ │ Essence         6/6 "
-"│   2  ¡ Essence Phial     restore 4 essence            │ │                     "
-"│ › 3  ♦ Steadying Ink     steady 2 casts               │ │ SIGILS          0/5 "
+"│   1  ¡ Healing draught   heal 10 HP                   │ │ Essence         6/6 "
+"│   2  ¡ Essence phial     restore 4 essence            │ │                     "
+"│ › 3  ♦ Steadying ink     steady 2 casts               │ │ SIGILS          0/5 "
 "│   4  ¶ Page of the Veil  teach Veil                   │ │ none yet            "
-"│   5  ¡ Healing Draught   heal 10 HP                   │ │                     "
+"│   5  ¡ Healing draught   heal 10 HP                   │ │                     "
 "│                                                       │ │ IN VIEW             "
 "│                                                       │ │ @ you               "
 "│                                                       │ │                     "

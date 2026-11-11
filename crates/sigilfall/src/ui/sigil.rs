@@ -13,6 +13,14 @@
 //! pattern expected and the one traced, and the faulty node drawn `×`; for a
 //! pattern not in the grimoire, how sigils are learnt from glyphs.
 //!
+//! Every node is labelled with the keys that link it: its digit right of
+//! it, as the grimoire writes patterns ("7·5·3"), and on AZERTY the top-row
+//! key typed without Shift under the digit (`è` under 7), so the pattern
+//! read in the grimoire leads to the keys to press. The grimoire keeps the
+//! digits on both layouts: the keypad and Shift with the top row type them
+//! on AZERTY too, and `-` (the key of 6) would read as the separator of the
+//! patterns in ASCII.
+//!
 //! Every state is readable without colour: free, linked, pen and faulty
 //! nodes have four glyphs, and verdicts and warnings are written out.
 
@@ -29,6 +37,7 @@ use sigilfall_core::sigil::{CastQuality, ESSENCE_COST, Node, Trace};
 
 use super::grimoire;
 use crate::casting::{Casting, Notice, Verdict};
+use crate::input;
 use crate::messages;
 use crate::theme::Theme;
 
@@ -484,11 +493,15 @@ pub(super) fn draw_lines(buffer: &mut Buffer, area: Rect, lines: Vec<Line<'stati
 }
 
 /// Draws the grid with `trace` in the frame's `inner` area, as `look`
-/// says: strokes first, then the nine nodes over them.
+/// says: the labels of the nodes first, then the strokes, then the nine
+/// nodes over them.
 ///
 /// A node is free (`○`, `sigil_node`), linked (`●`, the stroke style), the
 /// pen (`◉`, `sigil_cursor`) when it is the last one and `look.pen` is set,
-/// or faulty (`×`, the stroke style) when it is `look.fault`.
+/// or faulty (`×`, the stroke style) when it is `look.fault`. Its labels
+/// (see [`label_cells`]) are its digit in `text_muted` and, on AZERTY, its
+/// key without Shift in `text`, the one to press. A stroke only crosses the
+/// labels of a node it leaves, so a free node keeps them in view.
 fn draw_grid(buffer: &mut Buffer, inner: Rect, trace: &Trace, look: GridLook, theme: &Theme) {
     let glyphs = &theme.glyphs;
     let origin = (inner.x + GRID_LEFT, inner.y + GRID_TOP);
@@ -496,6 +509,18 @@ fn draw_grid(buffer: &mut Buffer, inner: Rect, trace: &Trace, look: GridLook, th
         let cell = (origin.0 + x, origin.1 + y);
         (cell.0 < inner.right() && cell.1 < inner.bottom()).then_some(cell)
     };
+    for digit in 1..=9 {
+        let Some(node) = Node::new(digit) else {
+            continue;
+        };
+        let (digit_cell, key_cell) = label_cells(node);
+        if let Some(cell) = inside(digit_cell) {
+            put(buffer, cell, char::from(b'0' + digit), theme.text_muted);
+        }
+        if let (Some(key), Some(cell)) = (input::node_key(theme.keyboard, node), inside(key_cell)) {
+            put(buffer, cell, key, theme.text);
+        }
+    }
     for (cell, stroke) in stroke_cells(trace) {
         let glyph = match stroke {
             Stroke::Horizontal => glyphs.stroke_horizontal,
@@ -534,6 +559,20 @@ const fn node_cell(node: Node) -> (u16, u16) {
     let column = node.column() as u16;
     let row_from_top = (GRID_SIDE - 1) - node.row() as u16;
     (column * NODE_STEP_X, row_from_top * NODE_STEP_Y)
+}
+
+/// The grid cells of the labels of `node` (see [`node_cell`]): its digit
+/// right of it, and its key on AZERTY under the digit, which falls in the
+/// blank row under the grid for the bottom row.
+///
+/// No stroke crosses them but a stroke from `node` itself: along a row, the
+/// stroke leaves the node through its digit; down a column, it passes left
+/// of both labels; across, a diagonal crosses the rows of the nodes only
+/// halfway between two columns of nodes, and the rows under them only one
+/// column right of the node it leaves, the key's column.
+const fn label_cells(node: Node) -> ((u16, u16), (u16, u16)) {
+    let (x, y) = node_cell(node);
+    ((x + 1, y), (x + 1, y + 1))
 }
 
 /// The cells between the nodes of `trace` that its strokes cross, each
@@ -742,6 +781,38 @@ mod tests {
             .collect();
 
         assert_eq!(crosses, [(3, 3)]);
+    }
+
+    #[test]
+    fn a_stroke_crosses_the_labels_of_the_nodes_it_links_only() {
+        for from in 1..=9 {
+            for to in (1..=9).filter(|&to| to != from) {
+                let (from, to) = (Node::new(from).unwrap(), Node::new(to).unwrap());
+                let linked = [Some(from), Some(to), from.between(to)];
+                for (cell, _) in segment(from, to) {
+                    for digit in 1..=9 {
+                        let node = Node::new(digit).unwrap();
+                        let (digit_cell, key_cell) = label_cells(node);
+                        assert!(
+                            (cell != digit_cell && cell != key_cell)
+                                || linked.contains(&Some(node)),
+                            "{from:?} to {to:?} crosses a label of {node:?} at {cell:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_labels_stay_inside_the_rows_and_columns_left_to_the_grid() {
+        for digit in 1..=9 {
+            let ((x, y), (key_x, key_y)) = label_cells(Node::new(digit).unwrap());
+            // Right of the grid, before the grimoire; above the first line
+            // under the grid.
+            assert!(x < COLUMN_LEFT - GRID_LEFT && key_x < COLUMN_LEFT - GRID_LEFT);
+            assert!(y < INFO_TOP - GRID_TOP && key_y < INFO_TOP - GRID_TOP);
+        }
     }
 
     #[test]

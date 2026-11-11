@@ -1,5 +1,6 @@
 ---
 source: crates/sigilfall/src/app/tests/inventory_screen.rs
+assertion_line: 459
 expression: text(&app)
 ---
 " Depth 1 · Turn 4                                      Seed 7F3A-91C2-0B5E-D4A8 "
@@ -15,13 +16,13 @@ expression: text(&app)
 "│                                                       │ │ ≡ known glyph       "
 "│                                                       │ │                     "
 "│                                                       │ │                     "
-"│ ! You already know Veil: the Page of the Veil has     │ │                     "
+"│ ! You already know Veil: the page of the Veil has     │ │                     "
 "│   nothing to teach.                                   │ │                     "
 "╰───────────────────────────────────────────────────────╯ │                     "
 "                                                          │                     "
 "─ Log ────────────────────────────────────────────────────┴─────────────────────"
 "   You enter the dungeon.                                                       "
-"   You already know Veil: the Page of the Veil has nothing to teach.            "
+"   You already know Veil: the page of the Veil has nothing to teach.            "
 "                                                                                "
 "                                                                                "
 "                                                                                "
