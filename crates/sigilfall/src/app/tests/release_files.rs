@@ -150,36 +150,72 @@ fn the_release_files_agree_on_targets_trigger_installers_and_tool_version() {
         workflow.contains("artifacts_matrix"),
         "the build matrix comes from `dist plan`"
     );
-    // The runner overrides name targets of the list, nothing else.
-    for line in section(&dist, "[dist.github-custom-runners]", "\n[")
-        .lines()
-        .skip(1)
-    {
-        if let Some((target, _)) = line.split_once(" = ") {
-            assert!(targets.contains(&target.trim()), "{target} is a target");
+    // The runner overrides name targets of the list, plus `global` for the
+    // jobs that run once, nothing else.
+    let runners = section(
+        &dist,
+        "[dist.github-custom-runners]",
+        "
+[",
+    );
+    let runner_of = |key: &str| {
+        runners
+            .lines()
+            .find_map(|line| line.strip_prefix(&format!("{key} = \"")))
+            .and_then(|rest| rest.strip_suffix('"'))
+            .unwrap_or_else(|| panic!("{key} has a runner override"))
+    };
+    for line in runners.lines().skip(1) {
+        if let Some((key, _)) = line.split_once(" = ") {
+            let key = key.trim();
+            assert!(
+                key == "global" || targets.contains(&key),
+                "{key} is a target or `global`"
+            );
         }
     }
-    // Both macOS targets build on a versioned Apple Silicon image GitHub
-    // still offers: a job asking for a retired image (macos-14) is cancelled
-    // before it starts, which left v0.1.0 without its macOS binaries. A
-    // suffixed label such as macos-15-intel is not Apple Silicon and fails
-    // here. The action has a pinned dist archive for that runner.
-    let runners = section(&dist, "[dist.github-custom-runners]", "\n[");
-    for target in ["x86_64-apple-darwin", "aarch64-apple-darwin"] {
-        let runner = runners
-            .lines()
-            .find_map(|line| line.strip_prefix(&format!("{target} = \"")))
-            .and_then(|rest| rest.strip_suffix('"'))
-            .unwrap_or_else(|| panic!("{target} has a runner override"));
-        let image_version = runner
-            .strip_prefix("macos-")
+    // Every runner is a versioned image GitHub still offers: a job asking
+    // for a retired image (macos-14) is cancelled before it starts, which
+    // left v0.1.0 without its macOS binaries, and ubuntu-22.04, the dist
+    // default for Linux, is unsupported from April 2027. Both macOS targets
+    // build on Apple Silicon: a suffixed label such as macos-15-intel fails
+    // here. The action has a pinned dist archive for each of these runners.
+    let image_version = |runner: &str, prefix: &str| {
+        runner
+            .strip_prefix(prefix)
             .and_then(|version| version.parse::<u32>().ok())
-            .unwrap_or_else(|| panic!("{runner} is a versioned macOS image"));
+            .unwrap_or_else(|| panic!("{runner} is a versioned {prefix} image"))
+    };
+    for target in ["x86_64-apple-darwin", "aarch64-apple-darwin"] {
+        let runner = runner_of(target);
         assert!(
-            image_version >= 15,
+            image_version(runner, "macos-") >= 15,
             "{runner} is an image GitHub still offers"
         );
     }
+    for key in ["x86_64-unknown-linux-gnu", "global"] {
+        let runner = runner_of(key);
+        let year = runner
+            .strip_prefix("ubuntu-")
+            .and_then(|version| version.split_once('.'))
+            .and_then(|(year, _)| year.parse::<u32>().ok())
+            .unwrap_or_else(|| panic!("{runner} is a versioned Ubuntu image"));
+        assert!(year >= 24, "{runner} is an image GitHub still offers");
+    }
+    let windows = runner_of("x86_64-pc-windows-msvc");
+    assert!(
+        image_version(windows, "windows-") >= 2022,
+        "{windows} is an image GitHub still offers"
+    );
+    // release.yml is edited by hand (allow-dirty), so its jobs that run once
+    // must ask for the `global` runner themselves.
+    let global = format!("runs-on: \"{}\"", runner_of("global"));
+    assert_eq!(
+        workflow.matches("runs-on: \"").count(),
+        workflow.matches(&global).count(),
+        "every fixed runs-on of release.yml is the `global` runner"
+    );
+    assert_eq!(workflow.matches(&global).count(), 4);
     assert!(install_dist.contains("macOS/ARM64)"));
     // A tag `v<version>` matches the glob for the version of the crate.
     let version = fs::read_to_string(root.join("Cargo.toml"))

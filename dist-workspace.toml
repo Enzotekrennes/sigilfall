@@ -50,16 +50,26 @@ include = ["THIRD-PARTY-LICENSES", "README.fr.md"]
 # The action pins below are applied by dist itself.
 allow-dirty = ["ci"]
 
-# dist picks a runner for each target. Both macOS targets build on a
-# versioned Apple Silicon image: GitHub cancels any job whose image it has
-# retired, so this one must name an image GitHub still offers (when it
-# announces the retirement of this one, move to the next). A versioned image,
-# rather than `macos-latest`, keeps the toolchain from changing under a
-# release without a change here. The Intel binary is cross-compiled on
-# Apple Silicon, as Intel macOS runners are being retired.
+# dist picks a runner for each target, and one for the jobs that run once
+# (plan, global artifacts, host, announce). Every runner is pinned to a
+# versioned image: GitHub cancels any job whose image it has retired, so each
+# one must name an image GitHub still offers (when it announces the
+# retirement of one, move to the next), and a versioned image, rather than a
+# `-latest` label, keeps the toolchain from changing under a release without
+# a change here.
+# - macOS: both targets build on Apple Silicon; the Intel binary is
+#   cross-compiled, as Intel macOS runners are being retired.
+# - Linux: ubuntu-24.04, as ubuntu-22.04 (the dist default) is deprecated and
+#   unsupported from April 2027. The binary links the glibc of the build
+#   image, so this sets the oldest glibc the Linux archive runs on.
+# - Windows: windows-2022, the dist default made explicit (MSVC from
+#   Visual Studio 2022).
 [dist.github-custom-runners]
 x86_64-apple-darwin = "macos-15"
 aarch64-apple-darwin = "macos-15"
+x86_64-unknown-linux-gnu = "ubuntu-24.04"
+x86_64-pc-windows-msvc = "windows-2022"
+global = "ubuntu-24.04"
 
 # The actions release.yml uses, pinned to a commit so a moved tag cannot
 # change what runs. The text after the SHA lands in release.yml as a YAML
