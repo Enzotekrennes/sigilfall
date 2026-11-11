@@ -45,11 +45,19 @@ runs:
           --output "$work_dir/$archive" \
           "https://github.com/axodotdev/cargo-dist/releases/download/v$DIST_VERSION/$archive"
 
-        # sha256sum on Linux and in Git Bash on Windows, shasum on macOS.
+        # sha256sum on Linux and in Git Bash on Windows, shasum on macOS. The
+        # archive is read on standard input: given a file name holding a
+        # backslash (any path under RUNNER_TEMP on Windows), both tools
+        # prefix their output line with "\", which would make a correct hash
+        # fail the comparison.
         if command -v sha256sum > /dev/null 2>&1; then
-          actual="$(sha256sum "$work_dir/$archive" | cut -d ' ' -f 1)"
+          actual="$(sha256sum < "$work_dir/$archive" | cut -d ' ' -f 1)"
         else
-          actual="$(shasum -a 256 "$work_dir/$archive" | cut -d ' ' -f 1)"
+          actual="$(shasum -a 256 < "$work_dir/$archive" | cut -d ' ' -f 1)"
+        fi
+        if ! [[ "$actual" =~ ^[0-9a-f]{64}$ ]]; then
+          echo "::error::Could not compute the SHA-256 of $archive (got '$actual'): refusing to install it"
+          exit 1
         fi
         if [ "$actual" != "$expected" ]; then
           echo "::error::$archive has SHA-256 $actual, expected $expected: refusing to install it"

@@ -104,6 +104,15 @@ fn the_release_files_agree_on_targets_trigger_installers_and_tool_version() {
         );
     }
     assert!(install_dist.contains("\"$actual\" != \"$expected\""));
+    // The archive is hashed from standard input: given a Windows path, which
+    // holds backslashes, sha256sum and shasum prefix their output with "\"
+    // and a correct hash would no longer match.
+    assert!(install_dist.contains("sha256sum < \"$work_dir/$archive\""));
+    assert!(install_dist.contains("shasum -a 256 < \"$work_dir/$archive\""));
+    assert!(
+        !install_dist.contains("sha256sum \"$") && !install_dist.contains("shasum -a 256 \"$"),
+        "no archive is hashed by its file name"
+    );
 
     // The workflow installs dist only through that action, never by piping
     // an unchecked installer into a shell.
