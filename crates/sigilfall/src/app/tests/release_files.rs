@@ -159,6 +159,28 @@ fn the_release_files_agree_on_targets_trigger_installers_and_tool_version() {
             assert!(targets.contains(&target.trim()), "{target} is a target");
         }
     }
+    // Both macOS targets build on a versioned Apple Silicon image GitHub
+    // still offers: a job asking for a retired image (macos-14) is cancelled
+    // before it starts, which left v0.1.0 without its macOS binaries. A
+    // suffixed label such as macos-15-intel is not Apple Silicon and fails
+    // here. The action has a pinned dist archive for that runner.
+    let runners = section(&dist, "[dist.github-custom-runners]", "\n[");
+    for target in ["x86_64-apple-darwin", "aarch64-apple-darwin"] {
+        let runner = runners
+            .lines()
+            .find_map(|line| line.strip_prefix(&format!("{target} = \"")))
+            .and_then(|rest| rest.strip_suffix('"'))
+            .unwrap_or_else(|| panic!("{target} has a runner override"));
+        let image_version = runner
+            .strip_prefix("macos-")
+            .and_then(|version| version.parse::<u32>().ok())
+            .unwrap_or_else(|| panic!("{runner} is a versioned macOS image"));
+        assert!(
+            image_version >= 15,
+            "{runner} is an image GitHub still offers"
+        );
+    }
+    assert!(install_dist.contains("macOS/ARM64)"));
     // A tag `v<version>` matches the glob for the version of the crate.
     let version = fs::read_to_string(root.join("Cargo.toml"))
         .unwrap()

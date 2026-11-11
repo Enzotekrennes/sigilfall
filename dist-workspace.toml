@@ -50,11 +50,16 @@ include = ["THIRD-PARTY-LICENSES", "README.fr.md"]
 # The action pins below are applied by dist itself.
 allow-dirty = ["ci"]
 
-# dist picks a runner for each target; the Intel macOS runners are being
-# retired, so the Intel binary is cross-compiled on Apple Silicon instead.
+# dist picks a runner for each target. Both macOS targets build on a
+# versioned Apple Silicon image: GitHub cancels any job whose image it has
+# retired, so this one must name an image GitHub still offers (when it
+# announces the retirement of this one, move to the next). A versioned image,
+# rather than `macos-latest`, keeps the toolchain from changing under a
+# release without a change here. The Intel binary is cross-compiled on
+# Apple Silicon, as Intel macOS runners are being retired.
 [dist.github-custom-runners]
-x86_64-apple-darwin = "macos-14"
-aarch64-apple-darwin = "macos-14"
+x86_64-apple-darwin = "macos-15"
+aarch64-apple-darwin = "macos-15"
 
 # The actions release.yml uses, pinned to a commit so a moved tag cannot
 # change what runs. The text after the SHA lands in release.yml as a YAML
