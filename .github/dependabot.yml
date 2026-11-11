@@ -1,7 +1,8 @@
 # Weekly update pull requests for the two kinds of pinned dependencies:
 # - the GitHub Actions of ci.yml and release.yml, pinned by commit SHA (the
 #   version comment after each SHA is updated with it);
-# - the crates of Cargo.lock.
+# - the crates of Cargo.lock;
+# - the npm packages of the documentation site in site/.
 # Each pull request goes through CI (including `cargo deny`) before merging.
 # The steps of release.yml written by `dist generate` are also bumped here;
 # run `dist generate` after merging such a pull request if dist then reports
@@ -25,4 +26,14 @@ updates:
       # Patch and minor updates together; a major update gets its own pull
       # request, since it may need code changes.
       cargo-minor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /site
+    schedule:
+      interval: weekly
+    groups:
+      # The site only builds documentation: one pull request for all
+      # non-major updates keeps the noise down.
+      site-minor:
         update-types: [minor, patch]

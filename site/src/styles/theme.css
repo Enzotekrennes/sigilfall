@@ -1,0 +1,17 @@
+/* Colours of the documentation site, taken from the game's own tokens
+   (ARCHITECTURE.md, "Visual identity"): gold accents and an ink background
+   in the dark theme, a darker gold on parchment in the light one. */
+
+:root {
+	--sl-color-accent-low: #3a2d12;
+	--sl-color-accent: #b8892f;
+	--sl-color-accent-high: #e3b24f;
+	--sl-color-black: #0f0d15;
+}
+
+:root[data-theme='light'] {
+	--sl-color-accent-low: #efdcae;
+	--sl-color-accent: #7a4f08;
+	--sl-color-accent-high: #5a3a06;
+	--sl-color-white: #2a2230;
+}

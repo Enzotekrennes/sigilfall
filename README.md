@@ -268,6 +268,9 @@ installers and publishes them as a GitHub release.
 
 ## Documentation
 
+- [Documentation site](https://enzotekrennes.github.io/sigilfall/), in
+  English and French: installing, playing, keyboard layouts, options, and a
+  reference of the `sigilfall-core` modules with the full API docs.
 - [ARCHITECTURE.md](ARCHITECTURE.md): the two crates, their modules, how a
   key press becomes a turn, the visual identity, and the design decisions
   with the alternatives set aside.

@@ -286,6 +286,10 @@ les binaires et les installateurs, et les publie comme version GitHub.
 
 ## Documentation
 
+- [Site de documentation](https://enzotekrennes.github.io/sigilfall/fr/), en
+  français et en anglais : installation, jeu, dispositions de clavier,
+  options, et une référence des modules de `sigilfall-core` avec la
+  documentation complète de l'API.
 - [ARCHITECTURE.md](ARCHITECTURE.md) (en anglais) : les deux crates, leurs
   modules, comment une touche devient un tour, l'identité visuelle, et les
   décisions de conception avec les solutions écartées.

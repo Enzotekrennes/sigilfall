@@ -1,0 +1,87 @@
+# Documentation site: builds the Starlight site of site/ (English at the
+# root, French under /fr/, every internal link checked by the build) with the
+# rustdoc of sigilfall-core copied under /api/, and deploys it to GitHub
+# Pages at https://enzotekrennes.github.io/sigilfall/.
+# Runs when the site or the crates change on main (the reference pages are
+# generated from the crates' documentation), or by hand. Pull requests are
+# checked by ci.yml; this workflow only publishes what is on main.
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "crates/**"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+# Nothing but reading the repository by default; the deploy job alone gets
+# the rights GitHub Pages needs.
+permissions:
+  contents: read
+
+# Every action is pinned to a commit (version in the comment), so a moved tag
+# cannot change what runs; .github/dependabot.yml proposes the updates.
+
+# One deployment at a time; a newer push waits rather than cancelling a
+# deployment halfway.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build the site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      # Installs the toolchain pinned in rust-toolchain.toml.
+      - name: Install toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # Warnings fail the build, as in ci.yml, so a broken intra-doc link is
+      # never published.
+      - name: Build the rustdoc of sigilfall-core
+        run: cargo doc --no-deps -p sigilfall-core --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+      # Served at /sigilfall/api/sigilfall_core/; the folder is ignored by git.
+      - name: Copy the rustdoc into the site
+        run: cp -r target/doc site/public/api
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - name: Install the site's dependencies
+        working-directory: site
+        run: npm ci
+      # Regenerates the sigilfall-core reference page first (prebuild), then
+      # fails on any broken internal link.
+      - name: Build the site
+        working-directory: site
+        run: npm run build
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site/dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
