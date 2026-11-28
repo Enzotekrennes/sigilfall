@@ -40,8 +40,9 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Enzotekrennes/sigilfall
 ```
 
 ```powershell
-# Windows (PowerShell)
-powershell -ExecutionPolicy Bypass -c "irm https://github.com/Enzotekrennes/sigilfall/releases/latest/download/sigilfall-installer.ps1 | iex"
+# Windows (PowerShell): download the installer, then run it
+irm https://github.com/Enzotekrennes/sigilfall/releases/latest/download/sigilfall-installer.ps1 -OutFile sigilfall-installer.ps1
+powershell -ExecutionPolicy RemoteSigned -File .\sigilfall-installer.ps1
 ```
 
 **From source**, with Rust 1.88 or later:

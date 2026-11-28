@@ -21,10 +21,11 @@ Sous Linux et macOS :
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Enzotekrennes/sigilfall/releases/latest/download/sigilfall-installer.sh | sh
 ```
 
-Sous Windows, dans PowerShell :
+Sous Windows, dans PowerShell, téléchargez l'installateur, puis lancez-le :
 
 ```powershell
-powershell -ExecutionPolicy Bypass -c "irm https://github.com/Enzotekrennes/sigilfall/releases/latest/download/sigilfall-installer.ps1 | iex"
+irm https://github.com/Enzotekrennes/sigilfall/releases/latest/download/sigilfall-installer.ps1 -OutFile sigilfall-installer.ps1
+powershell -ExecutionPolicy RemoteSigned -File .\sigilfall-installer.ps1
 ```
 
 ## Depuis une archive
