@@ -28,6 +28,12 @@ irm https://github.com/Enzotekrennes/sigilfall/releases/latest/download/sigilfal
 powershell -ExecutionPolicy RemoteSigned -File .\sigilfall-installer.ps1
 ```
 
+À partir de la version qui suit la 0.1.0, Windows a aussi un paquet
+d'installation, `sigilfall-x86_64-pc-windows-msvc.msi`, sur la
+[page des versions](https://github.com/Enzotekrennes/sigilfall/releases) :
+ouvrez-le pour installer le jeu dans `Program Files\sigilfall` et l'ajouter
+au PATH, sans lancer de script. Désinstallez-le depuis Paramètres, Applications.
+
 ## Depuis une archive
 
 Chaque version propose aussi une archive du jeu pour chaque système :

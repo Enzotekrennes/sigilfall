@@ -49,7 +49,7 @@ fn the_release_files_agree_on_targets_trigger_installers_and_tool_version() {
         .collect();
     assert_eq!(listed, targets.into_iter().collect::<BTreeSet<_>>());
     assert!(dist.contains("ci = \"github\""));
-    assert!(dist.contains("installers = [\"shell\", \"powershell\"]"));
+    assert!(dist.contains("installers = [\"shell\", \"powershell\", \"msi\"]"));
     assert!(dist.contains("[workspace]") && dist.contains("members = [\"cargo:.\"]"));
     // Every archive ships the notices of the crates and the French README
     // beside the files dist adds on its own (README.md, LICENSE-*).

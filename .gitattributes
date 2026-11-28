@@ -2,6 +2,10 @@
 # with LF, so rustfmt and snapshot tests behave identically on Windows.
 * text=auto eol=lf
 
+# The WiX source of the Windows installer, written by `dist generate` with
+# CRLF line endings: kept byte for byte, so dist does not see it as edited.
+crates/sigilfall/wix/main.wxs -text
+
 # Binary assets: never converted nor diffed as text.
 *.png binary
 *.jpg binary

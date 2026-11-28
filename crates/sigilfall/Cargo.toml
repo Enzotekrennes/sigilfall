@@ -12,6 +12,15 @@ readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+# The Windows installer (.msi) built by dist from wix/main.wxs. The GUIDs must
+# never change: upgrade-guid lets a new version replace the installed one,
+# path-guid identifies the PATH entry it adds. No license or EULA page.
+[package.metadata.wix]
+upgrade-guid = "7E482B53-8719-4E45-963C-8E8E1785D515"
+path-guid = "17880C79-158D-4DFA-80CF-BD0BEECC4038"
+license = false
+eula = false
+
 [lints]
 workspace = true
 

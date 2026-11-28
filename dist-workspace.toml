@@ -15,8 +15,13 @@ cargo-dist-version = "0.34.0"
 ci = "github"
 # A shell script for Linux and macOS, a PowerShell script for Windows: each
 # downloads the right archive from the GitHub release and puts the binary on
-# the PATH.
-installers = ["shell", "powershell"]
+# the PATH. And a Windows installer (.msi), built by WiX from
+# crates/sigilfall/wix/main.wxs, which installs to Program Files and adds the
+# binary to the PATH: a regular installer package, for players who would
+# rather not run a script. `dist generate` writes main.wxs and the GUIDs in
+# [package.metadata.wix] of crates/sigilfall/Cargo.toml; keep the GUIDs, they
+# let a new version replace the installed one.
+installers = ["shell", "powershell", "msi"]
 # Windows (MSVC), Linux (glibc, x86_64), macOS Intel and Apple Silicon.
 targets = [
     "aarch64-apple-darwin",

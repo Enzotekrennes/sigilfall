@@ -49,6 +49,10 @@ irm https://github.com/Enzotekrennes/sigilfall/releases/latest/download/sigilfal
 powershell -ExecutionPolicy RemoteSigned -File .\sigilfall-installer.ps1
 ```
 
+Sous Windows, les versions après la 0.1.0 proposent aussi un paquet
+d'installation, `sigilfall-x86_64-pc-windows-msvc.msi` : ouvrez-le pour installer
+le jeu dans Program Files et l'ajouter au PATH, sans lancer de script.
+
 **Depuis les sources**, avec Rust 1.88 ou plus récent :
 
 ```sh
